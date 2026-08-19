@@ -288,62 +288,78 @@ export default function App() {
       const { data: profileData } = await supabase.from('profiles').select('*');
       const { data: landlordTableData } = await supabase.from('landlords').select('*');
       
-      if (profileData) {
-        const lndMap = {};
-        (landlordTableData || []).forEach(l => { lndMap[l.id] = l; });
+      const lndMap = {};
+      (landlordTableData || []).forEach(l => { if (l && l.id) lndMap[l.id] = l; });
 
-        const lnds = profileData.filter(p => p.role === 'landlord').map(p => {
-          const lndInfo = lndMap[p.id] || {};
-          return {
+      const lndIdSet = new Set();
+      const lnds = [];
+
+      (profileData || []).filter(p => p.role === 'landlord').forEach(p => {
+        lndIdSet.add(p.id);
+        const lndInfo = lndMap[p.id] || {};
+        lnds.push({
+          id: p.id,
+          name: p.name || lndInfo.name || '房東',
+          phone: p.phone || lndInfo.phone || '',
+          status: lndInfo.status || 'approved',
+          adListingEnabled: lndInfo.ad_listing_enabled ?? true
+        });
+      });
+
+      (landlordTableData || []).forEach(l => {
+        if (l && l.id && !lndIdSet.has(l.id)) {
+          lndIdSet.add(l.id);
+          lnds.push({
+            id: l.id,
+            name: l.name || '房東',
+            phone: l.phone || '',
+            status: l.status || 'approved',
+            adListingEnabled: l.ad_listing_enabled ?? true
+          });
+        }
+      });
+
+      setLandlords(lnds);
+
+      // Aggregate tenants from profiles + active leases + historical leases
+      const tenantMap = new Map();
+      (profileData || []).filter(p => p.role === 'tenant').forEach(p => {
+        const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
+        if (cleanP) {
+          tenantMap.set(cleanP, {
             id: p.id,
-            name: p.name,
+            name: p.name || '租客',
             phone: p.phone,
-            status: lndInfo.status || 'approved',
-            adListingEnabled: lndInfo.ad_listing_enabled ?? true
-          };
-        });
-        setLandlords(lnds);
+            isSelfRegistered: true
+          });
+        }
+      });
 
-        // Aggregate tenants from profiles + active leases + historical leases
-        const tenantMap = new Map();
-        profileData.filter(p => p.role === 'tenant').forEach(p => {
-          const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
-          if (cleanP) {
-            tenantMap.set(cleanP, {
-              id: p.id,
-              name: p.name || '租客',
-              phone: p.phone,
-              isSelfRegistered: true
-            });
-          }
-        });
-
-        // Also ensure tenants in leases are populated
-        (leaseData || []).forEach(l => {
-          const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
-          if (cleanP && !tenantMap.has(cleanP)) {
-            tenantMap.set(cleanP, {
-              id: `TEN_${cleanP}`,
-              name: l.tenant_name || '房客',
-              phone: l.phone,
+      // Also ensure tenants in leases are populated
+      (leaseData || []).forEach(l => {
+        const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
+        if (cleanP && !tenantMap.has(cleanP)) {
+          tenantMap.set(cleanP, {
+            id: `TEN_${cleanP}`,
+            name: l.tenant_name || '房客',
+            phone: l.phone,
+            isSelfRegistered: false
+          });
+        }
+        if (l.co_phone) {
+          const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
+          if (cleanCo && !tenantMap.has(cleanCo)) {
+            tenantMap.set(cleanCo, {
+              id: `TEN_${cleanCo}`,
+              name: l.co_tenant_name || '共同承租人',
+              phone: l.co_phone,
               isSelfRegistered: false
             });
           }
-          if (l.co_phone) {
-            const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
-            if (cleanCo && !tenantMap.has(cleanCo)) {
-              tenantMap.set(cleanCo, {
-                id: `TEN_${cleanCo}`,
-                name: l.co_tenant_name || '共同承租人',
-                phone: l.co_phone,
-                isSelfRegistered: false
-              });
-            }
-          }
-        });
+        }
+      });
 
-        setRegisteredTenants(Array.from(tenantMap.values()));
-      }
+      setRegisteredTenants(Array.from(tenantMap.values()));
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
@@ -598,38 +614,58 @@ export default function App() {
         role: 'landlord'
       });
 
-      const nextIdNum = landlords.reduce((max, lnd) => Math.max(max, parseInt(lnd.id.replace('LND', ''), 10) || 0), 0) + 1;
+      const landlordId = registeredResult?.id || `LND_${cleanPhone}`;
       const newLnd = {
-        id: `LND${String(nextIdNum).padStart(3, '0')}`,
+        id: landlordId,
         name: cleanName,
         phone: cleanPhone,
         passwordHash: registeredResult?.passwordHash,
         isSelfRegistered: true,
-        status: 'approved'
+        status: 'approved',
+        adListingEnabled: true
       };
 
-      setLandlords([...landlords, newLnd]);
-      setCurrentLandlordId(newLnd.id);
+      setLandlords(prev => [...prev.filter(l => l.id !== landlordId), newLnd]);
+      setCurrentLandlordId(landlordId);
       setLandlordSelfName('');
       setLandlordSelfPhone('');
       setLandlordSelfPassword('');
       showToast(`🎉 註冊成功！歡迎加入，${newLnd.name} 房東！`, 'success');
+      fetchSupabaseData();
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', 'error');
     }
   };
 
-  const handleApproveLandlord = (landlordId, landlordName) => {
-    setLandlords(landlords.map(l =>
-      l.id === landlordId ? { ...l, status: 'approved' } : l
-    ));
-    showToast(`已成功核准房東「${landlordName}」的註冊申請！`, 'success');
+  const handleApproveLandlord = async (landlordId, landlordName) => {
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.from('landlords').update({ status: 'approved' }).eq('id', landlordId);
+      }
+      setLandlords(landlords.map(l =>
+        l.id === landlordId ? { ...l, status: 'approved' } : l
+      ));
+      showToast(`已成功核准房東「${landlordName}」的註冊申請！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      showToast(`核准失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleRejectLandlord = async (landlordId, landlordName) => {
     const confirmed = await showConfirmDialog(`確定要拒絕並刪除房東「${landlordName}」的註冊申請嗎？`);
     if (confirmed) {
-      setLandlords(landlords.filter(l => l.id !== landlordId));
+      try {
+        if (isSupabaseConfigured) {
+          await supabase.from('landlords').delete().eq('id', landlordId);
+          await supabase.from('profiles').delete().eq('id', landlordId);
+        }
+        setLandlords(landlords.filter(l => l.id !== landlordId));
+        showToast(`已成功刪除房東「${landlordName}」`, 'info');
+        fetchSupabaseData();
+      } catch (err) {
+        showToast(`刪除失敗: ${err.message}`, 'error');
+      }
     }
   };
 
