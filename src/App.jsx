@@ -373,28 +373,25 @@ export default function App() {
     };
     initAuth();
 
+    // Supabase Realtime 跨瀏覽器/跨裝置即時雙向同步
+    let channel;
     if (isSupabaseConfigured) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (session?.user) {
-          const user = session.user;
-          setCurrentUser(user);
-          const metaRole = user.user_metadata?.role || 'tenant';
-          const metaPhone = user.user_metadata?.phone || '';
-          setRole(metaRole === 'landlord' ? 'admin' : metaRole);
-          if (metaRole === 'landlord') {
-            setCurrentLandlordId(user.id);
-          } else if (metaRole === 'tenant') {
-            setCurrentTenantPhone(metaPhone);
-          }
-          await fetchSupabaseData(user);
-        } else {
-          setCurrentUser(null);
-          setCurrentLandlordId(null);
-          setCurrentTenantPhone(null);
-        }
-      });
-      return () => subscription.unsubscribe();
+      channel = supabase
+        .channel('schema-db-changes')
+        .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+          fetchSupabaseData();
+        })
+        .subscribe();
     }
+
+    // 瀏覽器分頁切換或回到焦點時自動重新載入最新雲端資料
+    const handleFocus = () => fetchSupabaseData();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   useEffect(() => {

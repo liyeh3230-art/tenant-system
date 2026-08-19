@@ -92,19 +92,22 @@ export const registerUser = async ({ email, phone, password, name, role = 'tenan
       console.warn('Supabase Auth SignUp rate-limited or warning, fallback to resilient profile registration:', e);
     }
 
-    // 寫入/更新 Supabase profiles 與對應角色的資料表
+    // 寫入/更新 Supabase profiles 與對應角色的資料表 (支援跨瀏覽器登入比對)
     try {
       await supabase.from('profiles').upsert({
         id: userId,
         role: role,
         name: sanitizeText(name),
         phone: safePhone,
+        password_hash: passwordHash,
         created_at: new Date().toISOString(),
       });
 
       if (role === 'landlord') {
         await supabase.from('landlords').upsert({
           id: userId,
+          name: sanitizeText(name),
+          phone: safePhone,
           status: 'approved',
           ad_listing_enabled: true,
         });
@@ -150,7 +153,7 @@ export const registerUser = async ({ email, phone, password, name, role = 'tenan
 };
 
 /**
- * 登入認證 (由 Supabase Auth 優先驗證，並具備雜湊密碼安全比對)
+ * 登入認證 (由 Supabase Auth 優先驗證，並具備雲端 profiles 與本地加密驗證存儲)
  */
 export const loginUser = async ({ phone, password, role = 'tenant' }) => {
   const safePhone = phone.replace(/[^0-9]/g, '');
@@ -189,7 +192,34 @@ export const loginUser = async ({ phone, password, role = 'tenant' }) => {
     }
   }
 
-  // 2. 若 Supabase 回應異常或離線，使用本地加密驗證存儲
+  // 2. 若 Supabase Auth 未通過，檢查 Supabase 雲端 profiles 表 (支援跨瀏覽器/多裝置直接登入)
+  if (!loggedInUser && isSupabaseConfigured) {
+    try {
+      const { data: cloudProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('phone', safePhone)
+        .maybeSingle();
+
+      if (cloudProfile && cloudProfile.password_hash === inputHash) {
+        loggedInUser = {
+          user: { id: cloudProfile.id },
+          profile: {
+            id: cloudProfile.id,
+            name: cloudProfile.name,
+            phone: cloudProfile.phone,
+            role: cloudProfile.role || role,
+            status: 'approved',
+            isSelfRegistered: true
+          },
+        };
+      }
+    } catch (cloudErr) {
+      console.warn('Cloud profile login check fallback:', cloudErr);
+    }
+  }
+
+  // 3. 若雲端未連線或離線，使用本地加密驗證存儲
   if (!loggedInUser) {
     const storageKey = role === 'landlord' ? 'rental_landlords' : 'rental_registered_tenants';
     let users = [];
