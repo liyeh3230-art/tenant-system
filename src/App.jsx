@@ -479,13 +479,16 @@ export default function App() {
 
   useEffect(() => {
     if (role === 'admin') {
-      setActiveTab(prev => prev || 'dashboard');
+      const validAdminTabs = ['dashboard', 'payments', 'properties', 'advertise', 'leases', 'history'];
+      setActiveTab(prev => (validAdminTabs.includes(prev) ? prev : 'dashboard'));
       setLandlordAuthMode('login');
     } else if (role === 'tenant') {
-      setActiveTab(prev => prev || 'portal');
+      const validTenantTabs = ['portal', 'tenantHistory', 'contract'];
+      setActiveTab(prev => (validTenantTabs.includes(prev) ? prev : 'portal'));
       setTenantAuthMode('login');
     } else if (role === 'superadmin') {
-      setActiveTab(prev => prev || 'landlords');
+      const validSuperTabs = ['landlords', 'superadmin_tenants', 'export'];
+      setActiveTab(prev => (validSuperTabs.includes(prev) ? prev : 'landlords'));
       setSuperadminTab('approved');
     }
     setSearchQuery('');
@@ -596,6 +599,7 @@ export default function App() {
 
       setTenantLoginPhone('');
       setTenantLoginPassword('');
+      setActiveTab('portal');
       const matched = registeredTenants.find(t => t.phone.replace(/[^0-9]/g, '') === cleanPhone);
       showToast(`歡迎回來，${matched?.name || authResult?.profile?.name || '租客'}！`, 'success');
     } catch (err) {
@@ -622,6 +626,7 @@ export default function App() {
       setCurrentLandlordId(targetId);
       setCurrentLandlordPhone(cleanInputPhone);
 
+      setActiveTab('dashboard');
       if (matchedLandlord) {
         if (matchedLandlord.status === 'pending') {
           setLandlords(prev => prev.map(l => l.id === matchedLandlord.id ? { ...l, status: 'approved' } : l));
@@ -683,6 +688,7 @@ export default function App() {
 
       if (isValid) {
         setIsSuperadminAuthenticated(true);
+        setActiveTab('landlords');
         setSuperadminPasswordInput('');
         showToast('🎉 系統管理員驗證通過，歡迎進入平台總管理後台！', 'success');
       } else {
@@ -2583,7 +2589,10 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 text-left">
                     {/* Landlord Portal Card */}
                     <div
-                      onClick={() => setRole('admin')}
+                      onClick={() => {
+                        setRole('admin');
+                        setActiveTab('dashboard');
+                      }}
                       className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-indigo-500 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
                     >
                       <div className="space-y-4">
@@ -2604,7 +2613,10 @@ export default function App() {
 
                     {/* Tenant Portal Card */}
                     <div
-                      onClick={() => setRole('tenant')}
+                      onClick={() => {
+                        setRole('tenant');
+                        setActiveTab('portal');
+                      }}
                       className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-emerald-500 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
                     >
                       <div className="space-y-4">
@@ -2627,6 +2639,7 @@ export default function App() {
                     <div
                       onClick={() => {
                         setRole('superadmin');
+                        setActiveTab('landlords');
                         setIsSuperadminAuthenticated(false);
                         setSuperadminPasswordInput('');
                       }}
@@ -3323,7 +3336,7 @@ export default function App() {
             )}
 
             {/* LANDLORD LOGGED IN DASHBOARD & PAYMENTS HUB */}
-            {role === 'admin' && currentLandlordId && (activeTab === 'dashboard' || activeTab === 'payments') && (() => {
+            {role === 'admin' && currentLandlordId && (activeTab === 'dashboard' || activeTab === 'payments' || !['properties', 'advertise', 'leases', 'history'].includes(activeTab)) && (() => {
               // Financial & category calculations (純租金收入計算：排除押金、水電費、管理費、其他)
               const pendingTenantReports = landlordPayments.filter(p => p.status === 'pending_approval');
               const activeLandlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active');
@@ -4957,7 +4970,7 @@ export default function App() {
             )}
 
             {/* TENANT HOME SCREEN */}
-            {role === 'tenant' && currentTenantPhone && activeTab === 'portal' && (
+            {role === 'tenant' && currentTenantPhone && (activeTab === 'portal' || !['tenantHistory', 'contract'].includes(activeTab)) && (
               <div className="space-y-6">
                 {/* 方案一：頂部合約膠囊切換器 (Segmented Pills Switcher for Multiple Leases) */}
                 {tenantLeases.length > 1 && (
