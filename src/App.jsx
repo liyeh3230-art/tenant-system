@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Home, Users, FileText, CreditCard, Building,
   LogOut, Plus, CheckCircle, Clock, AlertCircle,
@@ -241,11 +241,11 @@ export default function App() {
   });
 
   // --- Supabase Data Fetching & Realtime Hydration ---
-  const fetchSupabaseData = async (user = currentUser) => {
+  const fetchSupabaseData = useCallback(async (user = currentUser) => {
     if (!isSupabaseConfigured) return;
     try {
-      // 1. Fetch Properties
-      const { data: propData } = await supabase.from('properties').select('*').is('deleted_at', null);
+      // 1. Fetch Properties (包含軟刪除資料，確保歷史合約與帳單正確關聯名稱)
+      const { data: propData } = await supabase.from('properties').select('*');
       if (propData) {
         setProperties(propData.map(p => ({
           id: p.id,
@@ -257,7 +257,8 @@ export default function App() {
           status: p.status,
           address: p.address,
           isAdvertised: p.is_advertised,
-          photos: p.photos || []
+          photos: p.photos || [],
+          deletedAt: p.deleted_at
         })));
       }
 
@@ -413,7 +414,7 @@ export default function App() {
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
-  };
+  }, [currentUser, currentLandlordPhone]);
 
   // Sync Supabase Auth Session & Initial Global Data Hydration
   useEffect(() => {
@@ -458,7 +459,7 @@ export default function App() {
       if (channel) supabase.removeChannel(channel);
       window.removeEventListener('focus', handleFocus);
     };
-  }, []);
+  }, [fetchSupabaseData]);
 
   // 監聽並自動同步當前登入狀態至 localStorage (重新整理免重新登入)
   useEffect(() => {
@@ -808,6 +809,7 @@ export default function App() {
 
   const isMyLandlordProp = (p) => {
     if (!activeLandlordId && !currentLandlordId && !currentLandlordPhone) return false;
+    if (p.deletedAt) return false; // 排除軟刪除房源，不在活躍列表顯示
     if (activeLandlordId && p.landlordId === activeLandlordId) return true;
     if (currentLandlordId && p.landlordId === currentLandlordId) return true;
     if (currentLandlord && p.landlordId === currentLandlord.id) return true;
@@ -977,17 +979,31 @@ export default function App() {
     showToast('已移除該張照片', 'info');
   };
 
-  const handleSavePhotos = () => {
+  const handleSavePhotos = async () => {
     if (!photoModalProperty) return;
-    setProperties(prev => prev.map(p => {
-      if (p.id === photoModalProperty.id) {
-        return { ...p, photos: tempPhotos };
+    try {
+      if (isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('properties')
+          .update({
+            photos: tempPhotos,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', photoModalProperty.id);
+        if (error) throw error;
       }
-      return p;
-    }));
-    setActiveModal(null);
-    setPhotoModalProperty(null);
-    showToast('房源照片已成功更新並保存！', 'success');
+      setProperties(prev => prev.map(p => {
+        if (p.id === photoModalProperty.id) {
+          return { ...p, photos: tempPhotos };
+        }
+        return p;
+      }));
+      setActiveModal(null);
+      setPhotoModalProperty(null);
+      showToast('房源照片已成功更新並儲存至雲端！', 'success');
+    } catch (err) {
+      showToast(`照片儲存失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleAddProperty = async (e) => {
@@ -1007,12 +1023,13 @@ export default function App() {
       status: 'vacant',
       address: propAddress.trim(),
       isAdvertised: false,
-      photos: []
+      photos: [],
+      deletedAt: null
     };
 
     try {
       if (isSupabaseConfigured && currentLandlordId) {
-        await supabase.from('properties').insert({
+        const { data: insertedRows, error: insertErr } = await supabase.from('properties').insert({
           id: newProp.id,
           landlord_id: currentLandlordId,
           name: newProp.name,
@@ -1023,9 +1040,16 @@ export default function App() {
           address: newProp.address,
           is_advertised: false,
           photos: []
-        });
+        }).select();
+        if (insertErr) throw insertErr;
+        if (insertedRows && insertedRows[0]) {
+          newProp.id = insertedRows[0].id;
+        }
       }
-      setProperties([...properties, newProp]);
+      setProperties(prev => {
+        if (prev.some(p => p.id === newProp.id)) return prev;
+        return [...prev, newProp];
+      });
       setActiveModal(null);
       showToast(`房源「${propName}」新增成功！`, 'success');
     } catch (err) {
@@ -1079,15 +1103,16 @@ export default function App() {
   };
 
   const handleDeleteProperty = async (propertyId) => {
-    const confirmed = await showConfirmDialog('確定要刪除此房源嗎？這將會一併移除關聯的合約與帳單。');
+    const target = properties.find(p => p.id === propertyId);
+    const confirmed = await showConfirmDialog(`確定要將房源「${target?.name || ''}」下架/刪除嗎？歷史租約與帳單紀錄將會完整保留。`);
     if (confirmed) {
       try {
+        const nowIso = new Date().toISOString();
         if (isSupabaseConfigured) {
-          await supabase.from('properties').update({ deleted_at: new Date().toISOString() }).eq('id', propertyId);
+          await supabase.from('properties').update({ deleted_at: nowIso }).eq('id', propertyId);
         }
-        setProperties(properties.filter(p => p.id !== propertyId));
-        setLeases(leases.filter(l => l.propertyId !== propertyId));
-        showToast('房源已刪除！', 'success');
+        setProperties(prev => prev.map(p => p.id === propertyId ? { ...p, deletedAt: nowIso } : p));
+        showToast('房源已成功下架！歷史紀錄已安全留存。', 'success');
       } catch (err) {
         showToast(`刪除失敗: ${err.message}`, 'error');
       }
@@ -1506,7 +1531,7 @@ export default function App() {
 
     try {
       if (isSupabaseConfigured) {
-        await supabase.from('leases').insert({
+        const { data: insertedRows, error: insertErr } = await supabase.from('leases').insert({
           id: nextLeaseId,
           property_id: leasePropId,
           landlord_id: currentLandlordId,
@@ -1521,13 +1546,20 @@ export default function App() {
           total_contract_rent: newLease.totalContractRent,
           status: 'active',
           note: newLease.note
-        });
+        }).select();
+        if (insertErr) throw insertErr;
+        if (insertedRows && insertedRows[0]) {
+          newLease.id = insertedRows[0].id;
+        }
         await supabase.from('properties').update({ status: 'occupied' }).eq('id', leasePropId);
       }
-      setProperties(properties.map(p =>
+      setProperties(prev => prev.map(p =>
         p.id === leasePropId ? { ...p, status: 'occupied' } : p
       ));
-      setLeases([...leases, newLease]);
+      setLeases(prev => {
+        if (prev.some(l => l.id === newLease.id)) return prev;
+        return [...prev, newLease];
+      });
       setActiveModal(null);
       showToast(`已成功建立「${leaseTenantName.trim()}」的租約紀錄！合約總租金：NT$ ${totalRent.toLocaleString()}`, 'success');
     } catch (err) {
@@ -1811,7 +1843,7 @@ export default function App() {
 
     try {
       if (isSupabaseConfigured) {
-        await supabase.from('payments').insert({
+        const { data: insertedRows, error: insertErr } = await supabase.from('payments').insert({
           id: newPayment.id,
           lease_id: targetLease.id,
           tenant_name: newPayment.tenantName,
@@ -1824,9 +1856,16 @@ export default function App() {
           title: newPayment.title,
           payment_method: newPayment.paymentMethod,
           note: newPayment.note
-        });
+        }).select();
+        if (insertErr) throw insertErr;
+        if (insertedRows && insertedRows[0]) {
+          newPayment.id = insertedRows[0].id;
+        }
       }
-      setPayments([newPayment, ...payments]);
+      setPayments(prev => {
+        if (prev.some(p => p.id === newPayment.id)) return prev;
+        return [newPayment, ...prev];
+      });
       setActiveModal(null);
       const displayItemName = `${typeLabels[customBillCategory] || '費用項目'}${newPayment.title ? ` (${newPayment.title})` : ''}`;
       showToast(`已成功記錄 ${targetLease.tenantName} 的「${displayItemName}」(金額 NT$ ${amt.toLocaleString()}${isDirectlyPaid ? ' · 已入帳' : ' · 待繳款'})！`, 'success');
@@ -1939,7 +1978,7 @@ export default function App() {
         };
 
         if (isSupabaseConfigured) {
-          await supabase.from('payments').insert({
+          const { data: insertedRows, error: insertErr } = await supabase.from('payments').insert({
             id: newPayment.id,
             lease_id: currentTenantLease.id,
             tenant_name: newPayment.tenantName,
@@ -1952,9 +1991,16 @@ export default function App() {
             payment_method: newPayment.paymentMethod,
             transfer_last5: newPayment.transferLast5,
             note: newPayment.note
-          });
+          }).select();
+          if (insertErr) throw insertErr;
+          if (insertedRows && insertedRows[0]) {
+            newPayment.id = insertedRows[0].id;
+          }
         }
-        setPayments([newPayment, ...payments]);
+        setPayments(prev => {
+          if (prev.some(p => p.id === newPayment.id)) return prev;
+          return [newPayment, ...prev];
+        });
       }
 
       setActiveModal(null);
@@ -4632,7 +4678,7 @@ export default function App() {
                               </div>
                               <p className="text-xs text-slate-500 mt-1 flex items-center font-medium">
                                 <Building size={13} className="mr-1 text-slate-400 flex-shrink-0" />
-                                <span>{prop ? prop.name : '未知房源'}</span>
+                                <span>{prop ? (prop.name + (prop.deletedAt ? ' (已下架)' : '')) : (lease.propertyName || lease.propertyId || '歷史房源')}</span>
                                 {prop?.address && <span className="ml-1 text-slate-400">({prop.address})</span>}
                               </p>
                             </div>
@@ -6814,7 +6860,7 @@ export default function App() {
                       <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3">
                         <div className="flex justify-between items-center pb-2 border-b border-slate-200">
                           <span className="text-slate-500 font-medium">租賃房源</span>
-                          <span className="font-bold text-slate-800">{prop ? prop.name : '未知房源'} ({prop?.address || '未填寫地址'})</span>
+                          <span className="font-bold text-slate-800">{prop ? (prop.name + (prop.deletedAt ? ' (已下架)' : '')) : (viewingLease.propertyName || viewingLease.propertyId || '歷史房源')} ({prop?.address || '未填寫地址'})</span>
                         </div>
                         <div className="flex justify-between items-center pb-2 border-b border-slate-200">
                           <span className="text-slate-500 font-medium">主承租人</span>
