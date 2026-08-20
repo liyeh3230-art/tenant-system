@@ -846,11 +846,23 @@ export default function App() {
   const landlordLeaseIds = landlordLeases.map(l => l.id);
   const landlordPayments = payments.filter(p => landlordLeaseIds.includes(p.leaseId));
 
-  const markAsPaid = (paymentId) => {
-    setPayments(payments.map(p =>
-      p.id === paymentId ? { ...p, status: 'paid', paidDate: new Date().toISOString().split('T')[0] } : p
-    ));
-    showToast('已確認收款並標記為「已付款」', 'success');
+  const markAsPaid = async (paymentId) => {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.from('payments').update({
+          status: 'paid',
+          paid_date: today,
+          updated_at: new Date().toISOString()
+        }).eq('id', paymentId);
+      }
+      setPayments(payments.map(p =>
+        p.id === paymentId ? { ...p, status: 'paid', paidDate: today } : p
+      ));
+      showToast('已確認收款並標記為「已付款」', 'success');
+    } catch (err) {
+      showToast(`標記失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleToggleAdvertiseWithConfirm = async (propertyId, propertyName, currentIsAdvertised) => {
@@ -1704,7 +1716,7 @@ export default function App() {
     setActiveModal('recordPayment');
   };
 
-  const handleSaveRecordedPayment = (e) => {
+  const handleSaveRecordedPayment = async (e) => {
     e?.preventDefault();
     if (!recordingPayment) return;
     const methodNames = {
@@ -1712,21 +1724,37 @@ export default function App() {
       cash: '現金交付'
     };
     const finalMethod = methodNames[recordPaymentMethod] || formatPaymentMethod(recordPaymentMethod) || '銀行轉帳';
-    setPayments(payments.map(p => {
-      if (p.id === recordingPayment.id) {
-        return {
-          ...p,
+    const paidDateVal = recordPaymentDate || new Date().toISOString().split('T')[0];
+
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.from('payments').update({
           status: 'paid',
-          paidDate: recordPaymentDate || new Date().toISOString().split('T')[0],
-          paymentMethod: finalMethod,
-          note: recordPaymentNote
-        };
+          paid_date: paidDateVal,
+          payment_method: finalMethod,
+          note: recordPaymentNote,
+          updated_at: new Date().toISOString()
+        }).eq('id', recordingPayment.id);
       }
-      return p;
-    }));
-    setActiveModal(null);
-    setRecordingPayment(null);
-    showToast(`已確認「${recordingPayment.tenantName}」的帳單收款入帳！`, 'success');
+
+      setPayments(payments.map(p => {
+        if (p.id === recordingPayment.id) {
+          return {
+            ...p,
+            status: 'paid',
+            paidDate: paidDateVal,
+            payment_method: finalMethod,
+            note: recordPaymentNote
+          };
+        }
+        return p;
+      }));
+      setActiveModal(null);
+      setRecordingPayment(null);
+      showToast(`已確認「${recordingPayment.tenantName}」的帳單收款入帳！`, 'success');
+    } catch (err) {
+      showToast(`儲存入帳失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleSendPaymentReminder = (payment) => {
@@ -2091,7 +2119,7 @@ export default function App() {
     setActiveModal('tenantPay');
   };
 
-  const handleTenantSubmitPayment = (e) => {
+  const handleTenantSubmitPayment = async (e) => {
     e.preventDefault();
     if (!tenantPayingBill) return;
 
@@ -2104,23 +2132,39 @@ export default function App() {
       bank: `銀行轉帳${tenantPayTransferLast5 ? ` (末5碼: ${tenantPayTransferLast5})` : ''}`,
       cash: '現金交付'
     };
+    const finalMethod = channelNames[tenantPayChannel] || (tenantPayChannel === 'cash' ? '現金交付' : '銀行轉帳');
+    const todayStr = new Date().toISOString().split('T')[0];
 
-    setPayments(payments.map(p => {
-      if (p.id === tenantPayingBill.id) {
-        return {
-          ...p,
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.from('payments').update({
           status: 'paid',
-          paidDate: new Date().toISOString().split('T')[0],
-          paymentMethod: channelNames[tenantPayChannel] || (tenantPayChannel === 'cash' ? '現金交付' : '銀行轉帳'),
-          transferLast5: tenantPayChannel === 'bank' ? (tenantPayTransferLast5 || null) : null
-        };
+          paid_date: todayStr,
+          payment_method: finalMethod,
+          transfer_last5: tenantPayChannel === 'bank' ? (tenantPayTransferLast5 || null) : null,
+          updated_at: new Date().toISOString()
+        }).eq('id', tenantPayingBill.id);
       }
-      return p;
-    }));
 
-    setActiveModal(null);
-    setTenantPayingBill(null);
-    showToast('🎉 租金已成功繳納！系統已開立電子繳費收據。', 'success');
+      setPayments(payments.map(p => {
+        if (p.id === tenantPayingBill.id) {
+          return {
+            ...p,
+            status: 'paid',
+            paidDate: todayStr,
+            paymentMethod: finalMethod,
+            transferLast5: tenantPayChannel === 'bank' ? (tenantPayTransferLast5 || null) : null
+          };
+        }
+        return p;
+      }));
+
+      setActiveModal(null);
+      setTenantPayingBill(null);
+      showToast('🎉 租金已成功繳納！系統已開立電子繳費收據。', 'success');
+    } catch (err) {
+      showToast(`繳納失敗: ${err.message}`, 'error');
+    }
   };
 
   const tenantLeases = currentTenantPhone ? leases.filter(l =>
@@ -2131,15 +2175,27 @@ export default function App() {
   const currentTenantProperty = properties.find(p => p.id === currentTenantLease?.propertyId);
   const currentTenantPayments = payments.filter(p => p.leaseId === currentTenantLease?.id);
 
-  const handleTenantPay = (paymentId) => {
+  const handleTenantPay = async (paymentId) => {
     const bill = payments.find(p => p.id === paymentId);
     if (bill) {
       handleOpenTenantPay(bill);
     } else {
-      setPayments(payments.map(p =>
-        p.id === paymentId ? { ...p, status: 'paid', paidDate: new Date().toISOString().split('T')[0] } : p
-      ));
-      showToast('租金付款成功！已透過系統通知房東。', 'success');
+      const todayStr = new Date().toISOString().split('T')[0];
+      try {
+        if (isSupabaseConfigured) {
+          await supabase.from('payments').update({
+            status: 'paid',
+            paid_date: todayStr,
+            updated_at: new Date().toISOString()
+          }).eq('id', paymentId);
+        }
+        setPayments(payments.map(p =>
+          p.id === paymentId ? { ...p, status: 'paid', paidDate: todayStr } : p
+        ));
+        showToast('租金付款成功！已透過系統通知房東。', 'success');
+      } catch (err) {
+        showToast(`付款失敗: ${err.message}`, 'error');
+      }
     }
   };
 

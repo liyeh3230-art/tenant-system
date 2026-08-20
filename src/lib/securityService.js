@@ -278,13 +278,22 @@ export const PaymentStatus = {
 export const transitionPaymentStatus = async ({ paymentId, newStatus, metadata = {} }) => {
   if (isSupabaseConfigured) {
     try {
+      const updateData = {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      };
+      if (newStatus === PaymentStatus.PAID) {
+        updateData.paid_date = new Date().toISOString().split('T')[0];
+      }
+      await supabase.from('payments').update(updateData).eq('id', paymentId);
+
       const { data, error } = await supabase.rpc('transition_payment_status', {
         p_payment_id: paymentId,
         p_new_status: newStatus,
         p_metadata: metadata,
       });
 
-      if (!error) return data;
+      if (!error && data) return data;
     } catch (rpcErr) {
       console.warn('RPC transition_payment_status fallback:', rpcErr);
     }
