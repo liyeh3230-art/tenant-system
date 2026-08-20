@@ -252,153 +252,139 @@ export default function App() {
         let targetLandlordId = currentLandlordId;
 
         // 查詢當前房東 Profile / Landlord 資訊
-        let lndQuery = supabase.from('profiles').select('*').eq('role', 'landlord');
-        if (targetLandlordId) {
-          lndQuery = lndQuery.eq('id', targetLandlordId);
-        } else if (cleanLndPhone) {
-          lndQuery = lndQuery.eq('phone', cleanLndPhone);
+        const { data: myProfileData } = await supabase.from('profiles').select('*').eq('role', 'landlord');
+        const { data: myLandlordsData } = await supabase.from('landlords').select('*');
+
+        const matchedProfile = (myProfileData || []).find(p => (targetLandlordId && p.id === targetLandlordId) || (cleanLndPhone && String(p.phone || '').replace(/[^0-9]/g, '') === cleanLndPhone));
+        const matchedLandlord = (myLandlordsData || []).find(l => (targetLandlordId && l.id === targetLandlordId) || (cleanLndPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanLndPhone));
+
+        const resolvedId = targetLandlordId || matchedProfile?.id || matchedLandlord?.id || (myLandlordsData?.[0]?.id) || (myProfileData?.[0]?.id);
+        const resolvedPhone = cleanLndPhone || matchedProfile?.phone || matchedLandlord?.phone || '';
+        const resolvedName = matchedProfile?.name || matchedLandlord?.name || '房東';
+
+        setLandlords([{
+          id: resolvedId || 'LND_CURRENT',
+          name: resolvedName,
+          phone: resolvedPhone,
+          status: matchedLandlord?.status || 'approved',
+          adListingEnabled: matchedLandlord?.ad_listing_enabled ?? true
+        }]);
+
+        // 抓取該房東的地址庫
+        const addrQuery = resolvedId
+          ? supabase.from('landlord_addresses').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`)
+          : supabase.from('landlord_addresses').select('*');
+        const { data: addrData } = await addrQuery;
+        if (addrData) {
+          setLandlordAddresses(addrData.map(a => ({
+            id: a.id,
+            landlordId: a.landlord_id,
+            address: a.address
+          })));
         }
-        const { data: myProfileData } = await lndQuery;
 
-        let myLandlordsData = [];
-        if (targetLandlordId) {
-          const { data: lndTableData } = await supabase.from('landlords').select('*').eq('id', targetLandlordId);
-          myLandlordsData = lndTableData || [];
-        } else if (cleanLndPhone) {
-          const { data: lndTableData } = await supabase.from('landlords').select('*').eq('phone', cleanLndPhone);
-          myLandlordsData = lndTableData || [];
+        // 抓取該房東的房源 (包含軟刪除以供歷史合約參照)
+        const propQuery = resolvedId
+          ? supabase.from('properties').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`)
+          : supabase.from('properties').select('*');
+        const { data: propData } = await propQuery;
+        if (propData) {
+          setProperties(propData.map(p => ({
+            id: p.id,
+            landlordId: p.landlord_id,
+            name: p.name,
+            type: p.type,
+            rent: p.rent,
+            rentPeriod: p.rent_period || 'monthly',
+            status: p.status,
+            address: p.address,
+            isAdvertised: p.is_advertised,
+            photos: p.photos || [],
+            deletedAt: p.deleted_at
+          })));
         }
 
-        const foundProfile = myProfileData?.[0];
-        const foundLandlord = myLandlordsData?.[0];
-        const resolvedId = targetLandlordId || foundProfile?.id || foundLandlord?.id;
+        // 抓取該房東的租約
+        const leaseQuery = resolvedId
+          ? supabase.from('leases').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`).is('deleted_at', null)
+          : supabase.from('leases').select('*').is('deleted_at', null);
+        const { data: leaseData } = await leaseQuery;
 
-        if (foundProfile || foundLandlord) {
-          setLandlords([{
-            id: resolvedId || 'LND_CURRENT',
-            name: foundProfile?.name || foundLandlord?.name || '房東',
-            phone: foundProfile?.phone || foundLandlord?.phone || cleanLndPhone,
-            status: foundLandlord?.status || 'approved',
-            adListingEnabled: foundLandlord?.ad_listing_enabled ?? true
-          }]);
-        }
+        if (leaseData) {
+          const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            coPhone: l.co_phone,
+            coTenantName: l.co_tenant_name,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            deposit: l.deposit,
+            monthlyRent: l.monthly_rent,
+            totalContractRent: l.total_contract_rent,
+            status: l.status,
+            note: l.note
+          }));
+          setLeases(activeLeases);
 
-        if (resolvedId) {
-          // 抓取該房東的地址庫
-          const { data: addrData } = await supabase
-            .from('landlord_addresses')
-            .select('*')
-            .eq('landlord_id', resolvedId);
-          if (addrData) {
-            setLandlordAddresses(addrData.map(a => ({
-              id: a.id,
-              landlordId: a.landlord_id,
-              address: a.address
-            })));
-          }
+          const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            terminatedAt: l.terminated_at,
+            status: l.status,
+            note: l.note,
+            archivedPayments: []
+          }));
+          setHistoricalLeases(histLeases);
 
-          // 抓取該房東的房源 (包含軟刪除以供歷史合約參照)
-          const { data: propData } = await supabase
-            .from('properties')
-            .select('*')
-            .eq('landlord_id', resolvedId);
-          if (propData) {
-            setProperties(propData.map(p => ({
-              id: p.id,
-              landlordId: p.landlord_id,
-              name: p.name,
-              type: p.type,
-              rent: p.rent,
-              rentPeriod: p.rent_period || 'monthly',
-              status: p.status,
-              address: p.address,
-              isAdvertised: p.is_advertised,
-              photos: p.photos || [],
-              deletedAt: p.deleted_at
-            })));
-          }
-
-          // 抓取該房東的租約
-          const { data: leaseData } = await supabase
-            .from('leases')
-            .select('*')
-            .eq('landlord_id', resolvedId)
-            .is('deleted_at', null);
-
-          if (leaseData) {
-            const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
-              id: l.id,
-              propertyId: l.property_id,
-              tenantName: l.tenant_name,
-              phone: l.phone,
-              coPhone: l.co_phone,
-              coTenantName: l.co_tenant_name,
-              startDate: l.start_date,
-              endDate: l.end_date,
-              deposit: l.deposit,
-              monthlyRent: l.monthly_rent,
-              totalContractRent: l.total_contract_rent,
-              status: l.status,
-              note: l.note
-            }));
-            setLeases(activeLeases);
-
-            const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
-              id: l.id,
-              propertyId: l.property_id,
-              tenantName: l.tenant_name,
-              phone: l.phone,
-              startDate: l.start_date,
-              endDate: l.end_date,
-              terminatedAt: l.terminated_at,
-              status: l.status,
-              note: l.note,
-              archivedPayments: []
-            }));
-            setHistoricalLeases(histLeases);
-
-            // 從合約中提取房客名冊
-            const tMap = new Map();
-            leaseData.forEach(l => {
-              const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
-              if (cleanP && !tMap.has(cleanP)) {
-                tMap.set(cleanP, { id: `TEN_${cleanP}`, name: l.tenant_name || '房客', phone: l.phone, isSelfRegistered: false });
-              }
-              if (l.co_phone) {
-                const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
-                if (cleanCo && !tMap.has(cleanCo)) {
-                  tMap.set(cleanCo, { id: `TEN_${cleanCo}`, name: l.co_tenant_name || '共同承租人', phone: l.co_phone, isSelfRegistered: false });
-                }
-              }
-            });
-            setRegisteredTenants(Array.from(tMap.values()));
-
-            // 只抓取該房東合約相關的帳單，避免全庫下載
-            const leaseIds = leaseData.map(l => l.id);
-            if (leaseIds.length > 0) {
-              const { data: paymentData } = await supabase
-                .from('payments')
-                .select('*')
-                .in('lease_id', leaseIds)
-                .is('deleted_at', null);
-              if (paymentData) {
-                setPayments(paymentData.map(p => ({
-                  id: p.id,
-                  leaseId: p.lease_id,
-                  tenantName: p.tenant_name,
-                  propertyName: p.property_name,
-                  amount: p.amount,
-                  status: p.status,
-                  billType: p.bill_type || 'rent',
-                  title: p.title,
-                  dueDate: p.due_date,
-                  paidDate: p.paid_date,
-                  paymentMethod: p.payment_method,
-                  transferLast5: p.transfer_last5,
-                  note: p.note
-                })));
+          // 從合約中提取房客名冊
+          const tMap = new Map();
+          leaseData.forEach(l => {
+            const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
+            if (cleanP && !tMap.has(cleanP)) {
+              tMap.set(cleanP, { id: `TEN_${cleanP}`, name: l.tenant_name || '房客', phone: l.phone, isSelfRegistered: false });
+            }
+            if (l.co_phone) {
+              const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
+              if (cleanCo && !tMap.has(cleanCo)) {
+                tMap.set(cleanCo, { id: `TEN_${cleanCo}`, name: l.co_tenant_name || '共同承租人', phone: l.co_phone, isSelfRegistered: false });
               }
             }
+          });
+          setRegisteredTenants(Array.from(tMap.values()));
+
+          // 只抓取該房東合約相關的帳單，避免全庫下載
+          const leaseIds = leaseData.map(l => l.id);
+          if (leaseIds.length > 0) {
+            const { data: paymentData } = await supabase
+              .from('payments')
+              .select('*')
+              .in('lease_id', leaseIds)
+              .is('deleted_at', null);
+            if (paymentData) {
+              setPayments(paymentData.map(p => ({
+                id: p.id,
+                leaseId: p.lease_id,
+                tenantName: p.tenant_name,
+                propertyName: p.property_name,
+                amount: p.amount,
+                status: p.status,
+                billType: p.bill_type || 'rent',
+                title: p.title,
+                dueDate: p.due_date,
+                paidDate: p.paid_date,
+                paymentMethod: p.payment_method,
+                transferLast5: p.transfer_last5,
+                note: p.note
+              })));
+            }
+          } else {
+            setPayments([]);
           }
         }
       }
@@ -1023,8 +1009,8 @@ export default function App() {
   const activeLandlordId = currentLandlord?.id || currentLandlordId;
 
   const isMyLandlordProp = (p) => {
-    if (!activeLandlordId && !currentLandlordId && !currentLandlordPhone) return false;
     if (p.deletedAt) return false; // 排除軟刪除房源，不在活躍列表顯示
+    if (role === 'admin') return true; // 房東後台載入的房源皆為自身房源
     if (activeLandlordId && p.landlordId === activeLandlordId) return true;
     if (currentLandlordId && p.landlordId === currentLandlordId) return true;
     if (currentLandlord && p.landlordId === currentLandlord.id) return true;
@@ -1032,9 +1018,17 @@ export default function App() {
   };
 
   const landlordPropertyIds = properties.filter(isMyLandlordProp).map(p => p.id);
-  const landlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) || (activeLandlordId && l.landlordId === activeLandlordId) || (currentLandlord && l.landlordId === currentLandlord.id));
+  const landlordLeases = leases.filter(l =>
+    role === 'admin' ||
+    landlordPropertyIds.includes(l.propertyId) ||
+    (activeLandlordId && l.landlordId === activeLandlordId) ||
+    (currentLandlord && l.landlordId === currentLandlord.id)
+  );
   const landlordLeaseIds = landlordLeases.map(l => l.id);
-  const landlordPayments = payments.filter(p => landlordLeaseIds.includes(p.leaseId));
+  const landlordPayments = payments.filter(p =>
+    role === 'admin' ||
+    landlordLeaseIds.includes(p.leaseId)
+  );
 
   const markAsPaid = async (paymentId) => {
     const today = new Date().toISOString().split('T')[0];
