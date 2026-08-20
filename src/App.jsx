@@ -111,6 +111,7 @@ export default function App() {
   const [historicalLeases, setHistoricalLeases] = useState([]);
 
   const [currentLandlordId, setCurrentLandlordId] = useState(savedSession?.currentLandlordId || null);
+  const [currentLandlordPhone, setCurrentLandlordPhone] = useState(savedSession?.currentLandlordPhone || null);
   const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(savedSession?.currentTenantLeaseId || null);
   const [currentTenantPhone, setCurrentTenantPhone] = useState(savedSession?.currentTenantPhone || null);
 
@@ -362,6 +363,14 @@ export default function App() {
 
       setLandlords(lnds);
 
+      if (currentLandlordPhone) {
+        const cleanSavedPhone = String(currentLandlordPhone).replace(/[^0-9]/g, '');
+        const matchedLnd = lnds.find(l => String(l.phone || '').replace(/[^0-9]/g, '') === cleanSavedPhone);
+        if (matchedLnd) {
+          setCurrentLandlordId(matchedLnd.id);
+        }
+      }
+
       // Aggregate tenants from profiles + active leases + historical leases
       const tenantMap = new Map();
       (profileData || []).filter(p => p.role === 'tenant').forEach(p => {
@@ -460,12 +469,13 @@ export default function App() {
         role,
         activeTab,
         currentLandlordId,
+        currentLandlordPhone,
         currentTenantPhone,
         currentTenantLeaseId,
         isSuperadminAuthenticated
       });
     }
-  }, [role, activeTab, currentLandlordId, currentTenantPhone, currentTenantLeaseId, isSuperadminAuthenticated]);
+  }, [role, activeTab, currentLandlordId, currentLandlordPhone, currentTenantPhone, currentTenantLeaseId, isSuperadminAuthenticated]);
 
   useEffect(() => {
     if (role === 'admin') {
@@ -608,18 +618,20 @@ export default function App() {
       const authResult = await loginUser({ phone: cleanInputPhone, password: cleanInputPassword, role: 'landlord' });
       const matchedLandlord = landlords.find(l => String(l.phone || '').replace(/[^0-9]/g, '') === cleanInputPhone);
 
+      const targetId = matchedLandlord?.id || authResult?.profile?.id || `LND_${cleanInputPhone}`;
+      setCurrentLandlordId(targetId);
+      setCurrentLandlordPhone(cleanInputPhone);
+
       if (matchedLandlord) {
         if (matchedLandlord.status === 'pending') {
           setLandlords(prev => prev.map(l => l.id === matchedLandlord.id ? { ...l, status: 'approved' } : l));
         }
-        setCurrentLandlordId(matchedLandlord.id);
         setLandlordLoginPhone('');
         setLandlordLoginPassword('');
         showToast(`歡迎回來，${matchedLandlord.name} 房東！`, 'success');
       } else if (authResult?.profile) {
         const newLnd = authResult.profile;
         setLandlords(prev => [...prev.filter(l => l.id !== newLnd.id), newLnd]);
-        setCurrentLandlordId(newLnd.id);
         setLandlordLoginPhone('');
         setLandlordLoginPassword('');
         showToast(`歡迎回來，${newLnd.name} 房東！`, 'success');
@@ -691,6 +703,7 @@ export default function App() {
       showToast('已成功登出您的租客帳號！', 'success');
     } else if (role === 'admin') {
       setCurrentLandlordId(null);
+      setCurrentLandlordPhone(null);
       showToast('已登出房東管理系統！', 'success');
     } else if (role === 'superadmin') {
       setIsSuperadminAuthenticated(false);
@@ -814,8 +827,22 @@ export default function App() {
     showToast('✨ 所有資料庫已成功重置為初始預設狀態！', 'success');
   };
 
-  const landlordPropertyIds = properties.filter(p => p.landlordId === currentLandlordId).map(p => p.id);
-  const landlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId));
+  const currentLandlord = landlords.find(l =>
+    (currentLandlordId && l.id === currentLandlordId) ||
+    (currentLandlordPhone && String(l.phone || '').replace(/[^0-9]/g, '') === String(currentLandlordPhone).replace(/[^0-9]/g, ''))
+  );
+  const activeLandlordId = currentLandlord?.id || currentLandlordId;
+
+  const isMyLandlordProp = (p) => {
+    if (!activeLandlordId && !currentLandlordId && !currentLandlordPhone) return false;
+    if (activeLandlordId && p.landlordId === activeLandlordId) return true;
+    if (currentLandlordId && p.landlordId === currentLandlordId) return true;
+    if (currentLandlord && p.landlordId === currentLandlord.id) return true;
+    return false;
+  };
+
+  const landlordPropertyIds = properties.filter(isMyLandlordProp).map(p => p.id);
+  const landlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) || (activeLandlordId && l.landlordId === activeLandlordId) || (currentLandlord && l.landlordId === currentLandlord.id));
   const landlordLeaseIds = landlordLeases.map(l => l.id);
   const landlordPayments = payments.filter(p => landlordLeaseIds.includes(p.leaseId));
 
@@ -2118,7 +2145,7 @@ export default function App() {
 
   // --- filters ---
   const filteredProperties = properties.filter(prop => {
-    if (prop.landlordId !== currentLandlordId) return false;
+    if (!isMyLandlordProp(prop)) return false;
     const matchesSearch = prop.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       prop.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       prop.type.toLowerCase().includes(searchQuery.toLowerCase());
