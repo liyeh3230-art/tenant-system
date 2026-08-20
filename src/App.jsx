@@ -798,40 +798,7 @@ export default function App() {
     }
   };
 
-  const handleResetAllDatabase = async () => {
-    const confirmed = await showConfirmDialog('⚠️ 確定要重置所有資料庫嗎？\n\n此操作將清空並還原所有房源、租約、帳單收據、租客與修繕紀錄至預設狀態。');
-    if (!confirmed) return;
 
-    const keysToClear = [
-      'rental_role',
-      'rental_landlords',
-      'rental_properties',
-      'rental_leases',
-      'rental_payments',
-      'rental_historical_leases',
-      'rental_current_landlord_id',
-      'rental_current_tenant_lease_id',
-      'rental_current_tenant_phone',
-      'rental_landlord_addresses',
-      'rental_registered_tenants',
-      'rental_default_contract_terms'
-    ];
-    keysToClear.forEach(k => localStorage.removeItem(k));
-
-    setLandlords(initialLandlords);
-    setProperties(initialProperties);
-    setLeases(initialLeases);
-    setPayments(initialPayments);
-    setHistoricalLeases([]);
-    setRegisteredTenants(initialRegisteredTenants);
-    setCurrentLandlordId(null);
-    setCurrentTenantPhone(null);
-    setCurrentTenantLeaseId(null);
-    setRole('portal');
-    setActiveTab('dashboard');
-
-    showToast('✨ 所有資料庫已成功重置為初始預設狀態！', 'success');
-  };
 
   const currentLandlord = landlords.find(l =>
     (currentLandlordId && l.id === currentLandlordId) ||
@@ -2493,16 +2460,8 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Sidebar Footer Logout & Reset */}
+        {/* Sidebar Footer Logout */}
         <div className="p-4 border-t border-slate-800 space-y-1">
-          <button
-            onClick={handleResetAllDatabase}
-            className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg text-rose-400/80 hover:bg-rose-950/40 hover:text-rose-300 transition-colors focus:outline-none text-xs font-semibold"
-            title="清空並還原所有資料庫至預設狀態"
-          >
-            <RefreshCw size={16} />
-            <span>重置所有資料庫</span>
-          </button>
           <button
             onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
             className="w-full flex items-center space-x-3 px-4 py-2.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-colors focus:outline-none text-xs"
@@ -2546,18 +2505,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* User Section & Global Reset */}
+          {/* User Section */}
           <div className="flex items-center space-x-3 sm:space-x-4">
-            <button
-              onClick={handleResetAllDatabase}
-              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 shadow-2xs"
-              title="重置資料庫為初始預設值"
-            >
-              <RefreshCw size={13} />
-              <span className="hidden sm:inline">重置資料庫</span>
-            </button>
-
-            <div className="flex items-center space-x-2 pl-2 sm:pl-4 border-l border-gray-200">
+            <div className="flex items-center space-x-2">
               <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
                 {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
               </div>
@@ -2662,16 +2612,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Reset Database Portal Footer */}
-                  <div className="pt-8 flex justify-center">
-                    <button
-                      onClick={handleResetAllDatabase}
-                      className="text-xs text-slate-400 hover:text-rose-600 font-medium transition-colors flex items-center space-x-1.5 p-2 rounded-xl hover:bg-rose-50"
-                    >
-                      <RefreshCw size={13} />
-                      <span>重置所有資料庫為原廠預設狀態</span>
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
