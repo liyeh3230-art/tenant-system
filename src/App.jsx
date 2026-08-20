@@ -240,186 +240,393 @@ export default function App() {
     });
   });
 
-  // --- Supabase Data Fetching & Realtime Hydration ---
-  const fetchSupabaseData = useCallback(async (user = currentUser) => {
+  // --- 1. 獨立的資料抓取函式 (使用 useCallback 並在 SQL 層面以 .eq()/.in() 進行身分精確過濾) ---
+  const fetchSupabaseData = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
-      // 1. Fetch Properties (包含軟刪除資料，確保歷史合約與帳單正確關聯名稱)
-      const { data: propData } = await supabase.from('properties').select('*');
-      if (propData) {
-        setProperties(propData.map(p => ({
-          id: p.id,
-          landlordId: p.landlord_id,
-          name: p.name,
-          type: p.type,
-          rent: p.rent,
-          rentPeriod: p.rent_period || 'monthly',
-          status: p.status,
-          address: p.address,
-          isAdvertised: p.is_advertised,
-          photos: p.photos || [],
-          deletedAt: p.deleted_at
-        })));
-      }
+      // 🚀 優化 A：針對「房東視角」進行精確查詢
+      if (role === 'admin' || currentLandlordId || currentLandlordPhone) {
+        const cleanLndPhone = currentLandlordPhone ? String(currentLandlordPhone).replace(/[^0-9]/g, '') : '';
+        let targetLandlordId = currentLandlordId;
 
-      // 2. Fetch Leases
-      const { data: leaseData } = await supabase.from('leases').select('*').is('deleted_at', null);
-      if (leaseData) {
-        const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
-          id: l.id,
-          propertyId: l.property_id,
-          tenantName: l.tenant_name,
-          phone: l.phone,
-          coPhone: l.co_phone,
-          coTenantName: l.co_tenant_name,
-          startDate: l.start_date,
-          endDate: l.end_date,
-          deposit: l.deposit,
-          monthlyRent: l.monthly_rent,
-          totalContractRent: l.total_contract_rent,
-          status: l.status,
-          note: l.note
-        }));
-        setLeases(activeLeases);
-
-        const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
-          id: l.id,
-          propertyId: l.property_id,
-          tenantName: l.tenant_name,
-          phone: l.phone,
-          startDate: l.start_date,
-          endDate: l.end_date,
-          terminatedAt: l.terminated_at,
-          status: l.status,
-          note: l.note,
-          archivedPayments: []
-        }));
-        setHistoricalLeases(histLeases);
-      }
-
-      // 3. Fetch Payments / Bills
-      const { data: paymentData } = await supabase.from('payments').select('*').is('deleted_at', null);
-      if (paymentData) {
-        setPayments(paymentData.map(p => ({
-          id: p.id,
-          leaseId: p.lease_id,
-          tenantName: p.tenant_name,
-          propertyName: p.property_name,
-          amount: p.amount,
-          status: p.status,
-          billType: p.bill_type || 'rent',
-          title: p.title,
-          dueDate: p.due_date,
-          paidDate: p.paid_date,
-          paymentMethod: p.payment_method,
-          transferLast5: p.transfer_last5,
-          note: p.note
-        })));
-      }
-
-      // 4. Fetch Landlord Addresses
-      const { data: addrData } = await supabase.from('landlord_addresses').select('*');
-      if (addrData) {
-        setLandlordAddresses(addrData.map(a => ({
-          id: a.id,
-          landlordId: a.landlord_id,
-          address: a.address
-        })));
-      }
-
-      // 5. Fetch Profiles / Landlords / Registered Tenants
-      const { data: profileData } = await supabase.from('profiles').select('*');
-      const { data: landlordTableData } = await supabase.from('landlords').select('*');
-      
-      const lndMap = {};
-      (landlordTableData || []).forEach(l => { if (l && l.id) lndMap[l.id] = l; });
-
-      const lndIdSet = new Set();
-      const lnds = [];
-
-      (profileData || []).filter(p => p.role === 'landlord').forEach(p => {
-        lndIdSet.add(p.id);
-        const lndInfo = lndMap[p.id] || {};
-        lnds.push({
-          id: p.id,
-          name: p.name || lndInfo.name || '房東',
-          phone: p.phone || lndInfo.phone || '',
-          status: lndInfo.status || 'approved',
-          adListingEnabled: lndInfo.ad_listing_enabled ?? true
-        });
-      });
-
-      (landlordTableData || []).forEach(l => {
-        if (l && l.id && !lndIdSet.has(l.id)) {
-          lndIdSet.add(l.id);
-          lnds.push({
-            id: l.id,
-            name: l.name || '房東',
-            phone: l.phone || '',
-            status: l.status || 'approved',
-            adListingEnabled: l.ad_listing_enabled ?? true
-          });
+        // 查詢當前房東 Profile / Landlord 資訊
+        let lndQuery = supabase.from('profiles').select('*').eq('role', 'landlord');
+        if (targetLandlordId) {
+          lndQuery = lndQuery.eq('id', targetLandlordId);
+        } else if (cleanLndPhone) {
+          lndQuery = lndQuery.eq('phone', cleanLndPhone);
         }
-      });
+        const { data: myProfileData } = await lndQuery;
 
-      setLandlords(lnds);
-
-      if (currentLandlordPhone) {
-        const cleanSavedPhone = String(currentLandlordPhone).replace(/[^0-9]/g, '');
-        const matchedLnd = lnds.find(l => String(l.phone || '').replace(/[^0-9]/g, '') === cleanSavedPhone);
-        if (matchedLnd) {
-          setCurrentLandlordId(matchedLnd.id);
+        let myLandlordsData = [];
+        if (targetLandlordId) {
+          const { data: lndTableData } = await supabase.from('landlords').select('*').eq('id', targetLandlordId);
+          myLandlordsData = lndTableData || [];
+        } else if (cleanLndPhone) {
+          const { data: lndTableData } = await supabase.from('landlords').select('*').eq('phone', cleanLndPhone);
+          myLandlordsData = lndTableData || [];
         }
-      }
 
-      // Aggregate tenants from profiles + active leases + historical leases
-      const tenantMap = new Map();
-      (profileData || []).filter(p => p.role === 'tenant').forEach(p => {
-        const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
-        if (cleanP) {
-          tenantMap.set(cleanP, {
-            id: p.id,
-            name: p.name || '租客',
-            phone: p.phone,
-            isSelfRegistered: true
-          });
+        const foundProfile = myProfileData?.[0];
+        const foundLandlord = myLandlordsData?.[0];
+        if (!targetLandlordId && (foundProfile || foundLandlord)) {
+          targetLandlordId = foundProfile?.id || foundLandlord?.id;
+          setCurrentLandlordId(targetLandlordId);
         }
-      });
 
-      // Also ensure tenants in leases are populated
-      (leaseData || []).forEach(l => {
-        const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
-        if (cleanP && !tenantMap.has(cleanP)) {
-          tenantMap.set(cleanP, {
-            id: `TEN_${cleanP}`,
-            name: l.tenant_name || '房客',
-            phone: l.phone,
-            isSelfRegistered: false
-          });
+        if (foundProfile || foundLandlord) {
+          setLandlords([{
+            id: targetLandlordId || 'LND_CURRENT',
+            name: foundProfile?.name || foundLandlord?.name || '房東',
+            phone: foundProfile?.phone || foundLandlord?.phone || cleanLndPhone,
+            status: foundLandlord?.status || 'approved',
+            adListingEnabled: foundLandlord?.ad_listing_enabled ?? true
+          }]);
         }
-        if (l.co_phone) {
-          const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
-          if (cleanCo && !tenantMap.has(cleanCo)) {
-            tenantMap.set(cleanCo, {
-              id: `TEN_${cleanCo}`,
-              name: l.co_tenant_name || '共同承租人',
-              phone: l.co_phone,
-              isSelfRegistered: false
+
+        if (targetLandlordId) {
+          // 抓取該房東的地址庫
+          const { data: addrData } = await supabase
+            .from('landlord_addresses')
+            .select('*')
+            .eq('landlord_id', targetLandlordId);
+          if (addrData) {
+            setLandlordAddresses(addrData.map(a => ({
+              id: a.id,
+              landlordId: a.landlord_id,
+              address: a.address
+            })));
+          }
+
+          // 抓取該房東的房源 (包含軟刪除以供歷史合約參照)
+          const { data: propData } = await supabase
+            .from('properties')
+            .select('*')
+            .eq('landlord_id', targetLandlordId);
+          if (propData) {
+            setProperties(propData.map(p => ({
+              id: p.id,
+              landlordId: p.landlord_id,
+              name: p.name,
+              type: p.type,
+              rent: p.rent,
+              rentPeriod: p.rent_period || 'monthly',
+              status: p.status,
+              address: p.address,
+              isAdvertised: p.is_advertised,
+              photos: p.photos || [],
+              deletedAt: p.deleted_at
+            })));
+          }
+
+          // 抓取該房東的租約
+          const { data: leaseData } = await supabase
+            .from('leases')
+            .select('*')
+            .eq('landlord_id', targetLandlordId)
+            .is('deleted_at', null);
+
+          if (leaseData) {
+            const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
+              id: l.id,
+              propertyId: l.property_id,
+              tenantName: l.tenant_name,
+              phone: l.phone,
+              coPhone: l.co_phone,
+              coTenantName: l.co_tenant_name,
+              startDate: l.start_date,
+              endDate: l.end_date,
+              deposit: l.deposit,
+              monthlyRent: l.monthly_rent,
+              totalContractRent: l.total_contract_rent,
+              status: l.status,
+              note: l.note
+            }));
+            setLeases(activeLeases);
+
+            const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
+              id: l.id,
+              propertyId: l.property_id,
+              tenantName: l.tenant_name,
+              phone: l.phone,
+              startDate: l.start_date,
+              endDate: l.end_date,
+              terminatedAt: l.terminated_at,
+              status: l.status,
+              note: l.note,
+              archivedPayments: []
+            }));
+            setHistoricalLeases(histLeases);
+
+            // 從合約中提取房客名冊
+            const tMap = new Map();
+            leaseData.forEach(l => {
+              const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
+              if (cleanP && !tMap.has(cleanP)) {
+                tMap.set(cleanP, { id: `TEN_${cleanP}`, name: l.tenant_name || '房客', phone: l.phone, isSelfRegistered: false });
+              }
+              if (l.co_phone) {
+                const cleanCo = l.co_phone.replace(/[^0-9]/g, '');
+                if (cleanCo && !tMap.has(cleanCo)) {
+                  tMap.set(cleanCo, { id: `TEN_${cleanCo}`, name: l.co_tenant_name || '共同承租人', phone: l.co_phone, isSelfRegistered: false });
+                }
+              }
             });
+            setRegisteredTenants(Array.from(tMap.values()));
+
+            // 只抓取該房東合約相關的帳單，避免全庫下載
+            const leaseIds = leaseData.map(l => l.id);
+            if (leaseIds.length > 0) {
+              const { data: paymentData } = await supabase
+                .from('payments')
+                .select('*')
+                .in('lease_id', leaseIds)
+                .is('deleted_at', null);
+              if (paymentData) {
+                setPayments(paymentData.map(p => ({
+                  id: p.id,
+                  leaseId: p.lease_id,
+                  tenantName: p.tenant_name,
+                  propertyName: p.property_name,
+                  amount: p.amount,
+                  status: p.status,
+                  billType: p.bill_type || 'rent',
+                  title: p.title,
+                  dueDate: p.due_date,
+                  paidDate: p.paid_date,
+                  paymentMethod: p.payment_method,
+                  transferLast5: p.transfer_last5,
+                  note: p.note
+                })));
+              }
+            }
           }
         }
-      });
+      }
 
-      setRegisteredTenants(Array.from(tenantMap.values()));
+      // 🚀 優化 B：針對「租客視角」進行精確查詢
+      else if (role === 'tenant' && currentTenantPhone) {
+        const cleanTenantPhone = String(currentTenantPhone).replace(/[^0-9]/g, '');
+        // 抓取該租客的合約
+        const { data: leaseData } = await supabase
+          .from('leases')
+          .select('*')
+          .or(`phone.eq.${cleanTenantPhone},co_phone.eq.${cleanTenantPhone}`)
+          .is('deleted_at', null);
+
+        if (leaseData) {
+          const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            coPhone: l.co_phone,
+            coTenantName: l.co_tenant_name,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            deposit: l.deposit,
+            monthlyRent: l.monthly_rent,
+            totalContractRent: l.total_contract_rent,
+            status: l.status,
+            note: l.note
+          }));
+          setLeases(activeLeases);
+
+          const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            terminatedAt: l.terminated_at,
+            status: l.status,
+            note: l.note,
+            archivedPayments: []
+          }));
+          setHistoricalLeases(histLeases);
+
+          // 抓取該租客合約關聯的房源
+          const propIds = Array.from(new Set(leaseData.map(l => l.property_id).filter(Boolean)));
+          if (propIds.length > 0) {
+            const { data: propData } = await supabase
+              .from('properties')
+              .select('*')
+              .in('id', propIds);
+            if (propData) {
+              setProperties(propData.map(p => ({
+                id: p.id,
+                landlordId: p.landlord_id,
+                name: p.name,
+                type: p.type,
+                rent: p.rent,
+                rentPeriod: p.rent_period || 'monthly',
+                status: p.status,
+                address: p.address,
+                isAdvertised: p.is_advertised,
+                photos: p.photos || [],
+                deletedAt: p.deleted_at
+              })));
+            }
+          }
+
+          // 抓取該租客合約關聯的帳單
+          const leaseIds = leaseData.map(l => l.id);
+          if (leaseIds.length > 0) {
+            const { data: paymentData } = await supabase
+              .from('payments')
+              .select('*')
+              .in('lease_id', leaseIds)
+              .is('deleted_at', null);
+            if (paymentData) {
+              setPayments(paymentData.map(p => ({
+                id: p.id,
+                leaseId: p.lease_id,
+                tenantName: p.tenant_name,
+                propertyName: p.property_name,
+                amount: p.amount,
+                status: p.status,
+                billType: p.bill_type || 'rent',
+                title: p.title,
+                dueDate: p.due_date,
+                paidDate: p.paid_date,
+                paymentMethod: p.payment_method,
+                transferLast5: p.transfer_last5,
+                note: p.note
+              })));
+            }
+          }
+        }
+      }
+
+      // 🚀 優化 C：若為「總管理員」，才抓取全平台資料以進行統計
+      else if (role === 'superadmin') {
+        const { data: propData } = await supabase.from('properties').select('*');
+        if (propData) {
+          setProperties(propData.map(p => ({
+            id: p.id,
+            landlordId: p.landlord_id,
+            name: p.name,
+            type: p.type,
+            rent: p.rent,
+            rentPeriod: p.rent_period || 'monthly',
+            status: p.status,
+            address: p.address,
+            isAdvertised: p.is_advertised,
+            photos: p.photos || [],
+            deletedAt: p.deleted_at
+          })));
+        }
+
+        const { data: leaseData } = await supabase.from('leases').select('*').is('deleted_at', null);
+        if (leaseData) {
+          setLeases(leaseData.filter(l => l.status === 'active').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            coPhone: l.co_phone,
+            coTenantName: l.co_tenant_name,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            deposit: l.deposit,
+            monthlyRent: l.monthly_rent,
+            totalContractRent: l.total_contract_rent,
+            status: l.status,
+            note: l.note
+          })));
+          setHistoricalLeases(leaseData.filter(l => l.status === 'terminated').map(l => ({
+            id: l.id,
+            propertyId: l.property_id,
+            tenantName: l.tenant_name,
+            phone: l.phone,
+            startDate: l.start_date,
+            endDate: l.end_date,
+            terminatedAt: l.terminated_at,
+            status: l.status,
+            note: l.note,
+            archivedPayments: []
+          })));
+        }
+
+        const { data: paymentData } = await supabase.from('payments').select('*').is('deleted_at', null);
+        if (paymentData) {
+          setPayments(paymentData.map(p => ({
+            id: p.id,
+            leaseId: p.lease_id,
+            tenantName: p.tenant_name,
+            propertyName: p.property_name,
+            amount: p.amount,
+            status: p.status,
+            billType: p.bill_type || 'rent',
+            title: p.title,
+            dueDate: p.due_date,
+            paidDate: p.paid_date,
+            paymentMethod: p.payment_method,
+            transferLast5: p.transfer_last5,
+            note: p.note
+          })));
+        }
+
+        const { data: addrData } = await supabase.from('landlord_addresses').select('*');
+        if (addrData) {
+          setLandlordAddresses(addrData.map(a => ({
+            id: a.id,
+            landlordId: a.landlord_id,
+            address: a.address
+          })));
+        }
+
+        const { data: profileData } = await supabase.from('profiles').select('*');
+        const { data: landlordTableData } = await supabase.from('landlords').select('*');
+        const lndMap = {};
+        (landlordTableData || []).forEach(l => { if (l && l.id) lndMap[l.id] = l; });
+        const lndIdSet = new Set();
+        const lnds = [];
+
+        (profileData || []).filter(p => p.role === 'landlord').forEach(p => {
+          lndIdSet.add(p.id);
+          const lndInfo = lndMap[p.id] || {};
+          lnds.push({
+            id: p.id,
+            name: p.name || lndInfo.name || '房東',
+            phone: p.phone || lndInfo.phone || '',
+            status: lndInfo.status || 'approved',
+            adListingEnabled: lndInfo.ad_listing_enabled ?? true
+          });
+        });
+
+        (landlordTableData || []).forEach(l => {
+          if (l && l.id && !lndIdSet.has(l.id)) {
+            lndIdSet.add(l.id);
+            lnds.push({
+              id: l.id,
+              name: l.name || '房東',
+              phone: l.phone || '',
+              status: l.status || 'approved',
+              adListingEnabled: l.ad_listing_enabled ?? true
+            });
+          }
+        });
+        setLandlords(lnds);
+
+        const tenantMap = new Map();
+        (profileData || []).filter(p => p.role === 'tenant').forEach(p => {
+          const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
+          if (cleanP) {
+            tenantMap.set(cleanP, { id: p.id, name: p.name || '租客', phone: p.phone, isSelfRegistered: true });
+          }
+        });
+        setRegisteredTenants(Array.from(tenantMap.values()));
+      }
+
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
-  }, [currentUser, currentLandlordPhone]);
+  }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, role]);
 
-  // Sync Supabase Auth Session & Initial Global Data Hydration
+  // --- 2. 初始化 Auth 狀態 (只在元件掛載時執行一次 []) ---
   useEffect(() => {
-    fetchSupabaseData(); // Always hydrate latest Supabase data immediately
-
     const initAuth = async () => {
       if (isSupabaseConfigured) {
         const { data: { session } } = await supabase.auth.getSession();
@@ -434,30 +641,33 @@ export default function App() {
           } else if (metaRole === 'tenant') {
             setCurrentTenantPhone(metaPhone);
           }
-          await fetchSupabaseData(user);
         }
       }
     };
     initAuth();
+  }, []);
 
-    // Supabase Realtime 跨瀏覽器/跨裝置即時雙向同步
+  // --- 3. 監聽狀態改變時抓取資料，與設定 Realtime (加入 300ms Debounce 防抖) ---
+  useEffect(() => {
+    fetchSupabaseData();
+
     let channel;
+    let debounceTimer = null;
     if (isSupabaseConfigured) {
       channel = supabase
         .channel('schema-db-changes')
         .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-          fetchSupabaseData();
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            fetchSupabaseData();
+          }, 300);
         })
         .subscribe();
     }
 
-    // 瀏覽器分頁切換或回到焦點時自動重新載入最新雲端資料
-    const handleFocus = () => fetchSupabaseData();
-    window.addEventListener('focus', handleFocus);
-
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (channel) supabase.removeChannel(channel);
-      window.removeEventListener('focus', handleFocus);
     };
   }, [fetchSupabaseData]);
 
