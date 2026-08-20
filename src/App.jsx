@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Home, Users, FileText, CreditCard, Building,
   LogOut, Plus, CheckCircle, Clock, AlertCircle,
@@ -241,6 +241,8 @@ export default function App() {
   });
 
   // --- 1. 獨立的資料抓取函式 (使用 useCallback 並在 SQL 層面以 .eq()/.in() 進行身分精確過濾) ---
+  const fetchSupabaseDataRef = useRef(null);
+
   const fetchSupabaseData = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     try {
@@ -269,14 +271,11 @@ export default function App() {
 
         const foundProfile = myProfileData?.[0];
         const foundLandlord = myLandlordsData?.[0];
-        if (!targetLandlordId && (foundProfile || foundLandlord)) {
-          targetLandlordId = foundProfile?.id || foundLandlord?.id;
-          setCurrentLandlordId(targetLandlordId);
-        }
+        const resolvedId = targetLandlordId || foundProfile?.id || foundLandlord?.id;
 
         if (foundProfile || foundLandlord) {
           setLandlords([{
-            id: targetLandlordId || 'LND_CURRENT',
+            id: resolvedId || 'LND_CURRENT',
             name: foundProfile?.name || foundLandlord?.name || '房東',
             phone: foundProfile?.phone || foundLandlord?.phone || cleanLndPhone,
             status: foundLandlord?.status || 'approved',
@@ -284,12 +283,12 @@ export default function App() {
           }]);
         }
 
-        if (targetLandlordId) {
+        if (resolvedId) {
           // 抓取該房東的地址庫
           const { data: addrData } = await supabase
             .from('landlord_addresses')
             .select('*')
-            .eq('landlord_id', targetLandlordId);
+            .eq('landlord_id', resolvedId);
           if (addrData) {
             setLandlordAddresses(addrData.map(a => ({
               id: a.id,
@@ -302,7 +301,7 @@ export default function App() {
           const { data: propData } = await supabase
             .from('properties')
             .select('*')
-            .eq('landlord_id', targetLandlordId);
+            .eq('landlord_id', resolvedId);
           if (propData) {
             setProperties(propData.map(p => ({
               id: p.id,
@@ -323,7 +322,7 @@ export default function App() {
           const { data: leaseData } = await supabase
             .from('leases')
             .select('*')
-            .eq('landlord_id', targetLandlordId)
+            .eq('landlord_id', resolvedId)
             .is('deleted_at', null);
 
           if (leaseData) {
@@ -625,6 +624,13 @@ export default function App() {
     }
   }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, role]);
 
+  fetchSupabaseDataRef.current = fetchSupabaseData;
+
+  // 觸發資料獲取 (當身分或關鍵參數改變時)
+  useEffect(() => {
+    fetchSupabaseData();
+  }, [fetchSupabaseData]);
+
   // --- 2. 初始化 Auth 狀態 (只在元件掛載時執行一次 []) ---
   useEffect(() => {
     const initAuth = async () => {
@@ -647,29 +653,28 @@ export default function App() {
     initAuth();
   }, []);
 
-  // --- 3. 監聽狀態改變時抓取資料，與設定 Realtime (加入 300ms Debounce 防抖) ---
+  // --- 3. 穩定掛載 Realtime 頻道 (掛載一次，透過 Ref 呼叫最新 fetchSupabaseData，避免重複建立連線) ---
   useEffect(() => {
-    fetchSupabaseData();
+    if (!isSupabaseConfigured) return;
 
-    let channel;
     let debounceTimer = null;
-    if (isSupabaseConfigured) {
-      channel = supabase
-        .channel('schema-db-changes')
-        .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            fetchSupabaseData();
-          }, 300);
-        })
-        .subscribe();
-    }
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (fetchSupabaseDataRef.current) {
+            fetchSupabaseDataRef.current();
+          }
+        }, 500);
+      })
+      .subscribe();
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      if (channel) supabase.removeChannel(channel);
+      supabase.removeChannel(channel);
     };
-  }, [fetchSupabaseData]);
+  }, []);
 
   // 監聽並自動同步當前登入狀態至 localStorage (重新整理免重新登入)
   useEffect(() => {
