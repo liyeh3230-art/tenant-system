@@ -63,10 +63,45 @@ const MOCK_HOUSE_PHOTOS = [
   "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80"
 ];
 
+// --- 登入會話持久化管理 (Session Persistence Helper - 重新整理保持登入狀態) ---
+const getSavedAuthSession = () => {
+  try {
+    const raw = localStorage.getItem('rental_auth_session');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const saveAuthSession = (sessionData) => {
+  try {
+    if (!sessionData || sessionData.role === 'portal') {
+      localStorage.removeItem('rental_auth_session');
+    } else {
+      localStorage.setItem('rental_auth_session', JSON.stringify({
+        ...sessionData,
+        updatedAt: Date.now()
+      }));
+    }
+  } catch (e) {
+    console.warn('Failed to save auth session:', e);
+  }
+};
+
+const clearAuthSession = () => {
+  try {
+    localStorage.removeItem('rental_auth_session');
+  } catch (e) {
+    console.warn('Failed to clear auth session:', e);
+  }
+};
+
 export default function App() {
+  const savedSession = getSavedAuthSession();
   const [currentUser, setCurrentUser] = useState(null);
-  const [role, setRole] = useState('portal');
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [role, setRole] = useState(savedSession?.role || 'portal');
+  const [activeTab, setActiveTab] = useState(savedSession?.activeTab || (savedSession?.role === 'superadmin' ? 'landlords' : 'dashboard'));
   const [searchQuery, setSearchQuery] = useState('');
 
   const [landlords, setLandlords] = useState([]);
@@ -75,9 +110,9 @@ export default function App() {
   const [payments, setPayments] = useState([]);
   const [historicalLeases, setHistoricalLeases] = useState([]);
 
-  const [currentLandlordId, setCurrentLandlordId] = useState(null);
-  const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(null);
-  const [currentTenantPhone, setCurrentTenantPhone] = useState(null);
+  const [currentLandlordId, setCurrentLandlordId] = useState(savedSession?.currentLandlordId || null);
+  const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(savedSession?.currentTenantLeaseId || null);
+  const [currentTenantPhone, setCurrentTenantPhone] = useState(savedSession?.currentTenantPhone || null);
 
   const [landlordLoginPhone, setLandlordLoginPhone] = useState('');
   const [landlordLoginPassword, setLandlordLoginPassword] = useState('');
@@ -173,7 +208,7 @@ export default function App() {
   const [landlordSelfPhone, setLandlordSelfPhone] = useState('');
   const [landlordSelfPassword, setLandlordSelfPassword] = useState('');
   // Superadmin Security Authentication States (密碼加密保護，不在前端存放明文)
-  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(false);
+  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(savedSession?.isSuperadminAuthenticated || false);
   const [superadminPasswordInput, setSuperadminPasswordInput] = useState('');
   const [superadminLoginLoading, setSuperadminLoginLoading] = useState(false);
   const [showSuperadminPassword, setShowSuperadminPassword] = useState(false);
@@ -416,15 +451,31 @@ export default function App() {
     };
   }, []);
 
+  // 監聽並自動同步當前登入狀態至 localStorage (重新整理免重新登入)
+  useEffect(() => {
+    if (role === 'portal') {
+      clearAuthSession();
+    } else {
+      saveAuthSession({
+        role,
+        activeTab,
+        currentLandlordId,
+        currentTenantPhone,
+        currentTenantLeaseId,
+        isSuperadminAuthenticated
+      });
+    }
+  }, [role, activeTab, currentLandlordId, currentTenantPhone, currentTenantLeaseId, isSuperadminAuthenticated]);
+
   useEffect(() => {
     if (role === 'admin') {
-      setActiveTab('dashboard');
+      setActiveTab(prev => prev || 'dashboard');
       setLandlordAuthMode('login');
     } else if (role === 'tenant') {
-      setActiveTab('portal');
+      setActiveTab(prev => prev || 'portal');
       setTenantAuthMode('login');
     } else if (role === 'superadmin') {
-      setActiveTab('landlords');
+      setActiveTab(prev => prev || 'landlords');
       setSuperadminTab('approved');
     }
     setSearchQuery('');
