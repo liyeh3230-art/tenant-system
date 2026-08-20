@@ -262,6 +262,13 @@ export default function App() {
         const resolvedPhone = cleanLndPhone || matchedProfile?.phone || matchedLandlord?.phone || '';
         const resolvedName = matchedProfile?.name || matchedLandlord?.name || '房東';
 
+        const landlordIdList = Array.from(new Set([
+          targetLandlordId,
+          matchedProfile?.id,
+          matchedLandlord?.id,
+          resolvedId
+        ].filter(Boolean)));
+
         setLandlords([{
           id: resolvedId || 'LND_CURRENT',
           name: resolvedName,
@@ -271,8 +278,9 @@ export default function App() {
         }]);
 
         // 抓取該房東的地址庫
-        const addrQuery = resolvedId
-          ? supabase.from('landlord_addresses').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`)
+        const addrOrClause = landlordIdList.map(id => `landlord_id.eq.${id}`).join(',');
+        const addrQuery = addrOrClause
+          ? supabase.from('landlord_addresses').select('*').or(`${addrOrClause},landlord_id.is.null`)
           : supabase.from('landlord_addresses').select('*');
         const { data: addrData } = await addrQuery;
         if (addrData) {
@@ -284,8 +292,9 @@ export default function App() {
         }
 
         // 抓取該房東的房源 (包含軟刪除以供歷史合約參照)
-        const propQuery = resolvedId
-          ? supabase.from('properties').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`)
+        const propOrClause = landlordIdList.map(id => `landlord_id.eq.${id}`).join(',');
+        const propQuery = propOrClause
+          ? supabase.from('properties').select('*').or(`${propOrClause},landlord_id.is.null`)
           : supabase.from('properties').select('*');
         const { data: propData } = await propQuery;
         if (propData) {
@@ -305,8 +314,9 @@ export default function App() {
         }
 
         // 抓取該房東的租約
-        const leaseQuery = resolvedId
-          ? supabase.from('leases').select('*').or(`landlord_id.eq.${resolvedId},landlord_id.is.null`).is('deleted_at', null)
+        const leaseOrClause = landlordIdList.map(id => `landlord_id.eq.${id}`).join(',');
+        const leaseQuery = leaseOrClause
+          ? supabase.from('leases').select('*').or(`${leaseOrClause},landlord_id.is.null`).is('deleted_at', null)
           : supabase.from('leases').select('*').is('deleted_at', null);
         const { data: leaseData } = await leaseQuery;
 
@@ -629,7 +639,11 @@ export default function App() {
           const metaPhone = user.user_metadata?.phone || '';
           setRole(metaRole === 'landlord' ? 'admin' : metaRole);
           if (metaRole === 'landlord') {
-            setCurrentLandlordId(user.id);
+            const cleanPhone = metaPhone.replace(/[^0-9]/g, '');
+            const { data: profs } = await supabase.from('profiles').select('*').or(`id.eq.${user.id},phone.eq.${cleanPhone}`);
+            const matchedProf = profs?.[0];
+            setCurrentLandlordId(matchedProf?.id || user.id);
+            if (cleanPhone) setCurrentLandlordPhone(cleanPhone);
           } else if (metaRole === 'tenant') {
             setCurrentTenantPhone(metaPhone);
           }
