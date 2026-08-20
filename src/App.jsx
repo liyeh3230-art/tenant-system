@@ -164,7 +164,7 @@ export default function App() {
   const [tenantReportCategory, setTenantReportCategory] = useState('rent');
   const [tenantReportTitle, setTenantReportTitle] = useState('');
   const [tenantReportAmount, setTenantReportAmount] = useState('');
-  const [tenantReportMethod, setTenantReportMethod] = useState('bank');
+  const [tenantReportMethod, setTenantReportMethod] = useState('cash'); // 預設為現金交付
   const [tenantReportTransferLast5, setTenantReportTransferLast5] = useState('');
   const [tenantReportDate, setTenantReportDate] = useState('');
   const [tenantReportNote, setTenantReportNote] = useState('');
@@ -172,11 +172,23 @@ export default function App() {
 
   // Tenant Payment Interaction States
   const [tenantPayingBill, setTenantPayingBill] = useState(null);
-  const [tenantPayChannel, setTenantPayChannel] = useState('bank');
+  const [tenantPayChannel, setTenantPayChannel] = useState('cash');
   const [tenantPayTransferLast5, setTenantPayTransferLast5] = useState('');
   const [tenantPayCardNumber, setTenantPayCardNumber] = useState('');
   const [tenantPayCardExp, setTenantPayCardExp] = useState('');
   const [tenantPayCardCvc, setTenantPayCardCvc] = useState('');
+
+  // Landlord Bank Account Configuration States (房東專區自訂收款帳戶，若未填寫則為空值)
+  const [landlordBankInfo, setLandlordBankInfo] = useState({
+    bankName: '',
+    bankAccount: '',
+    accountName: '',
+    note: ''
+  });
+  const [tempBankName, setTempBankName] = useState('');
+  const [tempBankAccount, setTempBankAccount] = useState('');
+  const [tempAccountName, setTempAccountName] = useState('');
+  const [tempBankNote, setTempBankNote] = useState('');
 
   // Modals state inputs
   const [propName, setPropName] = useState('');
@@ -268,6 +280,19 @@ export default function App() {
           matchedLandlord?.id,
           resolvedId
         ].filter(Boolean)));
+
+        const rawBank = matchedProfile?.bank_info || matchedLandlord?.bank_info;
+        if (rawBank) {
+          const parsed = typeof rawBank === 'string' ? JSON.parse(rawBank || '{}') : rawBank;
+          setLandlordBankInfo({
+            bankName: parsed.bankName || '',
+            bankAccount: parsed.bankAccount || '',
+            accountName: parsed.accountName || '',
+            note: parsed.note || ''
+          });
+        } else {
+          setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
+        }
 
         setLandlords([{
           id: resolvedId || 'LND_CURRENT',
@@ -463,6 +488,27 @@ export default function App() {
                 deletedAt: p.deleted_at
               })));
             }
+          }
+
+          // 抓取該租客房東的收款帳戶資訊
+          const lndIds = Array.from(new Set(leaseData.map(l => l.landlord_id).filter(Boolean)));
+          if (lndIds.length > 0) {
+            const { data: lndProfs } = await supabase.from('profiles').select('id, bank_info').in('id', lndIds);
+            const { data: lndTable } = await supabase.from('landlords').select('id, bank_info').in('id', lndIds);
+            const targetBank = lndProfs?.[0]?.bank_info || lndTable?.[0]?.bank_info;
+            if (targetBank) {
+              const parsed = typeof targetBank === 'string' ? JSON.parse(targetBank || '{}') : targetBank;
+              setLandlordBankInfo({
+                bankName: parsed.bankName || '',
+                bankAccount: parsed.bankAccount || '',
+                accountName: parsed.accountName || '',
+                note: parsed.note || ''
+              });
+            } else {
+              setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
+            }
+          } else {
+            setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
           }
 
           // 抓取該租客合約關聯的帳單
@@ -2097,6 +2143,42 @@ export default function App() {
     }
   };
 
+  const handleOpenLandlordBankModal = () => {
+    setTempBankName(landlordBankInfo.bankName || '');
+    setTempBankAccount(landlordBankInfo.bankAccount || '');
+    setTempAccountName(landlordBankInfo.accountName || '');
+    setTempBankNote(landlordBankInfo.note || '');
+    setActiveModal('manageBankInfo');
+  };
+
+  const handleSaveLandlordBankInfo = async (e) => {
+    if (e) e.preventDefault();
+    const updatedBank = {
+      bankName: tempBankName.trim(),
+      bankAccount: tempBankAccount.trim(),
+      accountName: tempAccountName.trim(),
+      note: tempBankNote.trim()
+    };
+    try {
+      if (isSupabaseConfigured && currentLandlordId) {
+        await supabase.from('profiles').update({
+          bank_info: updatedBank,
+          updated_at: new Date().toISOString()
+        }).eq('id', currentLandlordId);
+
+        await supabase.from('landlords').update({
+          bank_info: updatedBank,
+          updated_at: new Date().toISOString()
+        }).eq('id', currentLandlordId);
+      }
+      setLandlordBankInfo(updatedBank);
+      setActiveModal(null);
+      showToast('收款帳戶資訊已成功保存！', 'success');
+    } catch (err) {
+      showToast(`保存失敗: ${err.message}`, 'error');
+    }
+  };
+
   const handleOpenTenantReportPayment = (targetBill = null) => {
     if (!currentTenantLease) {
       showToast('目前尚無生效之租約可回報！', 'warning');
@@ -2107,7 +2189,7 @@ export default function App() {
       setTenantReportCategory(targetBill.billType || 'rent');
       setTenantReportTitle(targetBill.title || '');
       setTenantReportAmount(targetBill.amount.toString());
-      setTenantReportMethod('bank');
+      setTenantReportMethod('cash'); // 預設為現金交付
       setTenantReportTransferLast5(targetBill.transferLast5 || '');
       setTenantReportDate(targetBill.dueDate || new Date().toISOString().split('T')[0]);
       setTenantReportNote('');
@@ -2116,7 +2198,7 @@ export default function App() {
       setTenantReportCategory('rent');
       setTenantReportTitle('');
       setTenantReportAmount(getLeaseMonthlyRent(currentTenantLease).toString());
-      setTenantReportMethod('bank');
+      setTenantReportMethod('cash'); // 預設為現金交付
       setTenantReportTransferLast5('');
       setTenantReportDate(new Date().toISOString().split('T')[0]);
       setTenantReportNote('');
@@ -3635,6 +3717,13 @@ export default function App() {
 
                     <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                       <button
+                        onClick={handleOpenLandlordBankModal}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center border border-slate-250 flex-1 sm:flex-none focus:outline-none"
+                      >
+                        <CreditCard size={16} className="mr-1.5 text-slate-550" />
+                        <span>設定收款帳戶</span>
+                      </button>
+                      <button
                         onClick={handleOpenAddCustomBill}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center shadow-xs flex-1 sm:flex-none"
                       >
@@ -4339,6 +4428,13 @@ export default function App() {
                       <option value="occupied">已出租</option>
                       <option value="vacant">未出租</option>
                     </select>
+                    <button
+                      onClick={handleOpenLandlordBankModal}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center border border-slate-250 flex-1 sm:flex-none focus:outline-none"
+                    >
+                      <CreditCard size={16} className="mr-1 text-slate-550" />
+                      <span>設定收款帳戶</span>
+                    </button>
                     <button
                       onClick={() => {
                         setNewAddressText('');
@@ -6218,6 +6314,7 @@ export default function App() {
                 {activeModal === 'addProperty' && '新增房間房號'}
                 {activeModal === 'editProperty' && '編輯房源資訊'}
                 {activeModal === 'manageAddresses' && '管理租屋地址'}
+                {activeModal === 'manageBankInfo' && '設定收款帳戶資訊'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
                 {activeModal === 'viewLease' && '租約詳細紀錄'}
@@ -6576,6 +6673,83 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+              )}
+
+              {/* Manage Landlord Bank Info Modal */}
+              {activeModal === 'manageBankInfo' && (
+                <form onSubmit={handleSaveLandlordBankInfo} className="space-y-4">
+                  <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 flex items-start gap-3">
+                    <CreditCard className="text-indigo-600 flex-shrink-0 mt-0.5" size={20} />
+                    <div className="text-xs text-indigo-950">
+                      <p className="font-bold mb-0.5">房東專屬收款帳戶設定</p>
+                      <p className="text-indigo-800 leading-relaxed">
+                        在此填寫您的銀行匯款帳戶資訊。當房客於房客專區選擇「銀行轉帳」繳款時，系統將會向房客展示此帳戶。若不填寫則房客端轉帳資訊將保持為空值。
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">收款銀行名稱與代碼</label>
+                      <input
+                        type="text"
+                        placeholder="例如：808 玉山銀行 營業部，或 013 國泰世華"
+                        value={tempBankName}
+                        onChange={(e) => setTempBankName(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-indigo-600 bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">銀行帳號</label>
+                      <input
+                        type="text"
+                        placeholder="例如：0012-3456-7890-12"
+                        value={tempBankAccount}
+                        onChange={(e) => setTempBankAccount(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-mono font-bold outline-none focus:border-indigo-600 bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">戶名</label>
+                      <input
+                        type="text"
+                        placeholder="例如：周金在"
+                        value={tempAccountName}
+                        onChange={(e) => setTempAccountName(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-indigo-600 bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">轉帳備註 / 說明 (選填)</label>
+                      <input
+                        type="text"
+                        placeholder="例如：匯款後請務必回報帳號後五碼供核帳"
+                        value={tempBankNote}
+                        onChange={(e) => setTempBankNote(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-xs outline-none focus:border-indigo-600 bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-xs font-semibold transition-colors focus:outline-none"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors focus:outline-none"
+                    >
+                      儲存收款帳戶
+                    </button>
+                  </div>
+                </form>
               )}
 
               {/* Add Lease (Simplified Information Recording) */}
@@ -7925,35 +8099,59 @@ export default function App() {
                   {/* Channel 1: Bank Transfer Details */}
                   {tenantReportMethod === 'bank' && (
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                      <div className="space-y-1.5 text-xs text-slate-700">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">收款銀行：</span>
-                          <span className="font-bold text-slate-800">808 玉山銀行 (營業部)</span>
+                      {(landlordBankInfo?.bankAccount || landlordBankInfo?.bankName) ? (
+                        <div className="space-y-1.5 text-xs text-slate-700">
+                          {landlordBankInfo.bankName && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">收款銀行：</span>
+                              <span className="font-bold text-slate-800">{landlordBankInfo.bankName}</span>
+                            </div>
+                          )}
+                          {landlordBankInfo.bankAccount && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-slate-500">收款帳號：</span>
+                              <div className="flex items-center space-x-1.5">
+                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs">
+                                  {landlordBankInfo.bankAccount}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(landlordBankInfo.bankAccount.replace(/\D/g, ''));
+                                    showToast('已複製銀行帳號至剪貼簿！', 'success');
+                                  }}
+                                  className="text-indigo-600 hover:text-indigo-800 p-1"
+                                  title="複製帳號"
+                                >
+                                  <Copy size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {landlordBankInfo.accountName && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">戶名：</span>
+                              <span className="font-semibold text-slate-800">{landlordBankInfo.accountName}</span>
+                            </div>
+                          )}
+                          {landlordBankInfo.note && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500">轉帳備註：</span>
+                              <span className="text-slate-600">{landlordBankInfo.note}</span>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-slate-500">專屬虛擬繳款帳號：</span>
-                          <div className="flex items-center space-x-1.5">
-                            <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs">
-                              9982-1208-8839-11
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard?.writeText('99821208883911');
-                                showToast('已複製銀行帳號至剪貼簿！', 'success');
-                              }}
-                              className="text-indigo-600 hover:text-indigo-800 p-1"
-                              title="複製帳號"
-                            >
-                              <Copy size={14} />
-                            </button>
+                      ) : (
+                        <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200/70 text-xs text-amber-900 space-y-1">
+                          <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                            <AlertCircle size={14} />
+                            <span>房東目前尚未設定收款帳戶資訊</span>
                           </div>
+                          <p className="text-[11px] text-amber-700 leading-relaxed">
+                            若您已與房東確認線下轉帳帳號並完成匯款，請直接於下方填寫您的「匯款帳號末五碼」以供核帳。
+                          </p>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">戶名：</span>
-                          <span className="font-semibold text-slate-800">租賃房源代收專戶</span>
-                        </div>
-                      </div>
+                      )}
 
                       <div className="pt-2 border-t border-slate-200">
                         <label className="block text-xs font-bold text-slate-700 mb-1">
