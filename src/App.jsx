@@ -5,11 +5,12 @@ import {
   Search, Bell, User, LayoutDashboard, Wallet,
   Calendar, Phone, DollarSign, X, Check, Clipboard, Edit3, Trash2, Menu, FileEdit, XCircle, History, Image, Share2, Lock, FileCheck,
   Printer, Download, QrCode, Send, ArrowUpRight, RefreshCw, SlidersHorizontal, ChevronRight, Percent, TrendingUp, Receipt, Copy, Sparkles, Filter, Layers, ChevronDown, ChevronUp,
-  Upload, Star, ArrowLeft, ArrowRight, ShieldCheck, GripVertical, KeyRound, MessageSquare
+  Upload, Star, ArrowLeft, ArrowRight, ShieldCheck, GripVertical, KeyRound, MessageSquare, Shield, Eye, EyeOff
 } from 'lucide-react';
 import {
   sanitizeText,
   sanitizeNumber,
+  hashPassword,
   registerUser,
   loginUser,
   logoutUser,
@@ -171,6 +172,11 @@ export default function App() {
   const [landlordSelfName, setLandlordSelfName] = useState('');
   const [landlordSelfPhone, setLandlordSelfPhone] = useState('');
   const [landlordSelfPassword, setLandlordSelfPassword] = useState('');
+  // Superadmin Security Authentication States (密碼加密保護，不在前端存放明文)
+  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(false);
+  const [superadminPasswordInput, setSuperadminPasswordInput] = useState('');
+  const [superadminLoginLoading, setSuperadminLoginLoading] = useState(false);
+  const [showSuperadminPassword, setShowSuperadminPassword] = useState(false);
   const [superadminTab, setSuperadminTab] = useState('approved'); // 'approved' | 'pending'
   const [superadminCategory, setSuperadminCategory] = useState('landlord'); // 'landlord' | 'tenant'
   const [landlordAddresses, setLandlordAddresses] = useState([]);
@@ -575,6 +581,57 @@ export default function App() {
     }
   };
 
+  const handleSuperadminLogin = async (e) => {
+    if (e) e.preventDefault();
+    const cleanPwd = String(superadminPasswordInput || '').trim();
+    if (!cleanPwd) {
+      showToast('請輸入系統管理員授權密碼！', 'error');
+      return;
+    }
+
+    setSuperadminLoginLoading(true);
+    try {
+      // 使用 SHA-256 加鹽雜湊運算，前端不存放任何明文密碼
+      const inputHash = await hashPassword(cleanPwd);
+      let isValid = false;
+
+      // 1. 優先比對 Supabase 雲端 profiles 中的 superadmin 安全雜湊
+      if (isSupabaseConfigured) {
+        try {
+          const { data: adminProfile } = await supabase
+            .from('profiles')
+            .select('password_hash')
+            .eq('role', 'superadmin')
+            .maybeSingle();
+
+          if (adminProfile?.password_hash) {
+            isValid = (adminProfile.password_hash === inputHash);
+          }
+        } catch (cloudErr) {
+          console.warn('Superadmin cloud auth check fallback:', cloudErr);
+        }
+      }
+
+      // 2. 備用雜湊驗證 (不可逆 SHA-256 雜湊，代碼中無任何明文密碼)
+      const SECURE_SUPERADMIN_HASH = 'b854dcf489b9c5fa4303a235a5212b3a378db986592f74ea16f49fe6ee172fbf';
+      if (!isValid && inputHash === SECURE_SUPERADMIN_HASH) {
+        isValid = true;
+      }
+
+      if (isValid) {
+        setIsSuperadminAuthenticated(true);
+        setSuperadminPasswordInput('');
+        showToast('🎉 系統管理員驗證通過，歡迎進入平台總管理後台！', 'success');
+      } else {
+        showToast('管理員密碼錯誤，拒絕存取！', 'error');
+      }
+    } catch (err) {
+      showToast('身分驗證異常，請重試', 'error');
+    } finally {
+      setSuperadminLoginLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await logoutUser();
     if (role === 'tenant') {
@@ -585,6 +642,8 @@ export default function App() {
       setCurrentLandlordId(null);
       showToast('已登出房東管理系統！', 'success');
     } else if (role === 'superadmin') {
+      setIsSuperadminAuthenticated(false);
+      setSuperadminPasswordInput('');
       showToast('已登出系統管理員！', 'success');
     }
     setRole('portal');
@@ -2195,8 +2254,8 @@ export default function App() {
               <button
                 className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg bg-slate-800 text-white font-medium focus:outline-none"
               >
-                <Users size={20} />
-                <span>會員資料管理</span>
+                {isSuperadminAuthenticated ? <Users size={20} /> : <Shield size={20} />}
+                <span>{isSuperadminAuthenticated ? '會員資料管理' : '管理員身分驗證'}</span>
               </button>
             ) : role === 'admin' ? (
               currentLandlordId ? (
@@ -2432,12 +2491,16 @@ export default function App() {
 
                     {/* Super Admin Portal Card */}
                     <div
-                      onClick={() => setRole('superadmin')}
+                      onClick={() => {
+                        setRole('superadmin');
+                        setIsSuperadminAuthenticated(false);
+                        setSuperadminPasswordInput('');
+                      }}
                       className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-slate-800 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
                     >
                       <div className="space-y-4">
                         <div className="w-12 h-12 bg-slate-100 text-slate-700 rounded-2xl flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-colors">
-                          <Users size={24} />
+                          <Shield size={24} />
                         </div>
                         <div>
                           <h3 className="text-lg font-bold text-slate-900 group-hover:text-slate-900 transition-colors">系統管理員</h3>
@@ -2447,7 +2510,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="pt-6 flex items-center text-xs font-bold text-slate-700">
-                        <span>管理員登入 →</span>
+                        <span>管理員驗證登入 →</span>
                       </div>
                     </div>
                   </div>
@@ -2681,8 +2744,77 @@ export default function App() {
               </div>
             )}
 
-            {/* SUPER ADMIN CHANNEL */}
-            {role === 'superadmin' && (
+            {/* SUPER ADMIN CHANNEL - PASSWORD LOGIN CHALLENGE */}
+            {role === 'superadmin' && !isSuperadminAuthenticated && (
+              <div className="max-w-md mx-auto my-8 bg-white p-8 rounded-3xl shadow-xl border border-slate-100 space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="w-16 h-16 bg-slate-900 text-amber-400 rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-slate-900/20">
+                    <Shield size={32} />
+                  </div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tight">系統管理員身分驗證</h2>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
+                    本區塊具備全站會員名冊、房東審核與資料庫最高管理權限，請輸入管理員專屬授權密碼。
+                  </p>
+                </div>
+
+                <form onSubmit={handleSuperadminLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>管理員專屬密碼</span>
+                      <span className="text-[10px] text-slate-400 font-normal">SHA-256 加密防護</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showSuperadminPassword ? 'text' : 'password'}
+                        placeholder="請輸入管理員密碼"
+                        value={superadminPasswordInput}
+                        onChange={(e) => setSuperadminPasswordInput(e.target.value)}
+                        autoFocus
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-slate-900 focus:bg-white font-semibold transition-all pr-12"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSuperadminPassword(!showSuperadminPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                      >
+                        {showSuperadminPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={superadminLoginLoading}
+                    className="w-full bg-slate-900 hover:bg-black text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-slate-900/10 hover:shadow-slate-900/25 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {superadminLoginLoading ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (
+                      <>
+                        <KeyRound size={18} />
+                        <span>驗證身分並進入後台</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                <div className="pt-2 text-center border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRole('portal');
+                      setSuperadminPasswordInput('');
+                    }}
+                    className="text-xs text-slate-500 hover:text-slate-800 font-semibold transition-colors cursor-pointer"
+                  >
+                    ← 返回入口首頁
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* SUPER ADMIN CHANNEL - AUTHENTICATED DASHBOARD */}
+            {role === 'superadmin' && isSuperadminAuthenticated && (
               <div className="space-y-6">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-slate-800">平台總管理後台</h2>

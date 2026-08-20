@@ -173,3 +173,17 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN NULL;
 END $$;
+
+-- 12. 建立/更新平台總管理員安全帳號 (密碼已使用 SHA-256 加鹽雜湊，完全不儲存明文)
+INSERT INTO public.profiles (id, role, name, phone, password_hash)
+VALUES (
+    'usr_superadmin',
+    'superadmin',
+    '平台總管理員',
+    '0900000000',
+    'b854dcf489b9c5fa4303a235a5212b3a378db986592f74ea16f49fe6ee172fbf'
+) ON CONFLICT (id) DO UPDATE 
+SET password_hash = 'b854dcf489b9c5fa4303a235a5212b3a378db986592f74ea16f49fe6ee172fbf',
+    role = 'superadmin',
+    name = '平台總管理員';
+
