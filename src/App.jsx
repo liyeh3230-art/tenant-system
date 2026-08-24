@@ -746,7 +746,73 @@ export default function App() {
     }, 4000);
   };
 
-  // --- Secure Authentication & Registration Handlers (No Plaintext Passwords / No Enumeration) ---
+  const [lineLoginModalOpen, setLineLoginModalOpen] = useState(false);
+  const [lineLoginRole, setLineLoginRole] = useState('tenant');
+  const [lineLoginInput, setLineLoginInput] = useState('');
+  const [lineLoginLoading, setLineLoginLoading] = useState(false);
+
+  const handleOpenLineLoginModal = (targetRole = 'tenant') => {
+    setLineLoginRole(targetRole);
+    setLineLoginInput('');
+    setLineLoginModalOpen(true);
+  };
+
+  const handleExecuteLineLogin = async (e) => {
+    if (e) e.preventDefault();
+    const cleanInput = lineLoginInput.trim();
+    if (!cleanInput) {
+      showToast('請輸入綁定代碼或綁定的手機號碼！', 'warning');
+      return;
+    }
+    setLineLoginLoading(true);
+    try {
+      const cleanPhone = cleanInput.replace(/[^0-9]/g, '');
+      let matchedProfile = null;
+      if (cleanPhone.length >= 8) {
+        const { data: profs } = await supabase.from('profiles').select('*').eq('phone', cleanPhone);
+        matchedProfile = profs?.[0];
+      }
+
+      if (!matchedProfile) {
+        const { data: tokens } = await supabase.from('line_binding_tokens').select('*').eq('token', cleanInput.toUpperCase());
+        if (tokens && tokens[0]) {
+          const { data: profs } = await supabase.from('profiles').select('*').or(`id.eq.${tokens[0].tenant_id}`);
+          matchedProfile = profs?.[0];
+        }
+      }
+
+      if (!matchedProfile) {
+        const { data: bindings } = await supabase.from('line_bindings').select('*').eq('status', 'active');
+        const found = (bindings || []).find(b => b.line_user_id === cleanInput || b.tenant_id === cleanInput);
+        if (found) {
+          const { data: profs } = await supabase.from('profiles').select('*').eq('id', found.tenant_id);
+          matchedProfile = profs?.[0];
+        }
+      }
+
+      if (matchedProfile) {
+        setCurrentUser({ id: matchedProfile.id, phone: matchedProfile.phone, user_metadata: { role: matchedProfile.role, name: matchedProfile.name } });
+        if (matchedProfile.role === 'landlord' || lineLoginRole === 'landlord') {
+          setRole('admin');
+          setCurrentLandlordId(matchedProfile.id);
+          setCurrentLandlordPhone(matchedProfile.phone);
+          setActiveTab('dashboard');
+        } else {
+          setRole('tenant');
+          setCurrentTenantPhone(matchedProfile.phone);
+          setActiveTab('portal');
+        }
+        setLineLoginModalOpen(false);
+        showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${matchedProfile.name}！`, 'success');
+      } else {
+        showToast('未查到相符的 LINE 綁定或會員帳號，請輸入綁定手機號碼或使用密碼登入。', 'error');
+      }
+    } catch (err) {
+      showToast('LINE 登入處理失敗: ' + err.message, 'error');
+    } finally {
+      setLineLoginLoading(false);
+    }
+  };
   const [lineBindingModalOpen, setLineBindingModalOpen] = useState(false);
   const [lineBindingTokenData, setLineBindingTokenData] = useState(null);
   const [lineBindingLoading, setLineBindingLoading] = useState(false);
@@ -2922,6 +2988,26 @@ export default function App() {
                       >
                         登入房東後台
                       </button>
+
+                      <div className="relative my-3">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-slate-200" />
+                        </div>
+                        <div className="relative flex justify-center text-xs">
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用第三方帳號</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLineLoginModal('landlord')}
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                      >
+                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                          <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                        </svg>
+                        <span>使用 LINE 帳號一鍵登入</span>
+                      </button>
                     </form>
                   </div>
                 ) : (
@@ -3030,6 +3116,26 @@ export default function App() {
                         className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none"
                       >
                         登入租客中心
+                      </button>
+
+                      <div className="relative my-3">
+                        <div className="absolute inset-0 flex items-center">
+                          <div className="w-full border-t border-slate-200" />
+                        </div>
+                        <div className="relative flex justify-center text-xs">
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用第三方帳號</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenLineLoginModal('tenant')}
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                      >
+                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                          <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                        </svg>
+                        <span>使用 LINE 帳號一鍵登入</span>
                       </button>
                     </form>
                   </div>
@@ -7785,7 +7891,72 @@ export default function App() {
                 </form>
               )}
 
-              {/* LINE Account Binding Modal (Single-use short-lived 10-min Token) */}
+              {/* LINE Account One-Click Quick Login Modal */}
+              {lineLoginModalOpen && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#06C755] text-white rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+                      <svg className="w-7 h-7 fill-current" viewBox="0 0 24 24">
+                        <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-bold text-emerald-950">LINE 帳號快速登入</h3>
+                    <p className="text-xs text-emerald-800 leading-relaxed max-w-sm mx-auto">
+                      您可以透過已綁定的 LINE 帳號、LINE 官方驗證碼或已綁定之手機號碼一鍵完成快速身分驗證。
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleExecuteLineLogin} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        請輸入您的 LINE 綁定驗證碼 或 已綁定手機號碼：
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="例如：0912345678 或 6 碼驗證碼"
+                        value={lineLoginInput}
+                        onChange={(e) => setLineLoginInput(e.target.value)}
+                        autoFocus
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={lineLoginLoading}
+                      className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>{lineLoginLoading ? '驗證登入中...' : '確認並以 LINE 快速登入'}</span>
+                    </button>
+                  </form>
+
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 flex items-center justify-between text-xs text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare size={16} className="text-[#06C755]" />
+                      <span>尚未加入系統 LINE 官方帳號？</span>
+                    </div>
+                    <a
+                      href="https://line.me/R/ti/p/@888mppnm"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1 bg-white hover:bg-slate-100 text-emerald-700 font-bold rounded-lg border border-slate-200 shadow-2xs transition-colors"
+                    >
+                      加入 @888mppnm
+                    </a>
+                  </div>
+
+                  <div className="pt-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setLineLoginModalOpen(false)}
+                      className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold"
+                    >
+                      返回密碼登入
+                    </button>
+                  </div>
+                </div>
+              )}
               {lineBindingModalOpen && (
                 <div className="space-y-4">
                   <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
