@@ -1,16 +1,18 @@
 // Supabase Client Initialization & Configuration
 import { createClient } from '@supabase/supabase-js';
 
-const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const configuredSupabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const DEFAULT_SUPABASE_URL = 'https://hpphlfmtyxrulirpyejp.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_TiqESe0SQ_HMFZjFpz-DBA_wOgnVUj3';
+
+const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const configuredSupabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
 
 export const isSupabaseConfigured = Boolean(
   configuredSupabaseUrl && configuredSupabaseKey && !configuredSupabaseUrl.includes('placeholder')
 );
 
-// Vite 需要在建置階段建立 client；缺少設定時使用無效值並由 isSupabaseConfigured 阻止所有請求。
-const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
-const supabaseKey = configuredSupabaseKey || 'missing-supabase-publishable-key';
+const supabaseUrl = configuredSupabaseUrl || DEFAULT_SUPABASE_URL;
+const supabaseKey = configuredSupabaseKey || DEFAULT_SUPABASE_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
