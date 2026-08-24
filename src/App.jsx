@@ -754,33 +754,45 @@ export default function App() {
   }, [role]);
 
   // --- LINE OAuth 2.0 Authorization Callback Hook ---
+  const [lineFirstLoginUser, setLineFirstLoginUser] = useState(null);
+  const [lineFirstLoginName, setLineFirstLoginName] = useState('');
+  const [lineFirstLoginPhone, setLineFirstLoginPhone] = useState('');
+  const [lineFirstLoginLoading, setLineFirstLoginLoading] = useState(false);
+
   useEffect(() => {
     const processLineOAuth = async () => {
       try {
         const oauthResult = await handleLineOAuthCallback();
         if (oauthResult && oauthResult.user) {
           const u = oauthResult.user;
-          setCurrentUser({
-            id: u.id,
-            phone: u.phone,
-            user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
-          });
-          if (u.role === 'landlord') {
-            setRole('admin');
-            setCurrentLandlordId(u.id);
-            setCurrentLandlordPhone(u.phone);
-            setActiveTab('dashboard');
+          const cleanP = String(u.phone || '').replace(/[^0-9]/g, '');
+          const isFirstTime = oauthResult.isNewUser || !cleanP || cleanP.length < 8 || String(u.phone).startsWith('line_');
+
+          if (isFirstTime) {
+            setLineFirstLoginUser({ ...u, lineProfile: oauthResult.lineProfile });
+            const initialName = u.name && !u.name.includes('LINE') ? u.name : (oauthResult.lineProfile?.displayName || '');
+            setLineFirstLoginName(initialName);
+            setLineFirstLoginPhone('');
+            setActiveModal('lineFirstLogin');
+            showToast('🎉 LINE 授權成功！請填寫您的真實姓名與聯絡電話以完成會員註冊。', 'info');
           } else {
-            setRole('tenant');
-            setCurrentTenantPhone(u.phone);
-            setActiveTab('portal');
+            setCurrentUser({
+              id: u.id,
+              phone: u.phone,
+              user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
+            });
+            if (u.role === 'landlord') {
+              setRole('admin');
+              setCurrentLandlordId(u.id);
+              setCurrentLandlordPhone(u.phone);
+              setActiveTab('dashboard');
+            } else {
+              setRole('tenant');
+              setCurrentTenantPhone(u.phone);
+              setActiveTab('portal');
+            }
+            showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
           }
-          showToast(
-            oauthResult.isNewUser
-              ? `🎉 歡迎新會員！已成功透過 LINE 建立帳號並登入！`
-              : `🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`,
-            'success'
-          );
         }
       } catch (oauthErr) {
         console.warn('LINE OAuth callback processing notice:', oauthErr);
@@ -789,6 +801,109 @@ export default function App() {
     };
     processLineOAuth();
   }, []);
+
+  const handleSaveLineFirstLogin = async (e) => {
+    if (e) e.preventDefault();
+    const cleanName = sanitizeText(lineFirstLoginName).trim();
+    const cleanPhone = String(lineFirstLoginPhone || '').replace(/[^0-9]/g, '').trim();
+
+    if (!cleanName || cleanName.length < 2) {
+      showToast('請填寫完整真實姓名（至少2個字）！', 'warning');
+      return;
+    }
+    if (!cleanPhone || cleanPhone.length < 8) {
+      showToast('請填寫有效的手機電話號碼！', 'warning');
+      return;
+    }
+
+    setLineFirstLoginLoading(true);
+    try {
+      const u = lineFirstLoginUser || {};
+      const targetRole = u.role || 'tenant';
+      const targetId = u.id || `line_usr_${Date.now()}`;
+
+      // 1. 查詢是否已有該電話的會員 Profile
+      const { data: existingProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('phone', cleanPhone);
+
+      let finalId = targetId;
+      if (existingProfiles && existingProfiles.length > 0) {
+        const existingP = existingProfiles[0];
+        finalId = existingP.id;
+        await supabase.from('profiles').update({
+          name: cleanName,
+          updated_at: new Date().toISOString(),
+        }).eq('id', finalId);
+      } else {
+        await supabase.from('profiles').upsert({
+          id: finalId,
+          role: targetRole,
+          name: cleanName,
+          phone: cleanPhone,
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      // 2. 寫入角色資料表
+      if (targetRole === 'landlord') {
+        await supabase.from('landlords').upsert({
+          id: finalId,
+          name: cleanName,
+          phone: cleanPhone,
+          status: 'approved',
+          ad_listing_enabled: false,
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        await supabase.from('tenants').upsert({
+          id: finalId,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      // 3. 寫入 LINE 綁定表
+      const lineUid = u.lineProfile?.userId || u.id;
+      if (lineUid) {
+        await supabase.from('line_bindings').upsert({
+          tenant_id: finalId,
+          line_user_id: lineUid,
+          line_display_name: cleanName,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      // 4. 設定登入身分
+      setCurrentUser({
+        id: finalId,
+        phone: cleanPhone,
+        user_metadata: { role: targetRole, name: cleanName, phone: cleanPhone }
+      });
+
+      if (targetRole === 'landlord') {
+        setRole('admin');
+        setCurrentLandlordId(finalId);
+        setCurrentLandlordPhone(cleanPhone);
+        setActiveTab('dashboard');
+      } else {
+        setRole('tenant');
+        setCurrentTenantPhone(cleanPhone);
+        setActiveTab('portal');
+      }
+
+      setActiveModal(null);
+      showToast(`🎉 會員資料登記完成！歡迎使用，${cleanName}！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Save LINE first login error:', err);
+      showToast('資料儲存異常：' + (err.message || '請重試'), 'error');
+    } finally {
+      setLineFirstLoginLoading(false);
+    }
+  };
 
   const showToast = (message, type = 'success') => {
     const id = Date.now();
@@ -6440,6 +6555,7 @@ export default function App() {
                 {activeModal === 'manageAddresses' && '管理租屋地址'}
                 {activeModal === 'manageBankInfo' && '設定收款帳戶資訊'}
                 {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
+                {activeModal === 'lineFirstLogin' && '🎉 首次 LINE 登入 - 請完善會員資料'}
                 {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
@@ -8003,6 +8119,68 @@ export default function App() {
                     </button>
                   </div>
                 </form>
+              )}
+
+              {/* First-Time LINE Login Profile Completion Modal */}
+              {activeModal === 'lineFirstLogin' && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#06C755] text-white rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+                      <svg className="w-7 h-7 fill-current" viewBox="0 0 24 24">
+                        <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-bold text-emerald-950">歡迎首次使用 LINE 登入！</h3>
+                    <p className="text-xs text-emerald-800 leading-relaxed max-w-sm mx-auto">
+                      為了讓房東或租管系統能正確為您發送租約通知與帳單，請填寫您的真實姓名與聯絡電話。
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSaveLineFirstLogin} className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        真實姓名 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="請輸入您的真實姓名（例如：林小美）"
+                        value={lineFirstLoginName}
+                        onChange={(e) => setLineFirstLoginName(e.target.value)}
+                        autoFocus
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        聯絡電話 / 手機號碼 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="請輸入手機號碼（例如：0912345678）"
+                        value={lineFirstLoginPhone}
+                        onChange={(e) => setLineFirstLoginPhone(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
+                      />
+                      <span className="text-[11px] text-slate-400 mt-1 block">
+                        此電話將作為系統帳單對帳與重要租約通知之唯一識別。
+                      </span>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={lineFirstLoginLoading}
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <CheckCircle size={16} />
+                        <span>{lineFirstLoginLoading ? '資料儲存中...' : '確認送出並完成登入'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
               )}
 
               {/* LINE Account One-Click Quick Login Modal */}
