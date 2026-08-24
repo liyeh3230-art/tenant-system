@@ -456,14 +456,39 @@ export const handleLineOAuthCallback = async () => {
 
   // Resilient Cloud Fallback (保證授權後 100% 成功登入)
   try {
-    const { data: existingProfiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('role', targetRole)
-      .order('created_at', { ascending: false });
+    const savedUserId = typeof localStorage !== 'undefined' ? localStorage.getItem('line_linked_user_id') : null;
+    const savedPhone = typeof localStorage !== 'undefined' ? localStorage.getItem('line_linked_phone') : null;
 
-    let matchedUser = existingProfiles?.[0];
+    let matchedUser = null;
 
+    // 1. 優先透過本機記錄之 User ID 或手機號碼查詢真實 Profile
+    if (savedUserId || savedPhone) {
+      const orClause = savedUserId ? `id.eq.${savedUserId},phone.eq.${savedPhone}` : `phone.eq.${savedPhone}`;
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(orClause);
+
+      if (profs && profs.length > 0) {
+        matchedUser = profs[0];
+      }
+    }
+
+    // 2. 若為全新設備登入，查詢該身分中已建立真實電話之會員
+    if (!matchedUser) {
+      const { data: realProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', targetRole)
+        .not('phone', 'like', 'line_%')
+        .order('updated_at', { ascending: false });
+
+      if (realProfiles && realProfiles.length > 0) {
+        matchedUser = realProfiles[0];
+      }
+    }
+
+    // 3. 若為完全未曾建立過資料的新用戶
     if (!matchedUser) {
       const fallbackId = `line_usr_${Date.now()}`;
       const fallbackName = targetRole === 'landlord' ? 'LINE 房東會員' : 'LINE 租客會員';
@@ -505,9 +530,19 @@ export const handleLineOAuthCallback = async () => {
       }
     }
 
+    // 4. 若已是完整資料用戶，同步存回 localStorage 供後續免輸入登入
+    if (matchedUser && !String(matchedUser.phone).startsWith('line_') && typeof localStorage !== 'undefined') {
+      localStorage.setItem('line_linked_user_id', matchedUser.id);
+      localStorage.setItem('line_linked_phone', matchedUser.phone);
+      localStorage.setItem('line_linked_name', matchedUser.name);
+      localStorage.setItem('line_linked_role', matchedUser.role);
+    }
+
+    const isFirstTime = !matchedUser || String(matchedUser.phone).startsWith('line_') || matchedUser.phone.length < 8;
+
     return {
       user: matchedUser,
-      isNewUser: false,
+      isNewUser: isFirstTime,
       targetRole: matchedUser.role || targetRole,
     };
   } catch (dbFallbackErr) {

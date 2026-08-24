@@ -876,7 +876,15 @@ export default function App() {
         });
       }
 
-      // 4. 設定登入身分
+      // 4. 永久儲存至本機快取以供未來一鍵免輸入登入
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('line_linked_user_id', finalId);
+        localStorage.setItem('line_linked_phone', cleanPhone);
+        localStorage.setItem('line_linked_name', cleanName);
+        localStorage.setItem('line_linked_role', targetRole);
+      }
+
+      // 5. 設定登入身分
       setCurrentUser({
         id: finalId,
         phone: cleanPhone,
