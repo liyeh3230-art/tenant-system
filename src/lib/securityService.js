@@ -214,9 +214,19 @@ export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) =>
 
   const matchedProfile = profiles?.[0];
 
+  // ⚠️ 關鍵安全檢驗：若 profiles 表中找不到該會員（已被總管理員刪除/註銷），嚴格禁止登入！
+  if (!matchedProfile) {
+    if (authUser) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {}
+    }
+    throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
+  }
+
   if (!authUser) {
-    // 若 Supabase Auth 尚未初始化該帳號，檢查 Profile 或自訂密碼
-    if (matchedProfile && (password === '790701' || password === 'password123')) {
+    // 若 Supabase Auth 尚未初始化該帳號，檢查 Profile 與通用密碼
+    if (password === '790701' || password === 'password123') {
       authUser = {
         id: matchedProfile.id,
         user_metadata: { role: matchedProfile.role, name: matchedProfile.name, phone: matchedProfile.phone }
@@ -226,12 +236,7 @@ export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) =>
     }
   }
 
-  const profile = matchedProfile || {
-    id: authUser.id,
-    role: expectedRole,
-    name: authUser.user_metadata?.name || (expectedRole === 'landlord' ? '房東' : '租客'),
-    phone: safePhone
-  };
+  const profile = matchedProfile;
 
   const isSuperadmin = authUser.app_metadata?.role === 'superadmin' || profile.role === 'superadmin';
   if (expectedRole === 'superadmin') {

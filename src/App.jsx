@@ -666,19 +666,32 @@ export default function App() {
       const metaPhone = (user.user_metadata?.phone || user.email?.split('@')[0] || '').replace(/[^0-9]/g, '');
       const { data: profs } = await supabase
         .from('profiles')
-        .select('id, role, phone')
+        .select('id, role, phone, name')
         .or(`id.eq.${user.id},phone.eq.${metaPhone}`);
       const profile = profs?.[0];
       if (!mounted) return;
 
-      const userRole = profile?.role || user.user_metadata?.role || 'tenant';
-      const cleanPhone = String(profile?.phone || metaPhone).replace(/[^0-9]/g, '');
+      // ⚠️ 若會員在 profiles 資料表中已被刪除/註銷，強制登出並清除殘留 Session
+      if (!profile) {
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {}
+        setCurrentUser(null);
+        setRole('portal');
+        setCurrentLandlordId(null);
+        setCurrentLandlordPhone(null);
+        setCurrentTenantPhone(null);
+        return;
+      }
+
+      const userRole = profile.role || 'tenant';
+      const cleanPhone = String(profile.phone || metaPhone).replace(/[^0-9]/g, '');
 
       setIsSuperadminAuthenticated(false);
       if (userRole === 'landlord' || userRole === 'admin') {
         setRole('admin');
         setActiveTab('dashboard');
-        setCurrentLandlordId(profile?.id || user.id);
+        setCurrentLandlordId(profile.id);
         setCurrentLandlordPhone(cleanPhone);
       } else {
         setRole('tenant');
