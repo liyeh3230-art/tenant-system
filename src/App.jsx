@@ -264,7 +264,7 @@ export default function App() {
           name: resolvedName,
           phone: resolvedPhone,
           status: matchedLandlord?.status || 'approved',
-          adListingEnabled: matchedLandlord?.ad_listing_enabled ?? true
+          adListingEnabled: matchedLandlord?.ad_listing_enabled ?? false
         }]);
 
         // 抓取該房東的地址庫
@@ -598,7 +598,7 @@ export default function App() {
             name: p.name || lndInfo.name || '房東',
             phone: p.phone || lndInfo.phone || '',
             status: lndInfo.status || 'approved',
-            adListingEnabled: lndInfo.ad_listing_enabled ?? true
+            adListingEnabled: lndInfo.ad_listing_enabled ?? false
           });
         });
 
@@ -610,7 +610,7 @@ export default function App() {
               name: l.name || '房東',
               phone: l.phone || '',
               status: l.status || 'approved',
-              adListingEnabled: l.ad_listing_enabled ?? true
+              adListingEnabled: l.ad_listing_enabled ?? false
             });
           }
         });

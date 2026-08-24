@@ -141,7 +141,7 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
         name: sanitizeText(name),
         phone: safePhone,
         status: 'approved',
-        ad_listing_enabled: true,
+        ad_listing_enabled: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
