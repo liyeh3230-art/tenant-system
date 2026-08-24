@@ -4,8 +4,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
-const LINE_CHANNEL_ID = Deno.env.get("LINE_CHANNEL_ID") || "2011232158";
-const LINE_CHANNEL_SECRET = Deno.env.get("LINE_CHANNEL_SECRET") || "e44eaf2457cd877830f4372b1b2d3ba2";
+const LINE_CHANNEL_ID = Deno.env.get("LINE_CHANNEL_ID") || "2011231660";
+const LINE_CHANNEL_SECRET = Deno.env.get("LINE_CHANNEL_SECRET") || "7498965ccf869f7d567a496cd46dcb5f";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://hpphlfmtyxrulirpyejp.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 

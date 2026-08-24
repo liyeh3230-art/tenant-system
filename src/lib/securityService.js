@@ -368,7 +368,7 @@ export const logAuditEvent = async ({
 };
 
 // --- 6. LINE Login OAuth 2.0 授權登入流程 (LINE Login OpenID Connect) ---
-export const LINE_LOGIN_CHANNEL_ID = '2011232158';
+export const LINE_LOGIN_CHANNEL_ID = '2011231660';
 
 /**
  * 導向 LINE Login 授權頁面
