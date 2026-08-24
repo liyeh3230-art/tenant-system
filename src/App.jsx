@@ -746,7 +746,6 @@ export default function App() {
     }, 4000);
   };
 
-  const [lineLoginModalOpen, setLineLoginModalOpen] = useState(false);
   const [lineLoginRole, setLineLoginRole] = useState('tenant');
   const [lineLoginInput, setLineLoginInput] = useState('');
   const [lineLoginLoading, setLineLoginLoading] = useState(false);
@@ -754,7 +753,7 @@ export default function App() {
   const handleOpenLineLoginModal = (targetRole = 'tenant') => {
     setLineLoginRole(targetRole);
     setLineLoginInput('');
-    setLineLoginModalOpen(true);
+    setActiveModal('lineLogin');
   };
 
   const handleExecuteLineLogin = async (e) => {
@@ -802,7 +801,7 @@ export default function App() {
           setCurrentTenantPhone(matchedProfile.phone);
           setActiveTab('portal');
         }
-        setLineLoginModalOpen(false);
+        setActiveModal(null);
         showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${matchedProfile.name}！`, 'success');
       } else {
         showToast('未查到相符的 LINE 綁定或會員帳號，請輸入綁定手機號碼或使用密碼登入。', 'error');
@@ -813,7 +812,6 @@ export default function App() {
       setLineLoginLoading(false);
     }
   };
-  const [lineBindingModalOpen, setLineBindingModalOpen] = useState(false);
   const [lineBindingTokenData, setLineBindingTokenData] = useState(null);
   const [lineBindingLoading, setLineBindingLoading] = useState(false);
 
@@ -823,7 +821,7 @@ export default function App() {
       const targetId = currentUser?.id || (currentTenantPhone ? `tenant_${currentTenantPhone}` : 'tenant_user');
       const tokenResult = await generateLineBindingToken(targetId);
       setLineBindingTokenData(tokenResult);
-      setLineBindingModalOpen(true);
+      setActiveModal('lineBinding');
     } catch (err) {
       console.warn('LINE binding token fallback:', err);
       const mockToken = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -832,7 +830,7 @@ export default function App() {
         expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
         expiresInSeconds: 600,
       });
-      setLineBindingModalOpen(true);
+      setActiveModal('lineBinding');
     } finally {
       setLineBindingLoading(false);
     }
@@ -6327,6 +6325,8 @@ export default function App() {
                 {activeModal === 'editProperty' && '編輯房源資訊'}
                 {activeModal === 'manageAddresses' && '管理租屋地址'}
                 {activeModal === 'manageBankInfo' && '設定收款帳戶資訊'}
+                {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
+                {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
                 {activeModal === 'viewLease' && '租約詳細紀錄'}
@@ -7892,7 +7892,7 @@ export default function App() {
               )}
 
               {/* LINE Account One-Click Quick Login Modal */}
-              {lineLoginModalOpen && (
+              {activeModal === 'lineLogin' && (
                 <div className="space-y-4">
                   <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
                     <div className="w-12 h-12 bg-[#06C755] text-white rounded-2xl flex items-center justify-center mx-auto shadow-xs">
@@ -7949,7 +7949,7 @@ export default function App() {
                   <div className="pt-1 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => setLineLoginModalOpen(false)}
+                      onClick={() => setActiveModal(null)}
                       className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold"
                     >
                       返回密碼登入
@@ -7957,7 +7957,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {lineBindingModalOpen && (
+              {activeModal === 'lineBinding' && (
                 <div className="space-y-4">
                   <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
                     <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
@@ -8009,7 +8009,7 @@ export default function App() {
                   <div className="pt-2 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => setLineBindingModalOpen(false)}
+                      onClick={() => setActiveModal(null)}
                       className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold transition-colors focus:outline-none"
                     >
                       我已了解，關閉視窗
