@@ -143,20 +143,20 @@ serve(async (req: Request) => {
           await replyLineMessage(replyToken, [
             {
               type: "text",
-              text: "🎉 恭喜！您已成功綁定智慧租屋系統帳號！\n\n您可以隨時在此傳送：\n👉「查詢帳單」：檢視本期應繳與待繳帳單\n👉「繳款資訊」：取得匯款帳號及回報方式\n👉「報修進度」：查看修繕申請狀態",
+              text: "🎉 恭喜！您已成功綁定智慧租屋系統帳號！\n\n您可以隨時在此傳送：\n👉「查詢帳單」：檢視本期應繳與待繳租金帳單\n👉「繳款資訊」：取得房東匯款帳號與繳費方式\n👉「租約資訊」：查看目前承租之房源與起迄日期",
             },
           ]);
         }
-      } else if (text === "查詢帳單" || text === "帳單") {
+      } else if (text.includes("帳單") || text.includes("查詢") || text === "1") {
         // Query linked tenant
-        const { data: lineAccount } = await supabase
-          .from("tenant_line_accounts")
+        const { data: binding } = await supabase
+          .from("line_bindings")
           .select("tenant_id")
           .eq("line_user_id", lineUserId)
           .eq("status", "active")
-          .single();
+          .maybeSingle();
 
-        if (!lineAccount) {
+        if (!binding) {
           await replyLineMessage(replyToken, [
             {
               type: "text",
@@ -166,39 +166,73 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // Query pending bills
-        const { data: bills } = await supabase
-          .from("bills")
-          .select("id, title, due_date, total_amount, status")
-          .eq("tenant_id", lineAccount.tenant_id)
-          .eq("status", "pending")
-          .is("deleted_at", null)
-          .order("due_date", { ascending: true });
+        // Query tenant profile & active leases
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, name, phone")
+          .or(`id.eq.${binding.tenant_id}`);
+        const currentProfile = profs?.[0];
+        const cleanPhone = currentProfile?.phone ? String(currentProfile.phone).replace(/[^0-9]/g, '') : '';
 
-        if (!bills || bills.length === 0) {
+        // Query active leases
+        const { data: leases } = await supabase
+          .from("leases")
+          .select("id, property_id, start_date, end_date")
+          .or(`phone.eq.${cleanPhone},co_phone.eq.${cleanPhone}`)
+          .eq("status", "active")
+          .is("deleted_at", null);
+
+        const leaseIds = (leases || []).map((l: any) => l.id);
+
+        // Query pending payments
+        let payments: any[] = [];
+        if (leaseIds.length > 0) {
+          const { data: payData } = await supabase
+            .from("payments")
+            .select("id, title, due_date, amount, bill_type, status, property_name")
+            .in("lease_id", leaseIds)
+            .in("status", ["pending", "pending_approval", "tenant_submitted"])
+            .is("deleted_at", null)
+            .order("due_date", { ascending: true });
+          payments = payData || [];
+        }
+
+        if (payments.length === 0) {
           await replyLineMessage(replyToken, [
-            { type: "text", text: "✅ 您目前沒有未繳納的帳單，感謝您的準時繳納！" },
+            { type: "text", text: `✅ ${currentProfile?.name || '您好'}！您目前沒有未繳納之帳單，感謝您的準時繳納！` },
           ]);
         } else {
-          const billListText = bills
+          const statusLabels: Record<string, string> = {
+            pending: "⏳ 待繳納",
+            pending_approval: "🔍 房東審核中",
+            tenant_submitted: "🔍 房東審核中"
+          };
+          const billListText = payments
             .map(
               (b: any, idx: number) =>
-                `📌 帳單 ${idx + 1}：${b.title}\n💵 金額：NT$ ${Number(b.total_amount).toLocaleString()}\n📅 到期日：${b.due_date}`
+                `📌 帳單 ${idx + 1}：${b.title || '租金帳單'}\n🏠 房源：${b.property_name || '租賃套房'}\n💵 金額：NT$ ${Number(b.amount || 0).toLocaleString()}\n📅 到期日：${b.due_date || '依約定'}\n狀態：${statusLabels[b.status] || '待處理'}`
             )
             .join("\n\n");
 
           await replyLineMessage(replyToken, [
             {
               type: "text",
-              text: `📋 【待繳帳單查詢結果】\n\n${billListText}\n\n💡 繳款後請至系統或告知房東匯款末五碼進行核帳。`,
+              text: `📋 【${currentProfile?.name || '租客'} 待繳帳單清單】\n\n${billListText}\n\n💡 匯款後可於租客系統回報後五碼，或輸入「繳款資訊」查閱房東帳戶。`,
             },
           ]);
         }
+      } else if (text.includes("繳款") || text.includes("匯款") || text.includes("帳戶") || text === "2") {
+        await replyLineMessage(replyToken, [
+          {
+            type: "text",
+            text: "💳 【繳費方式說明】\n\n1. 現金交付：現場交付房東並於系統回報。\n2. 銀行轉帳：請登入租客系統「自主回報繳費」查閱專屬收款帳號，轉帳後填寫後五碼供核帳。\n\n如需協助可隨時與房東聯絡！",
+          },
+        ]);
       } else {
         await replyLineMessage(replyToken, [
           {
             type: "text",
-            text: "您好！我是智慧租屋管理小幫手。\n輸入「查詢帳單」可即時查詢待繳租金。\n輸入「綁定 <驗證碼>」可綁定您的租客帳號。",
+            text: "您好！我是智慧租屋管理小幫手 🤖\n\n請輸入以下關鍵字：\n👉 輸入「查詢帳單」：查詢本期應繳租金\n👉 輸入「繳款資訊」：查看繳費與匯款管道\n👉 輸入「綁定 <驗證碼>」：綁定租客系統帳號",
           },
         ]);
       }
