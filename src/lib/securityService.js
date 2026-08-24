@@ -387,9 +387,9 @@ export const redirectToLineLogin = (targetRole = 'tenant') => {
     sessionStorage.setItem('line_oauth_role', targetRole);
 
     const redirectUri = window.location.origin + window.location.pathname;
-    const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize/consent?response_type=code&client_id=${LINE_LOGIN_CHANNEL_ID}&redirect_uri=${encodeURIComponent(
+    const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_LOGIN_CHANNEL_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}&scope=profile%20openid&nonce=${nonce}&bot_prompt=normal`;
+    )}&state=${encodeURIComponent(state)}&scope=profile%20openid&nonce=${nonce}&prompt=consent&bot_prompt=normal`;
 
     window.location.href = lineAuthUrl;
   }
