@@ -363,6 +363,90 @@ export const logAuditEvent = async ({
       });
     }
   } catch (err) {
-    // 稽核日誌靜默捕捉，不洩漏敏感資訊
+    console.warn('Audit log write warning:', err);
+  }
+};
+
+// --- 6. LINE Login OAuth 2.0 授權登入流程 (LINE Login OpenID Connect) ---
+export const LINE_LOGIN_CHANNEL_ID = '2011232158';
+
+/**
+ * 導向 LINE Login 授權頁面
+ */
+export const redirectToLineLogin = (targetRole = 'tenant') => {
+  const state = `state_${targetRole}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const nonce = Math.random().toString(36).substring(2, 10);
+  
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('line_oauth_state', state);
+    sessionStorage.setItem('line_oauth_role', targetRole);
+
+    const redirectUri = window.location.origin + window.location.pathname;
+    const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_LOGIN_CHANNEL_ID}&redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}&state=${encodeURIComponent(state)}&scope=profile%20openid&nonce=${nonce}&bot_prompt=normal`;
+
+    window.location.href = lineAuthUrl;
+  }
+};
+
+/**
+ * 處理 LINE Login 授權回傳 (Code 交換 Token 及會員身分)
+ */
+export const handleLineOAuthCallback = async () => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+  const errorDescription = params.get('error_description');
+
+  if (error) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    throw new Error(errorDescription || `LINE 登入授權被取消或失敗 (${error})`);
+  }
+
+  if (!code || !state) {
+    return null;
+  }
+
+  const savedState = sessionStorage.getItem('line_oauth_state');
+  const targetRole = sessionStorage.getItem('line_oauth_role') || (state.includes('landlord') ? 'landlord' : 'tenant');
+
+  // 清除 URL 中的 code 與 state 保持乾淨
+  window.history.replaceState({}, document.title, window.location.pathname);
+  sessionStorage.removeItem('line_oauth_state');
+  sessionStorage.removeItem('line_oauth_role');
+
+  const redirectUri = window.location.origin + window.location.pathname;
+
+  // 呼叫 Edge Function: line-auth
+  try {
+    const res = await fetch('https://hpphlfmtyxrulirpyejp.supabase.co/functions/v1/line-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code,
+        redirectUri,
+        targetRole,
+      }),
+    });
+
+    const result = await res.json();
+    if (!res.ok || !result.success) {
+      throw new Error(result.error || 'LINE 驗證失敗');
+    }
+
+    return {
+      user: result.user,
+      isNewUser: result.isNewUser,
+      targetRole: result.user?.role || targetRole,
+      lineProfile: result.lineProfile,
+    };
+  } catch (err) {
+    console.error('Line OAuth exchange error:', err);
+    throw err;
   }
 };

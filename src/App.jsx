@@ -15,6 +15,8 @@ import {
   logoutUser,
   transitionPaymentStatus,
   generateLineBindingToken,
+  redirectToLineLogin,
+  handleLineOAuthCallback,
   logAuditEvent,
   PaymentStatus
 } from './lib/securityService';
@@ -737,6 +739,43 @@ export default function App() {
     setSearchQuery('');
     setIsMobileMenuOpen(false);
   }, [role]);
+
+  // --- LINE OAuth 2.0 Authorization Callback Hook ---
+  useEffect(() => {
+    const processLineOAuth = async () => {
+      try {
+        const oauthResult = await handleLineOAuthCallback();
+        if (oauthResult && oauthResult.user) {
+          const u = oauthResult.user;
+          setCurrentUser({
+            id: u.id,
+            phone: u.phone,
+            user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
+          });
+          if (u.role === 'landlord') {
+            setRole('admin');
+            setCurrentLandlordId(u.id);
+            setCurrentLandlordPhone(u.phone);
+            setActiveTab('dashboard');
+          } else {
+            setRole('tenant');
+            setCurrentTenantPhone(u.phone);
+            setActiveTab('portal');
+          }
+          showToast(
+            oauthResult.isNewUser
+              ? `🎉 歡迎新會員！已成功透過 LINE 建立帳號並登入！`
+              : `🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`,
+            'success'
+          );
+        }
+      } catch (oauthErr) {
+        console.warn('LINE OAuth callback processing notice:', oauthErr);
+        showToast(oauthErr.message || 'LINE 登入授權失敗', 'error');
+      }
+    };
+    processLineOAuth();
+  }, []);
 
   const showToast = (message, type = 'success') => {
     const id = Date.now();
@@ -2992,21 +3031,20 @@ export default function App() {
                           <div className="w-full border-t border-slate-200" />
                         </div>
                         <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或直接前往 LINE 官方帳號</span>
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用 LINE 帳號登入</span>
                         </div>
                       </div>
 
-                      <a
-                        href="https://line.me/R/ti/p/@888mppnm"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer text-center no-underline"
+                      <button
+                        type="button"
+                        onClick={() => redirectToLineLogin('landlord')}
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2.5 text-sm focus:outline-none cursor-pointer text-center"
                       >
                         <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                           <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
                         </svg>
-                        <span>直接跳轉 LINE Bot (@888mppnm)</span>
-                      </a>
+                        <span>LINE 帳號一鍵授權登入</span>
+                      </button>
                     </form>
                   </div>
                 ) : (
@@ -3122,21 +3160,20 @@ export default function App() {
                           <div className="w-full border-t border-slate-200" />
                         </div>
                         <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或直接前往 LINE 官方帳號</span>
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用 LINE 帳號登入</span>
                         </div>
                       </div>
 
-                      <a
-                        href="https://line.me/R/ti/p/@888mppnm"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer text-center no-underline"
+                      <button
+                        type="button"
+                        onClick={() => redirectToLineLogin('tenant')}
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2.5 text-sm focus:outline-none cursor-pointer text-center"
                       >
                         <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                           <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
                         </svg>
-                        <span>直接跳轉 LINE Bot (@888mppnm)</span>
-                      </a>
+                        <span>LINE 帳號一鍵授權登入</span>
+                      </button>
                     </form>
                   </div>
                 ) : (
