@@ -648,56 +648,115 @@ export default function App() {
     const applySession = async (session) => {
       if (!mounted) return;
       const user = session?.user;
-      if (!user) {
-        setCurrentUser(null);
+
+      // 1. 若 Supabase Auth 存在有效 Session
+      if (user) {
+        const isSuperadmin = user.app_metadata?.role === 'superadmin';
+        if (isSuperadmin) {
+          setCurrentUser(user);
+          setRole('superadmin');
+          setActiveTab('landlords');
+          setIsSuperadminAuthenticated(true);
+          try {
+            localStorage.setItem('app_auth_session', JSON.stringify({ id: user.id, role: 'superadmin', name: '平台總管理員' }));
+          } catch (e) {}
+          return;
+        }
+
+        const metaPhone = (user.user_metadata?.phone || user.email?.split('@')[0] || '').replace(/[^0-9]/g, '');
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, role, phone, name')
+          .or(`id.eq.${user.id},phone.eq.${metaPhone}`);
+        const profile = profs?.[0];
+        if (!mounted) return;
+
+        // ⚠️ 若會員在 profiles 資料表中已被刪除/註銷，強制登出並清除殘留 Session
+        if (!profile) {
+          try {
+            await supabase.auth.signOut();
+            localStorage.removeItem('app_auth_session');
+          } catch (e) {}
+          setCurrentUser(null);
+          setRole('portal');
+          setCurrentLandlordId(null);
+          setCurrentLandlordPhone(null);
+          setCurrentTenantPhone(null);
+          return;
+        }
+
+        const userRole = profile.role || 'tenant';
+        const cleanPhone = String(profile.phone || metaPhone).replace(/[^0-9]/g, '');
+
         setIsSuperadminAuthenticated(false);
-        return;
-      }
-
-      setCurrentUser(user);
-      const isSuperadmin = user.app_metadata?.role === 'superadmin';
-      if (isSuperadmin) {
-        setRole('superadmin');
-        setActiveTab('landlords');
-        setIsSuperadminAuthenticated(true);
-        return;
-      }
-
-      const metaPhone = (user.user_metadata?.phone || user.email?.split('@')[0] || '').replace(/[^0-9]/g, '');
-      const { data: profs } = await supabase
-        .from('profiles')
-        .select('id, role, phone, name')
-        .or(`id.eq.${user.id},phone.eq.${metaPhone}`);
-      const profile = profs?.[0];
-      if (!mounted) return;
-
-      // ⚠️ 若會員在 profiles 資料表中已被刪除/註銷，強制登出並清除殘留 Session
-      if (!profile) {
+        if (userRole === 'landlord' || userRole === 'admin') {
+          setRole('admin');
+          setActiveTab('dashboard');
+          setCurrentLandlordId(profile.id);
+          setCurrentLandlordPhone(cleanPhone);
+        } else {
+          setRole('tenant');
+          setActiveTab('portal');
+          setCurrentTenantPhone(cleanPhone);
+        }
         try {
-          await supabase.auth.signOut();
+          localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
         } catch (e) {}
-        setCurrentUser(null);
-        setRole('portal');
-        setCurrentLandlordId(null);
-        setCurrentLandlordPhone(null);
-        setCurrentTenantPhone(null);
         return;
       }
 
-      const userRole = profile.role || 'tenant';
-      const cleanPhone = String(profile.phone || metaPhone).replace(/[^0-9]/g, '');
+      // 2. 若無 Supabase Auth Session，檢查 Persistent Local Session (如 LINE 登入或手機登入)
+      const savedSessionStr = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (savedSessionStr) {
+        try {
+          const savedSession = JSON.parse(savedSessionStr);
+          if (savedSession && (savedSession.id || savedSession.phone)) {
+            if (savedSession.role === 'superadmin') {
+              setCurrentUser({ id: 'usr_superadmin', phone: '0900000000', role: 'superadmin' });
+              setRole('superadmin');
+              setActiveTab('landlords');
+              setIsSuperadminAuthenticated(true);
+              return;
+            }
 
-      setIsSuperadminAuthenticated(false);
-      if (userRole === 'landlord' || userRole === 'admin') {
-        setRole('admin');
-        setActiveTab('dashboard');
-        setCurrentLandlordId(profile.id);
-        setCurrentLandlordPhone(cleanPhone);
-      } else {
-        setRole('tenant');
-        setActiveTab('portal');
-        setCurrentTenantPhone(cleanPhone);
+            // 向雲端 profiles 核實該會員是否存在且未被刪除
+            const query = savedSession.id ? `id.eq.${savedSession.id},phone.eq.${savedSession.phone}` : `phone.eq.${savedSession.phone}`;
+            const { data: profs } = await supabase.from('profiles').select('id, role, phone, name').or(query);
+            const profile = profs?.[0];
+            if (!mounted) return;
+
+            if (profile) {
+              const userRole = profile.role || savedSession.role || 'tenant';
+              const cleanPhone = String(profile.phone || savedSession.phone).replace(/[^0-9]/g, '');
+
+              setCurrentUser({ id: profile.id, phone: cleanPhone, user_metadata: { role: userRole, name: profile.name } });
+              setIsSuperadminAuthenticated(false);
+
+              if (userRole === 'landlord' || userRole === 'admin') {
+                setRole('admin');
+                setActiveTab('dashboard');
+                setCurrentLandlordId(profile.id);
+                setCurrentLandlordPhone(cleanPhone);
+              } else {
+                setRole('tenant');
+                setActiveTab('portal');
+                setCurrentTenantPhone(cleanPhone);
+              }
+              return;
+            } else {
+              // 會員已遭刪除/註銷
+              localStorage.removeItem('app_auth_session');
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to restore local session:', err);
+        }
       }
+
+      // 3. 無登入狀態
+      setCurrentUser(null);
+      setIsSuperadminAuthenticated(false);
+      setRole('portal');
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
@@ -791,6 +850,9 @@ export default function App() {
               setCurrentTenantPhone(u.phone);
               setActiveTab('portal');
             }
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
+            } catch (e) {}
             showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
           }
         }
@@ -1074,6 +1136,10 @@ export default function App() {
         setCurrentTenantLeaseId(null);
       }
 
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({ id: authResult.profile?.id, phone: cleanPhone, name: authResult.profile?.name, role: 'tenant' }));
+      } catch (e) {}
+
       setTenantLoginPhone('');
       setTenantLoginPassword('');
       setActiveTab('portal');
@@ -1116,6 +1182,10 @@ export default function App() {
       setCurrentLandlordId(targetId);
       setCurrentLandlordPhone(String(authResult.profile.phone || cleanInputPhone).replace(/[^0-9]/g, ''));
 
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({ id: targetId, phone: cleanInputPhone, name: authResult.profile?.name, role: 'landlord' }));
+      } catch (e) {}
+
       setActiveTab('dashboard');
       if (matchedLandlord) {
         setLandlordLoginPhone('');
@@ -1151,6 +1221,10 @@ export default function App() {
       setCurrentUser(authResult.user);
       setRole('superadmin');
       setIsSuperadminAuthenticated(true);
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({ id: 'usr_superadmin', phone: cleanPhone, name: '平台總管理員', role: 'superadmin' }));
+      } catch (e) {}
+
       setActiveTab('landlords');
       setSuperadminLoginPhone('');
       setSuperadminPasswordInput('');

@@ -253,6 +253,16 @@ export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) =>
  * 登出
  */
 export const logoutUser = async () => {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('app_auth_session');
+    localStorage.removeItem('line_linked_user_id');
+    localStorage.removeItem('line_linked_phone');
+    localStorage.removeItem('line_linked_name');
+    localStorage.removeItem('line_linked_role');
+  }
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.clear();
+  }
   if (isSupabaseConfigured) {
     try {
       await supabase.auth.signOut();
