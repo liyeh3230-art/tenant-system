@@ -2992,20 +2992,21 @@ export default function App() {
                           <div className="w-full border-t border-slate-200" />
                         </div>
                         <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用第三方帳號</span>
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或直接前往 LINE 官方帳號</span>
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleOpenLineLoginModal('landlord')}
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                      <a
+                        href="https://line.me/R/ti/p/@888mppnm"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer text-center no-underline"
                       >
                         <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                           <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
                         </svg>
-                        <span>使用 LINE 帳號一鍵登入</span>
-                      </button>
+                        <span>直接跳轉 LINE Bot (@888mppnm)</span>
+                      </a>
                     </form>
                   </div>
                 ) : (
@@ -3121,20 +3122,21 @@ export default function App() {
                           <div className="w-full border-t border-slate-200" />
                         </div>
                         <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用第三方帳號</span>
+                          <span className="bg-white px-2 text-slate-400 font-semibold">或直接前往 LINE 官方帳號</span>
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleOpenLineLoginModal('tenant')}
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                      <a
+                        href="https://line.me/R/ti/p/@888mppnm"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer text-center no-underline"
                       >
                         <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                           <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
                         </svg>
-                        <span>使用 LINE 帳號一鍵登入</span>
-                      </button>
+                        <span>直接跳轉 LINE Bot (@888mppnm)</span>
+                      </a>
                     </form>
                   </div>
                 ) : (
