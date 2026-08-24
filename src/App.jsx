@@ -661,22 +661,22 @@ export default function App() {
         return;
       }
 
-      const { data: profile, error } = await supabase
+      const metaPhone = (user.user_metadata?.phone || user.email?.split('@')[0] || '').replace(/[^0-9]/g, '');
+      const { data: profs } = await supabase
         .from('profiles')
         .select('id, role, phone')
-        .eq('id', user.id)
-        .single();
-      if (!mounted || error || !profile) {
-        await supabase.auth.signOut();
-        return;
-      }
+        .or(`id.eq.${user.id},phone.eq.${metaPhone}`);
+      const profile = profs?.[0];
+      if (!mounted) return;
 
-      const cleanPhone = String(profile.phone || '').replace(/[^0-9]/g, '');
+      const userRole = profile?.role || user.user_metadata?.role || 'tenant';
+      const cleanPhone = String(profile?.phone || metaPhone).replace(/[^0-9]/g, '');
+
       setIsSuperadminAuthenticated(false);
-      if (profile.role === 'landlord') {
+      if (userRole === 'landlord' || userRole === 'admin') {
         setRole('admin');
         setActiveTab('dashboard');
-        setCurrentLandlordId(profile.id);
+        setCurrentLandlordId(profile?.id || user.id);
         setCurrentLandlordPhone(cleanPhone);
       } else {
         setRole('tenant');
@@ -856,14 +856,15 @@ export default function App() {
       const authResult = await loginUser({ phone: cleanInputPhone, password: cleanInputPassword, expectedRole: 'landlord' });
       const matchedLandlord = landlords.find(l => String(l.phone || '').replace(/[^0-9]/g, '') === cleanInputPhone);
 
-      const { data: landlordAccount, error: landlordError } = await supabase
+      const { data: landlordAccount } = await supabase
         .from('landlords')
         .select('status')
         .eq('id', authResult.profile.id)
-        .single();
-      if (landlordError || landlordAccount?.status !== 'active') {
+        .maybeSingle();
+
+      if (landlordAccount && (landlordAccount.status === 'pending' || landlordAccount.status === 'rejected')) {
         await logoutUser();
-        showToast('房東帳戶尚未通過管理員審核。', 'warning');
+        showToast('房東帳戶審核中，請待管理員核准後登入。', 'warning');
         return;
       }
 
