@@ -27,15 +27,6 @@ export const sanitizeNumber = (input, min = 0, fallback = 0) => {
   return val;
 };
 
-// --- 密碼單向雜湊與驗證 (SHA-256 Crypto Hash) ---
-export const hashPassword = async (password, salt = 'rental_sec_v2026') => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + salt);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-};
-
 const getAuthEmail = (phone) => `${phone.replace(/[^0-9]/g, '')}@rental-auth.internal`;
 
 // --- 2. 身份驗證與授權 (Supabase Auth & RBAC) ---
@@ -55,7 +46,7 @@ export const getGenericAuthErrorMessage = (error) => {
 /**
  * 租客 / 房東註冊
  */
-export const registerUser = async ({ email, phone, password, name, role = 'tenant' }) => {
+export const registerUser = async ({ email, phone, password, name, requestedRole = 'tenant' }) => {
   const safePhone = phone.replace(/[^0-9]/g, '');
   const cleanEmail = email || getAuthEmail(safePhone);
 
@@ -66,96 +57,41 @@ export const registerUser = async ({ email, phone, password, name, role = 'tenan
     throw new Error('密碼長度至少需 6 碼以上');
   }
 
-  const passwordHash = await hashPassword(password);
-  let userId = `usr_${safePhone}_${Date.now()}`;
-  let registeredViaSupabase = false;
+  if (!isSupabaseConfigured) {
+    throw new Error('系統尚未完成安全的 Supabase 設定，暫時無法註冊。');
+  }
 
-  if (isSupabaseConfigured) {
-    try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: password,
-        options: {
-          data: {
-            phone: safePhone,
-            name: sanitizeText(name),
-            role: role,
-          },
-        },
-      });
-
-      if (!authError && authData?.user?.id) {
-        userId = authData.user.id;
-        registeredViaSupabase = true;
-      }
-    } catch (e) {
-      console.warn('Supabase Auth SignUp rate-limited or warning, fallback to resilient profile registration:', e);
-    }
-
-    // 寫入/更新 Supabase profiles 與對應角色的資料表 (支援跨瀏覽器登入比對)
-    try {
-      await supabase.from('profiles').upsert({
-        id: userId,
-        role: role,
-        name: sanitizeText(name),
+  // 僅允許「租客」或「申請成為房東」；絕不接受前端指定管理員角色。
+  const safeRequestedRole = requestedRole === 'landlord' ? 'landlord' : 'tenant';
+  const { data, error } = await supabase.auth.signUp({
+    email: cleanEmail,
+    password,
+    options: {
+      data: {
         phone: safePhone,
-        password_hash: passwordHash,
-        created_at: new Date().toISOString(),
-      });
+        name: sanitizeText(name),
+        requested_role: safeRequestedRole,
+      },
+    },
+  });
 
-      if (role === 'landlord') {
-        await supabase.from('landlords').upsert({
-          id: userId,
-          name: sanitizeText(name),
-          phone: safePhone,
-          status: 'approved',
-          ad_listing_enabled: true,
-        });
-      } else if (role === 'tenant') {
-        await supabase.from('tenants').upsert({
-          id: userId,
-          status: 'active',
-        });
-      }
-    } catch (dbErr) {
-      console.warn('Profiles upsert warning:', dbErr);
-    }
+  if (error || !data.user) {
+    throw error || new Error('註冊失敗，請稍後再試。');
   }
 
-  // 同步維護安全認證存儲 (含雜湊密碼)
-  const storageKey = role === 'landlord' ? 'rental_landlords' : 'rental_registered_tenants';
-  let users = [];
-  try {
-    users = JSON.parse(localStorage.getItem(storageKey) || '[]');
-  } catch {
-    users = [];
-  }
-
-  const existingIdx = users.findIndex(u => (u.phone || '').replace(/[^0-9]/g, '') === safePhone);
-  const userRecord = {
-    id: userId,
-    name: sanitizeText(name),
-    phone: safePhone,
-    passwordHash: passwordHash,
-    isSelfRegistered: true,
-    role: role,
-    status: 'approved',
+  // profiles、tenants、landlords 均由資料庫 trigger 以 auth.uid() 建立。
+  // 瀏覽器不再能自行 upsert profile、寫入角色或儲存密碼雜湊。
+  return {
+    user: data.user,
+    hasSession: Boolean(data.session),
+    needsEmailConfirmation: !data.session,
   };
-
-  if (existingIdx >= 0) {
-    users[existingIdx] = { ...users[existingIdx], ...userRecord };
-  } else {
-    users.push(userRecord);
-  }
-  localStorage.setItem(storageKey, JSON.stringify(users));
-
-  return userRecord;
 };
 
 /**
  * 登入認證 (由 Supabase Auth 優先驗證，並具備雲端 profiles 與本地加密驗證存儲)
  */
-export const loginUser = async ({ phone, password, role = 'tenant' }) => {
+export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) => {
   const safePhone = phone.replace(/[^0-9]/g, '');
   const cleanEmail = getAuthEmail(safePhone);
 
@@ -163,89 +99,40 @@ export const loginUser = async ({ phone, password, role = 'tenant' }) => {
     throw new Error('帳號或密碼錯誤，請重新輸入');
   }
 
-  const inputHash = await hashPassword(password);
-  let loggedInUser = null;
-
-  // 1. 優先嘗試 Supabase Auth 認證
-  if (isSupabaseConfigured) {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password: password,
-      });
-
-      if (!error && data?.user) {
-        const userId = data.user.id;
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id, role, name, phone, avatar_url')
-          .eq('id', userId)
-          .single();
-
-        loggedInUser = {
-          user: data.user,
-          profile: profile || { id: userId, role, phone: safePhone, name: data.user.user_metadata?.name || '會員' },
-        };
-      }
-    } catch (e) {
-      console.warn('Supabase signInWithPassword fallback:', e);
-    }
+  if (!isSupabaseConfigured) {
+    throw new Error('系統尚未完成安全的 Supabase 設定，暫時無法登入。');
   }
 
-  // 2. 若 Supabase Auth 未通過，檢查 Supabase 雲端 profiles 表 (支援跨瀏覽器/多裝置直接登入)
-  if (!loggedInUser && isSupabaseConfigured) {
-    try {
-      const { data: cloudProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('phone', safePhone)
-        .maybeSingle();
-
-      if (cloudProfile && cloudProfile.password_hash === inputHash) {
-        loggedInUser = {
-          user: { id: cloudProfile.id },
-          profile: {
-            id: cloudProfile.id,
-            name: cloudProfile.name,
-            phone: cloudProfile.phone,
-            role: cloudProfile.role || role,
-            status: 'approved',
-            isSelfRegistered: true
-          },
-        };
-      }
-    } catch (cloudErr) {
-      console.warn('Cloud profile login check fallback:', cloudErr);
-    }
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: cleanEmail,
+    password,
+  });
+  if (error || !data.user) {
+    throw error || new Error('帳號或密碼錯誤，請重新輸入');
   }
 
-  // 3. 若雲端未連線或離線，使用本地加密驗證存儲
-  if (!loggedInUser) {
-    const storageKey = role === 'landlord' ? 'rental_landlords' : 'rental_registered_tenants';
-    let users = [];
-    try {
-      users = JSON.parse(localStorage.getItem(storageKey) || '[]');
-    } catch {
-      users = [];
-    }
-
-    const matchedUser = users.find(u => (u.phone || '').replace(/[^0-9]/g, '') === safePhone);
-
-    if (!matchedUser || !matchedUser.isSelfRegistered || !matchedUser.passwordHash) {
-      throw new Error('帳號或密碼錯誤，請重新輸入');
-    }
-
-    if (matchedUser.passwordHash !== inputHash) {
-      throw new Error('帳號或密碼錯誤，請重新輸入');
-    }
-
-    loggedInUser = {
-      user: { id: matchedUser.id },
-      profile: matchedUser,
-    };
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, role, name, phone, avatar_url')
+    .eq('id', data.user.id)
+    .single();
+  if (profileError || !profile) {
+    await supabase.auth.signOut();
+    throw new Error('帳戶資料尚未初始化，請稍後重試或聯絡管理員。');
   }
 
-  return loggedInUser;
+  const isSuperadmin = data.user.app_metadata?.role === 'superadmin';
+  if (expectedRole === 'superadmin') {
+    if (!isSuperadmin) {
+      await supabase.auth.signOut();
+      throw new Error('此帳戶沒有系統管理員權限。');
+    }
+  } else if (profile.role !== expectedRole) {
+    await supabase.auth.signOut();
+    throw new Error('帳戶身分與登入入口不符。');
+  }
+
+  return { user: data.user, profile, isSuperadmin };
 };
 
 /**
@@ -276,30 +163,20 @@ export const PaymentStatus = {
  * 透過 Server-Side RPC 進行付款狀態轉換
  */
 export const transitionPaymentStatus = async ({ paymentId, newStatus, metadata = {} }) => {
-  if (isSupabaseConfigured) {
-    try {
-      const updateData = {
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      };
-      if (newStatus === PaymentStatus.PAID) {
-        updateData.paid_date = new Date().toISOString().split('T')[0];
-      }
-      await supabase.from('payments').update(updateData).eq('id', paymentId);
-
-      const { data, error } = await supabase.rpc('transition_payment_status', {
-        p_payment_id: paymentId,
-        p_new_status: newStatus,
-        p_metadata: metadata,
-      });
-
-      if (!error && data) return data;
-    } catch (rpcErr) {
-      console.warn('RPC transition_payment_status fallback:', rpcErr);
-    }
+  if (!isSupabaseConfigured) {
+    throw new Error('系統尚未完成安全設定，無法變更付款狀態。');
   }
 
-  return { success: true, paymentId, newStatus };
+  // 狀態轉換只准由資料庫函式執行；禁止先在瀏覽器直接 update payments。
+  const { data, error } = await supabase.rpc('transition_payment_status', {
+    p_payment_id: paymentId,
+    p_new_status: newStatus,
+    p_metadata: metadata,
+  });
+  if (error || !data) {
+    throw error || new Error('付款狀態更新失敗。');
+  }
+  return data;
 };
 
 // --- 4. LINE 一次性短效 Token 綁定 (LINE Security) ---
@@ -308,24 +185,17 @@ export const transitionPaymentStatus = async ({ paymentId, newStatus, metadata =
  * 產生 10 分鐘一次性短效 Token
  */
 export const generateLineBindingToken = async (tenantId) => {
-  if (isSupabaseConfigured) {
-    try {
-      const { data, error } = await supabase.rpc('generate_line_binding_token', {
-        p_tenant_id: tenantId,
-      });
-
-      if (!error && data) return data;
-    } catch (e) {
-      console.warn('generate_line_binding_token fallback:', e);
-    }
+  if (!isSupabaseConfigured) {
+    throw new Error('系統尚未完成安全設定，無法產生 LINE 綁定碼。');
   }
 
-  const mockToken = Math.random().toString(36).substring(2, 10).toUpperCase();
-  return {
-    token: mockToken,
-    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-    expiresInSeconds: 600,
-  };
+  const { data, error } = await supabase.rpc('generate_line_binding_token', {
+    p_tenant_id: tenantId,
+  });
+  if (error || !data) {
+    throw error || new Error('LINE 綁定碼產生失敗。');
+  }
+  return data;
 };
 
 /**

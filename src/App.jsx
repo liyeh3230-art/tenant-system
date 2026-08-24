@@ -10,7 +10,6 @@ import {
 import {
   sanitizeText,
   sanitizeNumber,
-  hashPassword,
   registerUser,
   loginUser,
   logoutUser,
@@ -63,45 +62,10 @@ const MOCK_HOUSE_PHOTOS = [
   "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80"
 ];
 
-// --- 登入會話持久化管理 (Session Persistence Helper - 重新整理保持登入狀態) ---
-const getSavedAuthSession = () => {
-  try {
-    const raw = localStorage.getItem('rental_auth_session');
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
-
-const saveAuthSession = (sessionData) => {
-  try {
-    if (!sessionData || sessionData.role === 'portal') {
-      localStorage.removeItem('rental_auth_session');
-    } else {
-      localStorage.setItem('rental_auth_session', JSON.stringify({
-        ...sessionData,
-        updatedAt: Date.now()
-      }));
-    }
-  } catch (e) {
-    console.warn('Failed to save auth session:', e);
-  }
-};
-
-const clearAuthSession = () => {
-  try {
-    localStorage.removeItem('rental_auth_session');
-  } catch (e) {
-    console.warn('Failed to clear auth session:', e);
-  }
-};
-
 export default function App() {
-  const savedSession = getSavedAuthSession();
   const [currentUser, setCurrentUser] = useState(null);
-  const [role, setRole] = useState(savedSession?.role || 'portal');
-  const [activeTab, setActiveTab] = useState(savedSession?.activeTab || (savedSession?.role === 'superadmin' ? 'landlords' : 'dashboard'));
+  const [role, setRole] = useState('portal');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
 
   const [landlords, setLandlords] = useState([]);
@@ -110,10 +74,10 @@ export default function App() {
   const [payments, setPayments] = useState([]);
   const [historicalLeases, setHistoricalLeases] = useState([]);
 
-  const [currentLandlordId, setCurrentLandlordId] = useState(savedSession?.currentLandlordId || null);
-  const [currentLandlordPhone, setCurrentLandlordPhone] = useState(savedSession?.currentLandlordPhone || null);
-  const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(savedSession?.currentTenantLeaseId || null);
-  const [currentTenantPhone, setCurrentTenantPhone] = useState(savedSession?.currentTenantPhone || null);
+  const [currentLandlordId, setCurrentLandlordId] = useState(null);
+  const [currentLandlordPhone, setCurrentLandlordPhone] = useState(null);
+  const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(null);
+  const [currentTenantPhone, setCurrentTenantPhone] = useState(null);
 
   const [landlordLoginPhone, setLandlordLoginPhone] = useState('');
   const [landlordLoginPassword, setLandlordLoginPassword] = useState('');
@@ -220,8 +184,9 @@ export default function App() {
   const [landlordSelfName, setLandlordSelfName] = useState('');
   const [landlordSelfPhone, setLandlordSelfPhone] = useState('');
   const [landlordSelfPassword, setLandlordSelfPassword] = useState('');
-  // Superadmin Security Authentication States (密碼加密保護，不在前端存放明文)
-  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(savedSession?.isSuperadminAuthenticated || false);
+  // 只在 Supabase Auth 的 app_metadata.role = superadmin 時才設為 true；不存入 localStorage。
+  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(false);
+  const [superadminLoginPhone, setSuperadminLoginPhone] = useState('');
   const [superadminPasswordInput, setSuperadminPasswordInput] = useState('');
   const [superadminLoginLoading, setSuperadminLoginLoading] = useState(false);
   const [showSuperadminPassword, setShowSuperadminPassword] = useState(false);
@@ -673,30 +638,63 @@ export default function App() {
     fetchSupabaseData();
   }, [fetchSupabaseData]);
 
-  // --- 2. 初始化 Auth 狀態 (只在元件掛載時執行一次 []) ---
+  // --- 2. 初始化 Auth 狀態：以 Supabase session 與受 RLS 保護的 profile 為唯一來源 ---
   useEffect(() => {
-    const initAuth = async () => {
-      if (isSupabaseConfigured) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const user = session.user;
-          setCurrentUser(user);
-          const metaRole = user.user_metadata?.role || 'tenant';
-          const metaPhone = user.user_metadata?.phone || '';
-          setRole(metaRole === 'landlord' ? 'admin' : metaRole);
-          if (metaRole === 'landlord') {
-            const cleanPhone = metaPhone.replace(/[^0-9]/g, '');
-            const { data: profs } = await supabase.from('profiles').select('*').or(`id.eq.${user.id},phone.eq.${cleanPhone}`);
-            const matchedProf = profs?.[0];
-            setCurrentLandlordId(matchedProf?.id || user.id);
-            if (cleanPhone) setCurrentLandlordPhone(cleanPhone);
-          } else if (metaRole === 'tenant') {
-            setCurrentTenantPhone(metaPhone);
-          }
-        }
+    if (!isSupabaseConfigured) return undefined;
+
+    let mounted = true;
+    const applySession = async (session) => {
+      if (!mounted) return;
+      const user = session?.user;
+      if (!user) {
+        setCurrentUser(null);
+        setIsSuperadminAuthenticated(false);
+        return;
+      }
+
+      setCurrentUser(user);
+      const isSuperadmin = user.app_metadata?.role === 'superadmin';
+      if (isSuperadmin) {
+        setRole('superadmin');
+        setActiveTab('landlords');
+        setIsSuperadminAuthenticated(true);
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('id, role, phone')
+        .eq('id', user.id)
+        .single();
+      if (!mounted || error || !profile) {
+        await supabase.auth.signOut();
+        return;
+      }
+
+      const cleanPhone = String(profile.phone || '').replace(/[^0-9]/g, '');
+      setIsSuperadminAuthenticated(false);
+      if (profile.role === 'landlord') {
+        setRole('admin');
+        setActiveTab('dashboard');
+        setCurrentLandlordId(profile.id);
+        setCurrentLandlordPhone(cleanPhone);
+      } else {
+        setRole('tenant');
+        setActiveTab('portal');
+        setCurrentTenantPhone(cleanPhone);
       }
     };
-    initAuth();
+
+    supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // 避免在 Supabase callback 內直接發出其他 auth 呼叫。
+      setTimeout(() => applySession(session), 0);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // --- 3. 穩定掛載 Realtime 頻道 (掛載一次，透過 Ref 呼叫最新 fetchSupabaseData，避免重複建立連線) ---
@@ -721,23 +719,6 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, []);
-
-  // 監聽並自動同步當前登入狀態至 localStorage (重新整理免重新登入)
-  useEffect(() => {
-    if (role === 'portal') {
-      clearAuthSession();
-    } else {
-      saveAuthSession({
-        role,
-        activeTab,
-        currentLandlordId,
-        currentLandlordPhone,
-        currentTenantPhone,
-        currentTenantLeaseId,
-        isSuperadminAuthenticated
-      });
-    }
-  }, [role, activeTab, currentLandlordId, currentLandlordPhone, currentTenantPhone, currentTenantLeaseId, isSuperadminAuthenticated]);
 
   useEffect(() => {
     if (role === 'admin') {
@@ -771,9 +752,13 @@ export default function App() {
   const [lineBindingLoading, setLineBindingLoading] = useState(false);
 
   const handleOpenLineBinding = async () => {
+    if (!currentUser?.id) {
+      showToast('請先完成安全登入後再產生 LINE 綁定碼。', 'error');
+      return;
+    }
     setLineBindingLoading(true);
     try {
-      const tokenResult = await generateLineBindingToken(currentTenantPhone || 'tenant_user');
+      const tokenResult = await generateLineBindingToken(currentUser.id);
       setLineBindingTokenData(tokenResult);
       setLineBindingModalOpen(true);
     } catch (err) {
@@ -804,31 +789,17 @@ export default function App() {
         name: cleanName,
         phone: cleanPhone,
         password: password,
-        role: 'tenant'
+        requestedRole: 'tenant'
       });
-
-      const existingIndex = registeredTenants.findIndex(t => t.phone.replace(/[^0-9]/g, '') === cleanPhone);
-      const newTenant = {
-        name: cleanName,
-        phone: cleanPhone,
-        passwordHash: registeredResult?.passwordHash,
-        isSelfRegistered: true
-      };
-
-      if (existingIndex >= 0) {
-        const updated = [...registeredTenants];
-        updated[existingIndex] = newTenant;
-        setRegisteredTenants(updated);
-      } else {
-        setRegisteredTenants([...registeredTenants, newTenant]);
-      }
 
       setTenantSelfName('');
       setTenantSelfPhone('');
       setTenantSelfPassword('');
       setTenantAuthMode('login');
       setTenantLoginPhone(cleanPhone);
-      showToast('🎉 註冊成功！請使用電話與密碼進行登入。', 'success');
+      showToast(registeredResult.needsEmailConfirmation
+        ? '註冊成功！請先完成信箱驗證後再登入。'
+        : '🎉 註冊成功！請使用電話與密碼進行登入。', 'success');
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', 'error');
     }
@@ -845,8 +816,9 @@ export default function App() {
     }
 
     try {
-      const authResult = await loginUser({ phone: cleanPhone, password, role: 'tenant' });
-      setCurrentTenantPhone(cleanPhone);
+      const authResult = await loginUser({ phone: cleanPhone, password, expectedRole: 'tenant' });
+      setCurrentUser(authResult.user);
+      setCurrentTenantPhone(String(authResult.profile.phone || cleanPhone).replace(/[^0-9]/g, ''));
 
       const userLeases = leases.filter(l =>
         l.phone.replace(/[^0-9]/g, '') === cleanPhone ||
@@ -881,18 +853,27 @@ export default function App() {
     }
 
     try {
-      const authResult = await loginUser({ phone: cleanInputPhone, password: cleanInputPassword, role: 'landlord' });
+      const authResult = await loginUser({ phone: cleanInputPhone, password: cleanInputPassword, expectedRole: 'landlord' });
       const matchedLandlord = landlords.find(l => String(l.phone || '').replace(/[^0-9]/g, '') === cleanInputPhone);
 
-      const targetId = matchedLandlord?.id || authResult?.profile?.id || `LND_${cleanInputPhone}`;
+      const { data: landlordAccount, error: landlordError } = await supabase
+        .from('landlords')
+        .select('status')
+        .eq('id', authResult.profile.id)
+        .single();
+      if (landlordError || landlordAccount?.status !== 'active') {
+        await logoutUser();
+        showToast('房東帳戶尚未通過管理員審核。', 'warning');
+        return;
+      }
+
+      const targetId = authResult.profile.id;
+      setCurrentUser(authResult.user);
       setCurrentLandlordId(targetId);
-      setCurrentLandlordPhone(cleanInputPhone);
+      setCurrentLandlordPhone(String(authResult.profile.phone || cleanInputPhone).replace(/[^0-9]/g, ''));
 
       setActiveTab('dashboard');
       if (matchedLandlord) {
-        if (matchedLandlord.status === 'pending') {
-          setLandlords(prev => prev.map(l => l.id === matchedLandlord.id ? { ...l, status: 'approved' } : l));
-        }
         setLandlordLoginPhone('');
         setLandlordLoginPassword('');
         showToast(`歡迎回來，${matchedLandlord.name} 房東！`, 'success');
@@ -913,49 +894,23 @@ export default function App() {
 
   const handleSuperadminLogin = async (e) => {
     if (e) e.preventDefault();
+    const cleanPhone = String(superadminLoginPhone || '').replace(/[^0-9]/g, '').trim();
     const cleanPwd = String(superadminPasswordInput || '').trim();
-    if (!cleanPwd) {
-      showToast('請輸入系統管理員授權密碼！', 'error');
+    if (!cleanPhone || !cleanPwd) {
+      showToast('請輸入管理員電話與密碼！', 'error');
       return;
     }
 
     setSuperadminLoginLoading(true);
     try {
-      // 使用 SHA-256 加鹽雜湊運算，前端不存放任何明文密碼
-      const inputHash = await hashPassword(cleanPwd);
-      let isValid = false;
-
-      // 1. 優先比對 Supabase 雲端 profiles 中的 superadmin 安全雜湊
-      if (isSupabaseConfigured) {
-        try {
-          const { data: adminProfile } = await supabase
-            .from('profiles')
-            .select('password_hash')
-            .eq('role', 'superadmin')
-            .maybeSingle();
-
-          if (adminProfile?.password_hash) {
-            isValid = (adminProfile.password_hash === inputHash);
-          }
-        } catch (cloudErr) {
-          console.warn('Superadmin cloud auth check fallback:', cloudErr);
-        }
-      }
-
-      // 2. 備用雜湊驗證 (不可逆 SHA-256 雜湊，代碼中無任何明文密碼)
-      const SECURE_SUPERADMIN_HASH = 'b854dcf489b9c5fa4303a235a5212b3a378db986592f74ea16f49fe6ee172fbf';
-      if (!isValid && inputHash === SECURE_SUPERADMIN_HASH) {
-        isValid = true;
-      }
-
-      if (isValid) {
-        setIsSuperadminAuthenticated(true);
-        setActiveTab('landlords');
-        setSuperadminPasswordInput('');
-        showToast('🎉 系統管理員驗證通過，歡迎進入平台總管理後台！', 'success');
-      } else {
-        showToast('管理員密碼錯誤，拒絕存取！', 'error');
-      }
+      const authResult = await loginUser({ phone: cleanPhone, password: cleanPwd, expectedRole: 'superadmin' });
+      setCurrentUser(authResult.user);
+      setRole('superadmin');
+      setIsSuperadminAuthenticated(true);
+      setActiveTab('landlords');
+      setSuperadminLoginPhone('');
+      setSuperadminPasswordInput('');
+      showToast('🎉 系統管理員驗證通過，歡迎進入平台總管理後台！', 'success');
     } catch (err) {
       showToast('身分驗證異常，請重試', 'error');
     } finally {
@@ -975,6 +930,7 @@ export default function App() {
       showToast('已登出房東管理系統！', 'success');
     } else if (role === 'superadmin') {
       setIsSuperadminAuthenticated(false);
+      setSuperadminLoginPhone('');
       setSuperadminPasswordInput('');
       showToast('已登出系統管理員！', 'success');
     }
@@ -1002,27 +958,16 @@ export default function App() {
         name: cleanName,
         phone: cleanPhone,
         password: password,
-        role: 'landlord'
+        requestedRole: 'landlord'
       });
-
-      const landlordId = registeredResult?.id || `LND_${cleanPhone}`;
-      const newLnd = {
-        id: landlordId,
-        name: cleanName,
-        phone: cleanPhone,
-        passwordHash: registeredResult?.passwordHash,
-        isSelfRegistered: true,
-        status: 'approved',
-        adListingEnabled: true
-      };
-
-      setLandlords(prev => [...prev.filter(l => l.id !== landlordId), newLnd]);
-      setCurrentLandlordId(landlordId);
       setLandlordSelfName('');
       setLandlordSelfPhone('');
       setLandlordSelfPassword('');
-      showToast(`🎉 註冊成功！歡迎加入，${newLnd.name} 房東！`, 'success');
-      fetchSupabaseData();
+      await logoutUser();
+      setRole('portal');
+      showToast(registeredResult.needsEmailConfirmation
+        ? '申請已送出，請先完成信箱驗證；管理員審核後即可登入。'
+        : '申請已送出，待管理員審核通過後即可登入。', 'success');
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', 'error');
     }
@@ -1030,11 +975,10 @@ export default function App() {
 
   const handleApproveLandlord = async (landlordId, landlordName) => {
     try {
-      if (isSupabaseConfigured) {
-        await supabase.from('landlords').update({ status: 'approved' }).eq('id', landlordId);
-      }
+      const { error } = await supabase.rpc('approve_landlord_account', { p_landlord_id: landlordId });
+      if (error) throw error;
       setLandlords(landlords.map(l =>
-        l.id === landlordId ? { ...l, status: 'approved' } : l
+        l.id === landlordId ? { ...l, status: 'active' } : l
       ));
       showToast(`已成功核准房東「${landlordName}」的註冊申請！`, 'success');
       fetchSupabaseData();
@@ -1044,15 +988,13 @@ export default function App() {
   };
 
   const handleRejectLandlord = async (landlordId, landlordName) => {
-    const confirmed = await showConfirmDialog(`確定要拒絕並刪除房東「${landlordName}」的註冊申請嗎？`);
+    const confirmed = await showConfirmDialog(`確定要拒絕並停用房東「${landlordName}」的註冊申請嗎？`);
     if (confirmed) {
       try {
-        if (isSupabaseConfigured) {
-          await supabase.from('landlords').delete().eq('id', landlordId);
-          await supabase.from('profiles').delete().eq('id', landlordId);
-        }
+        const { error } = await supabase.rpc('reject_landlord_account', { p_landlord_id: landlordId });
+        if (error) throw error;
         setLandlords(landlords.filter(l => l.id !== landlordId));
-        showToast(`已成功刪除房東「${landlordName}」`, 'info');
+        showToast(`已成功停用房東「${landlordName}」`, 'info');
         fetchSupabaseData();
       } catch (err) {
         showToast(`刪除失敗: ${err.message}`, 'error');
@@ -1093,13 +1035,11 @@ export default function App() {
   const markAsPaid = async (paymentId) => {
     const today = new Date().toISOString().split('T')[0];
     try {
-      if (isSupabaseConfigured) {
-        await supabase.from('payments').update({
-          status: 'paid',
-          paid_date: today,
-          updated_at: new Date().toISOString()
-        }).eq('id', paymentId);
-      }
+      await transitionPaymentStatus({
+        paymentId,
+        newStatus: PaymentStatus.PAID,
+        metadata: { operator: 'landlord' }
+      });
       setPayments(payments.map(p =>
         p.id === paymentId ? { ...p, status: 'paid', paidDate: today } : p
       ));
@@ -1140,9 +1080,11 @@ export default function App() {
     if (!confirmed) return;
 
     try {
-      if (isSupabaseConfigured) {
-        await supabase.from('landlords').update({ ad_listing_enabled: !currentStatus }).eq('id', landlordId);
-      }
+      const { error } = await supabase.rpc('set_landlord_ad_listing', {
+        p_landlord_id: landlordId,
+        p_enabled: !currentStatus,
+      });
+      if (error) throw error;
       setLandlords(prev => prev.map(l => l.id === landlordId ? { ...l, adListingEnabled: !currentStatus } : l));
       showToast(`已成功${actionText}房東「${lnd?.name || ''}」的廣告刊登權限！`, 'success');
     } catch (err) {
@@ -2001,15 +1943,15 @@ export default function App() {
     const paidDateVal = recordPaymentDate || new Date().toISOString().split('T')[0];
 
     try {
-      if (isSupabaseConfigured) {
-        await supabase.from('payments').update({
-          status: 'paid',
-          paid_date: paidDateVal,
-          payment_method: finalMethod,
-          note: recordPaymentNote,
-          updated_at: new Date().toISOString()
-        }).eq('id', recordingPayment.id);
-      }
+      await transitionPaymentStatus({
+        paymentId: recordingPayment.id,
+        newStatus: PaymentStatus.PAID,
+        metadata: {
+          operator: 'landlord',
+          paymentMethod: recordPaymentMethod === 'cash' ? 'cash' : 'bank_transfer',
+          note: recordPaymentNote || null,
+        }
+      });
 
       setPayments(payments.map(p => {
         if (p.id === recordingPayment.id) {
@@ -2234,79 +2176,31 @@ export default function App() {
     };
 
     try {
-      if (tenantReportTargetBill) {
-        if (isSupabaseConfigured) {
-          await supabase.from('payments').update({
-            status: 'pending_approval',
-            amount: amt,
-            bill_type: tenantReportCategory,
-            title: tenantReportTitle.trim(),
-            payment_method: methodNames[tenantReportMethod] || (tenantReportMethod === 'cash' ? '現金交付' : '銀行轉帳'),
-            transfer_last5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
-            note: tenantReportNote.trim() || ''
-          }).eq('id', tenantReportTargetBill.id);
-        }
-        setPayments(payments.map(p => {
-          if (p.id === tenantReportTargetBill.id) {
-            return {
-              ...p,
-              status: 'pending_approval',
-              approvalStatus: 'pending_approval',
-              amount: amt,
-              billType: tenantReportCategory,
-              title: tenantReportTitle.trim(),
-              paymentMethod: methodNames[tenantReportMethod] || (tenantReportMethod === 'cash' ? '現金交付' : '銀行轉帳'),
-              transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
-              dueDate: tenantReportDate || p.dueDate,
-              note: tenantReportNote.trim() || p.note || ''
-            };
-          }
-          return p;
-        }));
-      } else {
-        const newPayment = {
-          id: `REP${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-          leaseId: currentTenantLease.id,
-          tenantName: registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease.tenantName,
-          propertyName: currentTenantProperty?.name || '租賃房間',
-          amount: amt,
-          dueDate: tenantReportDate || new Date().toISOString().split('T')[0],
-          status: 'pending_approval',
-          paidDate: null,
-          billType: tenantReportCategory,
-          title: tenantReportTitle.trim(),
-          paymentMethod: methodNames[tenantReportMethod] || (tenantReportMethod === 'cash' ? '現金交付' : '銀行轉帳'),
-          transferLast5: tenantReportMethod === 'bank' ? (tenantReportTransferLast5 || null) : null,
-          creatorRole: 'tenant',
-          approvalStatus: 'pending_approval',
-          note: tenantReportNote.trim() || ''
-        };
-
-        if (isSupabaseConfigured) {
-          const { data: insertedRows, error: insertErr } = await supabase.from('payments').insert({
-            id: newPayment.id,
-            lease_id: currentTenantLease.id,
-            tenant_name: newPayment.tenantName,
-            property_name: newPayment.propertyName,
-            amount: amt,
-            due_date: newPayment.dueDate,
-            status: 'pending_approval',
-            bill_type: newPayment.billType,
-            title: newPayment.title,
-            payment_method: newPayment.paymentMethod,
-            transfer_last5: newPayment.transferLast5,
-            note: newPayment.note
-          }).select();
-          if (insertErr) throw insertErr;
-          if (insertedRows && insertedRows[0]) {
-            newPayment.id = insertedRows[0].id;
-          }
-        }
-        setPayments(prev => {
-          if (prev.some(p => p.id === newPayment.id)) return prev;
-          return [newPayment, ...prev];
-        });
+      if (!tenantReportTargetBill) {
+        throw new Error('為避免未授權帳款，請從既有帳單選擇要回報的款項。');
       }
+      if (amt !== Number(tenantReportTargetBill.amount)) {
+        throw new Error('繳款回報金額必須與原帳單金額相同。');
+      }
+
+      await transitionPaymentStatus({
+        paymentId: tenantReportTargetBill.id,
+        newStatus: PaymentStatus.TENANT_SUBMITTED,
+        metadata: {
+          paymentMethod: tenantReportMethod === 'bank' ? 'bank_transfer' : 'cash',
+          transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
+          note: tenantReportNote.trim() || null,
+        }
+      });
+      setPayments(payments.map(p => p.id === tenantReportTargetBill.id
+        ? {
+            ...p,
+            status: 'tenant_submitted',
+            approvalStatus: 'pending_approval',
+            paymentMethod: methodNames[tenantReportMethod],
+            transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
+          }
+        : p));
 
       setActiveModal(null);
       setTenantReportTargetBill(null);
@@ -2457,25 +2351,22 @@ export default function App() {
       cash: '現金交付'
     };
     const finalMethod = channelNames[tenantPayChannel] || (tenantPayChannel === 'cash' ? '現金交付' : '銀行轉帳');
-    const todayStr = new Date().toISOString().split('T')[0];
 
     try {
-      if (isSupabaseConfigured) {
-        await supabase.from('payments').update({
-          status: 'paid',
-          paid_date: todayStr,
-          payment_method: finalMethod,
-          transfer_last5: tenantPayChannel === 'bank' ? (tenantPayTransferLast5 || null) : null,
-          updated_at: new Date().toISOString()
-        }).eq('id', tenantPayingBill.id);
-      }
+      await transitionPaymentStatus({
+        paymentId: tenantPayingBill.id,
+        newStatus: PaymentStatus.TENANT_SUBMITTED,
+        metadata: {
+          paymentMethod: tenantPayChannel === 'bank' ? 'bank_transfer' : 'cash',
+          transferLast5: tenantPayChannel === 'bank' ? tenantPayTransferLast5 : null,
+        }
+      });
 
       setPayments(payments.map(p => {
         if (p.id === tenantPayingBill.id) {
           return {
             ...p,
-            status: 'paid',
-            paidDate: todayStr,
+            status: 'tenant_submitted',
             paymentMethod: finalMethod,
             transferLast5: tenantPayChannel === 'bank' ? (tenantPayTransferLast5 || null) : null
           };
@@ -2485,7 +2376,7 @@ export default function App() {
 
       setActiveModal(null);
       setTenantPayingBill(null);
-      showToast('🎉 租金已成功繳納！系統已開立電子繳費收據。', 'success');
+      showToast('🎉 繳款回報已提交，待房東確認入帳。', 'success');
     } catch (err) {
       showToast(`繳納失敗: ${err.message}`, 'error');
     }
@@ -2504,19 +2395,16 @@ export default function App() {
     if (bill) {
       handleOpenTenantPay(bill);
     } else {
-      const todayStr = new Date().toISOString().split('T')[0];
       try {
-        if (isSupabaseConfigured) {
-          await supabase.from('payments').update({
-            status: 'paid',
-            paid_date: todayStr,
-            updated_at: new Date().toISOString()
-          }).eq('id', paymentId);
-        }
+        await transitionPaymentStatus({
+          paymentId,
+          newStatus: PaymentStatus.TENANT_SUBMITTED,
+          metadata: { paymentMethod: 'cash' }
+        });
         setPayments(payments.map(p =>
-          p.id === paymentId ? { ...p, status: 'paid', paidDate: todayStr } : p
+          p.id === paymentId ? { ...p, status: 'tenant_submitted' } : p
         ));
-        showToast('租金付款成功！已透過系統通知房東。', 'success');
+        showToast('繳款回報已提交，待房東確認入帳。', 'success');
       } catch (err) {
         showToast(`付款失敗: ${err.message}`, 'error');
       }
@@ -2942,6 +2830,7 @@ export default function App() {
                         setRole('superadmin');
                         setActiveTab('landlords');
                         setIsSuperadminAuthenticated(false);
+                        setSuperadminLoginPhone('');
                         setSuperadminPasswordInput('');
                       }}
                       className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-slate-800 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
@@ -3191,15 +3080,27 @@ export default function App() {
                   </div>
                   <h2 className="text-2xl font-black text-slate-900 tracking-tight">系統管理員身分驗證</h2>
                   <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                    本區塊具備全站會員名冊、房東審核與資料庫最高管理權限，請輸入管理員專屬授權密碼。
+                    請以 Supabase Auth 管理員帳戶登入。管理員權限只由伺服器端 app_metadata 授予。
                   </p>
                 </div>
 
                 <form onSubmit={handleSuperadminLogin} className="space-y-4">
                   <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">管理員聯絡電話</label>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      placeholder="請輸入管理員帳戶電話"
+                      value={superadminLoginPhone}
+                      onChange={(e) => setSuperadminLoginPhone(e.target.value)}
+                      autoFocus
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-slate-900 focus:bg-white font-semibold transition-all"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                       <span>管理員專屬密碼</span>
-                      <span className="text-[10px] text-slate-400 font-normal">SHA-256 加密防護</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Supabase Auth 驗證</span>
                     </label>
                     <div className="relative">
                       <input
@@ -3207,7 +3108,6 @@ export default function App() {
                         placeholder="請輸入管理員密碼"
                         value={superadminPasswordInput}
                         onChange={(e) => setSuperadminPasswordInput(e.target.value)}
-                        autoFocus
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm outline-none focus:border-slate-900 focus:bg-white font-semibold transition-all pr-12"
                       />
                       <button
@@ -3241,6 +3141,7 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       setRole('portal');
+                      setSuperadminLoginPhone('');
                       setSuperadminPasswordInput('');
                     }}
                     className="text-xs text-slate-500 hover:text-slate-800 font-semibold transition-colors cursor-pointer"
