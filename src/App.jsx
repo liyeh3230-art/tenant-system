@@ -1110,6 +1110,88 @@ export default function App() {
     }
   };
 
+  const handleSuperadminDeleteLandlord = async (landlordId, landlordName, landlordPhone) => {
+    const confirmed = await showConfirmDialog(`確定要徹底刪除房東「${landlordName}」嗎？這將會一併移除該房東的所有房源、租約與專屬地址庫。`);
+    if (!confirmed) return;
+
+    try {
+      const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
+
+      // 1. 查詢該房東名下所有房源
+      const { data: props } = await supabase.from('properties').select('id').eq('landlord_id', landlordId);
+      const propIds = (props || []).map(p => p.id);
+
+      // 2. 刪除關聯帳單、合約與房源
+      if (propIds.length > 0) {
+        const { data: lData } = await supabase.from('leases').select('id').in('property_id', propIds);
+        const leaseIds = (lData || []).map(l => l.id);
+        if (leaseIds.length > 0) {
+          await supabase.from('payments').delete().in('lease_id', leaseIds);
+          await supabase.from('leases').delete().in('id', leaseIds);
+        }
+        await supabase.from('properties').delete().eq('landlord_id', landlordId);
+      }
+
+      // 3. 刪除房東地址庫
+      await supabase.from('landlord_addresses').delete().eq('landlord_id', landlordId);
+
+      // 4. 刪除 landlords 表與 profiles 表
+      await supabase.from('landlords').delete().eq('id', landlordId);
+      if (cleanPhone) {
+        await supabase.from('profiles').delete().or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+      } else {
+        await supabase.from('profiles').delete().eq('id', landlordId);
+      }
+
+      // 5. 更新本地狀態
+      setLandlords(prev => prev.filter(l => l.id !== landlordId));
+      setProperties(prev => prev.filter(p => p.landlordId !== landlordId));
+      setLandlordAddresses(prev => prev.filter(a => a.landlordId !== landlordId));
+
+      showToast(`已成功徹底刪除房東「${landlordName}」及其所有資料！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Delete landlord error:', err);
+      showToast(`刪除房東失敗: ${err.message || '資料庫操作異常'}`, 'error');
+    }
+  };
+
+  const handleSuperadminDeleteTenant = async (tenantPhone, tenantName, tenantId) => {
+    const confirmed = await showConfirmDialog(`確定要徹底註銷租客「${tenantName}」(${tenantPhone}) 的會員帳戶嗎？`);
+    if (!confirmed) return;
+
+    try {
+      const cleanPhone = String(tenantPhone || '').replace(/[^0-9]/g, '');
+
+      // 1. 刪除 LINE 綁定表記錄
+      if (tenantId) {
+        await supabase.from('line_bindings').delete().eq('tenant_id', tenantId);
+        await supabase.from('line_binding_tokens').delete().eq('tenant_id', tenantId);
+      }
+
+      // 2. 刪除 tenants 表
+      if (tenantId) {
+        await supabase.from('tenants').delete().eq('id', tenantId);
+      }
+
+      // 3. 刪除 profiles 表
+      if (cleanPhone) {
+        await supabase.from('profiles').delete().or(`id.eq.${tenantId || 'none'},phone.eq.${cleanPhone}`);
+      } else if (tenantId) {
+        await supabase.from('profiles').delete().eq('id', tenantId);
+      }
+
+      // 4. 更新本地狀態
+      setRegisteredTenants(prev => prev.filter(rt => rt.phone !== tenantPhone && rt.id !== tenantId));
+
+      showToast(`已成功註銷並刪除租客「${tenantName}」之會員帳號！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Delete tenant error:', err);
+      showToast(`註銷租客失敗: ${err.message || '資料庫操作異常'}`, 'error');
+    }
+  };
+
 
 
   const currentLandlord = landlords.find(l =>
@@ -3461,15 +3543,7 @@ export default function App() {
                                     </td>
                                     <td className="py-3.5 px-4 text-right">
                                       <button
-                                        onClick={async () => {
-                                          const confirmed = await showConfirmDialog(`確定要刪除房東「${lnd.name}」嗎？這將會一併移除該房東的所有房源、租約與專屬地址庫。`);
-                                          if (confirmed) {
-                                            setLandlords(landlords.filter(l => l.id !== lnd.id));
-                                            setProperties(prev => prev.filter(p => p.landlordId !== lnd.id));
-                                            setLandlordAddresses(prev => prev.filter(a => a.landlordId !== lnd.id));
-                                            showToast('房東帳戶及專屬資料已刪除！', 'success');
-                                          }
-                                        }}
+                                        onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
                                         className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
                                       >
                                         <Trash2 size={13} className="mr-0.5" />
@@ -3528,13 +3602,7 @@ export default function App() {
                                 </div>
                                 <div className="pt-2 border-t border-slate-200/60 flex justify-end">
                                   <button
-                                    onClick={async () => {
-                                      const confirmed = await showConfirmDialog(`確定要刪除房東「${lnd.name}」嗎？`);
-                                      if (confirmed) {
-                                        setLandlords(landlords.filter(l => l.id !== lnd.id));
-                                        showToast('房東帳戶已刪除！', 'success');
-                                      }
-                                    }}
+                                    onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
                                     className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center"
                                   >
                                     <Trash2 size={13} className="mr-0.5" />
@@ -3651,13 +3719,7 @@ export default function App() {
                                 <td className="py-3.5 px-4">{t.phone}</td>
                                 <td className="py-3.5 px-4 text-right">
                                   <button
-                                    onClick={async () => {
-                                      const confirmed = await showConfirmDialog(`確定要註銷租客「${t.name}」的帳戶嗎？`);
-                                      if (confirmed) {
-                                        setRegisteredTenants(registeredTenants.filter(rt => rt.phone !== t.phone));
-                                        showToast('租客帳戶已註銷！', 'success');
-                                      }
-                                    }}
+                                    onClick={() => handleSuperadminDeleteTenant(t.phone, t.name, t.id)}
                                     className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
                                   >
                                     <Trash2 size={13} className="mr-0.5" />
