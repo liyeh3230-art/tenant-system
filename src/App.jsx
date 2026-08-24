@@ -801,7 +801,7 @@ export default function App() {
         ? '註冊成功！請先完成信箱驗證後再登入。'
         : '🎉 註冊成功！請使用電話與密碼進行登入。', 'success');
     } catch (err) {
-      showToast(err.message || '註冊失敗，請重試', 'error');
+      showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
     }
   };
 
@@ -970,7 +970,7 @@ export default function App() {
         ? '申請已送出，請先完成信箱驗證；管理員審核後即可登入。'
         : '申請已送出，待管理員審核通過後即可登入。', 'success');
     } catch (err) {
-      showToast(err.message || '註冊失敗，請重試', 'error');
+      showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
     }
   };
 

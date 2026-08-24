@@ -61,6 +61,24 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
     throw new Error('系統尚未完成安全的 Supabase 設定，暫時無法註冊。');
   }
 
+  // 1. 檢查電話號碼是否已被註冊使用 (防止重複註冊)
+  try {
+    const { data: existingProfiles } = await supabase
+      .from('profiles')
+      .select('id, phone, role, name')
+      .eq('phone', safePhone);
+
+    if (existingProfiles && existingProfiles.length > 0) {
+      const existingUser = existingProfiles[0];
+      const roleName = existingUser.role === 'landlord' ? '房東' : '租客';
+      throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊為【${roleName}】帳號，無法重複註冊！請直接前往登入。`);
+    }
+  } catch (checkErr) {
+    if (checkErr.message && checkErr.message.includes('已被註冊')) {
+      throw checkErr;
+    }
+  }
+
   const safeRequestedRole = requestedRole === 'landlord' ? 'landlord' : 'tenant';
   let userId = null;
   let authUser = null;
@@ -80,12 +98,25 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
       },
     });
 
+    if (error) {
+      if (error.message?.includes('already registered') || error.message?.includes('already exists') || error.message?.includes('User already registered')) {
+        throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+      }
+    }
+
     if (data?.user) {
+      // 若 Supabase Auth 發現重複 email，identities 可能為空陣列
+      if (data.user.identities && data.user.identities.length === 0) {
+        throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+      }
       authUser = data.user;
       userId = data.user.id;
       hasSession = Boolean(data.session);
     }
   } catch (authErr) {
+    if (authErr.message && authErr.message.includes('已被註冊')) {
+      throw authErr;
+    }
     console.warn('Supabase auth signUp fallback:', authErr);
   }
 
