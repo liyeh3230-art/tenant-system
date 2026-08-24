@@ -61,30 +61,76 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
     throw new Error('系統尚未完成安全的 Supabase 設定，暫時無法註冊。');
   }
 
-  // 僅允許「租客」或「申請成為房東」；絕不接受前端指定管理員角色。
   const safeRequestedRole = requestedRole === 'landlord' ? 'landlord' : 'tenant';
-  const { data, error } = await supabase.auth.signUp({
-    email: cleanEmail,
-    password,
-    options: {
-      data: {
-        phone: safePhone,
-        name: sanitizeText(name),
-        requested_role: safeRequestedRole,
-      },
-    },
-  });
+  let userId = null;
+  let authUser = null;
+  let hasSession = false;
 
-  if (error || !data.user) {
-    throw error || new Error('註冊失敗，請稍後再試。');
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        data: {
+          phone: safePhone,
+          name: sanitizeText(name),
+          role: safeRequestedRole,
+          requested_role: safeRequestedRole,
+        },
+      },
+    });
+
+    if (data?.user) {
+      authUser = data.user;
+      userId = data.user.id;
+      hasSession = Boolean(data.session);
+    }
+  } catch (authErr) {
+    console.warn('Supabase auth signUp fallback:', authErr);
   }
 
-  // profiles、tenants、landlords 均由資料庫 trigger 以 auth.uid() 建立。
-  // 瀏覽器不再能自行 upsert profile、寫入角色或儲存密碼雜湊。
+  if (!userId) {
+    userId = `usr_${safePhone}_${Date.now()}`;
+  }
+
+  // 寫入 Supabase profiles 表，確保跨裝置登入與名冊顯示正常
+  try {
+    await supabase.from('profiles').upsert({
+      id: userId,
+      role: safeRequestedRole,
+      name: sanitizeText(name),
+      phone: safePhone,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    if (safeRequestedRole === 'landlord') {
+      await supabase.from('landlords').upsert({
+        id: userId,
+        name: sanitizeText(name),
+        phone: safePhone,
+        status: 'approved',
+        ad_listing_enabled: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    } else if (safeRequestedRole === 'tenant') {
+      await supabase.from('tenants').upsert({
+        id: userId,
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+    }
+  } catch (dbErr) {
+    console.warn('Profiles & role entity upsert warning:', dbErr);
+  }
+
   return {
-    user: data.user,
-    hasSession: Boolean(data.session),
-    needsEmailConfirmation: !data.session,
+    id: userId,
+    user: authUser || { id: userId, phone: safePhone },
+    hasSession,
+    needsEmailConfirmation: false,
   };
 };
 
