@@ -150,6 +150,16 @@ export default function App() {
     } catch (e) {}
     return null;
   });
+  const [currentTenantName, setCurrentTenantName] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'tenant') return parsed.name || '';
+      }
+    } catch (e) {}
+    return '';
+  });
 
   const [landlordLoginPhone, setLandlordLoginPhone] = useState('');
   const [landlordLoginPassword, setLandlordLoginPassword] = useState('');
@@ -500,6 +510,18 @@ export default function App() {
       // 🚀 優化 B：針對「租客視角」進行精確查詢
       else if (role === 'tenant' && currentTenantPhone) {
         const cleanTenantPhone = String(currentTenantPhone).replace(/[^0-9]/g, '');
+        // 抓取該租客在 profiles 中的真實姓名
+        try {
+          const { data: profData } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('phone', cleanTenantPhone)
+            .maybeSingle();
+          if (profData?.name) {
+            setCurrentTenantName(profData.name);
+          }
+        } catch (e) {}
+
         // 抓取該租客的合約
         const { data: leaseData } = await supabase
           .from('leases')
@@ -814,6 +836,7 @@ export default function App() {
           setRole('tenant');
           setActiveTab('portal');
           setCurrentTenantPhone(cleanPhone);
+          setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
         }
         try {
           localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
@@ -857,6 +880,7 @@ export default function App() {
                 setRole('tenant');
                 setActiveTab('portal');
                 setCurrentTenantPhone(cleanPhone);
+                setCurrentTenantName(profile.name || savedSession.name || '');
               }
               return;
             } else if (profile && profile.deleted_at) {
@@ -1189,6 +1213,7 @@ export default function App() {
         const targetId = userProfile.id;
         setCurrentUser(authResult.user);
         setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(userProfile.name || '');
         setRole('tenant');
         setActiveTab('portal');
         setAuthPassword('');
@@ -3626,10 +3651,10 @@ export default function App() {
               <div className="flex items-center space-x-3 sm:space-x-4">
                 <div className="flex items-center space-x-2">
                   <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
-                    {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
+                    {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (currentTenantName?.[0] || currentUser?.user_metadata?.name?.[0] || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
                   </div>
                   <span className="text-xs sm:text-sm font-semibold text-gray-700 max-w-[80px] sm:max-w-none truncate">
-                    {role === 'superadmin' ? '總管理員' : (role === 'admin' && currentLandlordId) ? `${landlords.find(l => l.id === currentLandlordId)?.name || '房東'} (房東)` : role === 'admin' ? '未登入房東' : (role === 'tenant' && currentTenantPhone) ? `${registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'} (租客)` : '訪客 (未登入)'}
+                    {role === 'superadmin' ? '總管理員' : (role === 'admin' && currentLandlordId) ? `${landlords.find(l => l.id === currentLandlordId)?.name || '房東'} (房東)` : role === 'admin' ? '未登入房東' : (role === 'tenant' && currentTenantPhone) ? `${currentTenantName || currentUser?.user_metadata?.name || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'} (租客)` : '訪客 (未登入)'}
                   </span>
                 </div>
               </div>
@@ -6766,7 +6791,7 @@ export default function App() {
                       <p className="flex justify-between items-center">
                         <span className="text-slate-500">您的註冊姓名：</span>
                         <span className="text-slate-800 font-bold">
-                          {registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name}
+                          {currentTenantName || currentUser?.user_metadata?.name || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || '租客'}
                         </span>
                       </p>
                       <p className="flex justify-between items-center">
