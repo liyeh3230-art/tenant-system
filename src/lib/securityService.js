@@ -100,18 +100,64 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
 
     if (error) {
       if (error.message?.includes('already registered') || error.message?.includes('already exists') || error.message?.includes('User already registered')) {
-        throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+        // 🚀 關鍵防孤立帳號自我修復 (Self-Healing Orphaned Accounts)：
+        // 若 profiles 表中並無此手機門號（代表過去在資料庫曾被刪除但 auth.users 殘留的孤立帳號）
+        const { data: checkProf } = await supabase.from('profiles').select('id, phone, role').eq('phone', safePhone);
+        if (!checkProf || checkProf.length === 0) {
+          // 嘗試以本次註冊所輸入之密碼進行認證
+          const { data: loginAttempt, error: loginErr } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+          if (!loginErr && loginAttempt?.user) {
+            // 密碼相符！成功認領並重新激活該帳號
+            authUser = loginAttempt.user;
+            userId = loginAttempt.user.id;
+            hasSession = Boolean(loginAttempt.session);
+            try {
+              await supabase.auth.updateUser({
+                data: {
+                  phone: safePhone,
+                  name: sanitizeText(name),
+                  role: safeRequestedRole,
+                  requested_role: safeRequestedRole,
+                }
+              });
+            } catch (e) {}
+          } else {
+            throw new Error(`⚠️ 此電話號碼（${safePhone}）在認證系統已有歷史紀錄！若這是您的帳號，請直接使用原設定密碼登入；若忘記密碼請洽管理員。`);
+          }
+        } else {
+          throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+        }
       }
     }
 
     if (data?.user) {
       // 若 Supabase Auth 發現重複 email，identities 可能為空陣列
       if (data.user.identities && data.user.identities.length === 0) {
-        throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+        const { data: checkProf } = await supabase.from('profiles').select('id, phone, role').eq('phone', safePhone);
+        if (!checkProf || checkProf.length === 0) {
+          const { data: loginAttempt, error: loginErr } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+          if (!loginErr && loginAttempt?.user) {
+            authUser = loginAttempt.user;
+            userId = loginAttempt.user.id;
+            hasSession = Boolean(loginAttempt.session);
+          } else {
+            throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用！若這是您的帳號，請直接前往會員登入。`);
+          }
+        } else {
+          throw new Error(`⚠️ 此電話號碼（${safePhone}）已被註冊使用，無法重複註冊！請直接登入。`);
+        }
+      } else {
+        authUser = data.user;
+        userId = data.user.id;
+        hasSession = Boolean(data.session);
       }
-      authUser = data.user;
-      userId = data.user.id;
-      hasSession = Boolean(data.session);
     }
   } catch (authErr) {
     if (authErr.message && authErr.message.includes('已被註冊')) {
@@ -350,9 +396,53 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
     .select('id, role, name, phone, avatar_url, password_hash')
     .or(queryClause);
 
-  const matchedProfile = profiles?.[0];
+  let matchedProfile = profiles?.[0];
 
-  // ⚠️ 關鍵安全檢驗：若 profiles 表中找不到該會員（已被總管理員刪除/註銷），嚴格禁止登入！
+  // 🚀 自動修復機制 (Self-Healing)：
+  // 若 Supabase Auth 驗證成功（使用者密碼正確），但 profiles 表中缺少記錄（例如非同步寫入遺漏或先前被不完整清理之孤立帳號）
+  // 自動從 Auth user_metadata 還原並即時寫入 profiles 表與 landlords/tenants 表！
+  if (!matchedProfile && authUser) {
+    try {
+      const meta = authUser.user_metadata || {};
+      const restoredName = meta.name || meta.full_name || '會員';
+      const restoredRole = meta.role || (expectedRole || 'tenant');
+      const restoredPhone = meta.phone || safePhone;
+
+      const { data: restoredProfile } = await supabase
+        .from('profiles')
+        .upsert({
+          id: authUser.id,
+          role: restoredRole,
+          name: restoredName,
+          phone: restoredPhone,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select();
+
+      if (restoredRole === 'landlord') {
+        await supabase.from('landlords').upsert({
+          id: authUser.id,
+          name: restoredName,
+          phone: restoredPhone,
+          status: 'approved',
+          ad_listing_enabled: true,
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      matchedProfile = restoredProfile?.[0] || {
+        id: authUser.id,
+        role: restoredRole,
+        name: restoredName,
+        phone: restoredPhone,
+      };
+    } catch (healErr) {
+      console.warn('Profile self-healing notice:', healErr);
+    }
+  }
+
+  // ⚠️ 關鍵安全檢驗：若 profiles 表中仍無此會員，才判定帳密錯誤
   if (!matchedProfile) {
     if (authUser) {
       try {

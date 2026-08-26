@@ -1657,6 +1657,16 @@ export default function App() {
     try {
       const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
 
+      // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
+      try {
+        await supabase.rpc('delete_user_by_admin', { 
+          target_user_id: landlordId, 
+          target_phone: cleanPhone 
+        });
+      } catch (rpcErr) {
+        console.warn('RPC delete_user_by_admin notice:', rpcErr);
+      }
+
       // 1. 查詢該房東名下所有房源
       const { data: props } = await supabase.from('properties').select('id').eq('landlord_id', landlordId);
       const propIds = (props || []).map(p => p.id);
@@ -1702,6 +1712,16 @@ export default function App() {
 
     try {
       const cleanPhone = String(tenantPhone || '').replace(/[^0-9]/g, '');
+
+      // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
+      try {
+        await supabase.rpc('delete_user_by_admin', { 
+          target_user_id: tenantId, 
+          target_phone: cleanPhone 
+        });
+      } catch (rpcErr) {
+        console.warn('RPC delete_user_by_admin notice:', rpcErr);
+      }
 
       // 1. 刪除 LINE 綁定表記錄
       if (tenantId) {
