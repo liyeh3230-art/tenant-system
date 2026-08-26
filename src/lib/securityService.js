@@ -79,7 +79,7 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
     }
   }
 
-  const safeRequestedRole = requestedRole === 'landlord' ? 'landlord' : 'tenant';
+  const safeRequestedRole = requestedRole === 'landlord' ? 'landlord' : (requestedRole === 'tenant' ? 'tenant' : 'unassigned');
   let userId = null;
   let authUser = null;
   let hasSession = false;
@@ -140,7 +140,7 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
         id: userId,
         name: sanitizeText(name),
         phone: safePhone,
-        status: 'approved',
+        status: 'pending',
         ad_listing_enabled: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -160,9 +160,149 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
   return {
     id: userId,
     user: authUser || { id: userId, phone: safePhone },
+    profile: { id: userId, phone: safePhone, name: sanitizeText(name), role: safeRequestedRole },
     hasSession,
     needsEmailConfirmation: false,
   };
+};
+
+/**
+ * 開通房客會員身分 (即開即用，無需管理員審核)
+ */
+export const completeTenantOnboarding = async ({ userId, phone, name }) => {
+  const safePhone = String(phone || '').replace(/[^0-9]/g, '');
+  const cleanName = sanitizeText(name || '租客');
+
+  try {
+    // 1. 更新 profile 為 tenant
+    await supabase.from('profiles').upsert({
+      id: userId,
+      role: 'tenant',
+      name: cleanName,
+      phone: safePhone,
+      updated_at: new Date().toISOString(),
+    });
+
+    // 2. 建立/啟用 tenants 表紀錄
+    await supabase.from('tenants').upsert({
+      id: userId,
+      status: 'active',
+      updated_at: new Date().toISOString(),
+    });
+
+    return { success: true, role: 'tenant' };
+  } catch (err) {
+    console.error('completeTenantOnboarding error:', err);
+    throw err;
+  }
+};
+
+/**
+ * 提交房東身分申請與詳細認證資料 (狀態設為 pending 待審核)
+ */
+export const submitLandlordApplication = async ({
+  userId,
+  phone,
+  name,
+  idNumber = '',
+  contactAddress = '',
+  companyName = '',
+  bankName = '',
+  bankAccount = '',
+  notes = '',
+}) => {
+  const safePhone = String(phone || '').replace(/[^0-9]/g, '');
+  const cleanName = sanitizeText(name || '房東');
+  const cleanIdNumber = sanitizeText(idNumber).trim();
+  const cleanAddress = sanitizeText(contactAddress).trim();
+  const cleanCompany = sanitizeText(companyName).trim();
+  const cleanBankName = sanitizeText(bankName).trim();
+  const cleanBankAccount = sanitizeText(bankAccount).trim();
+  const cleanNotes = sanitizeText(notes).trim();
+
+  // 封裝詳細審核資訊供總管理員查閱
+  const verificationPayload = JSON.stringify({
+    companyName: cleanCompany,
+    idNumber: cleanIdNumber,
+    contactAddress: cleanAddress,
+    bankName: cleanBankName,
+    bankAccount: cleanBankAccount,
+    notes: cleanNotes,
+    submittedAt: new Date().toISOString(),
+  });
+
+  try {
+    // 1. 更新 profiles 為 landlord
+    await supabase.from('profiles').upsert({
+      id: userId,
+      role: 'landlord',
+      name: cleanName,
+      phone: safePhone,
+      updated_at: new Date().toISOString(),
+    });
+
+    // 2. 寫入 landlords 表，狀態一律設為 pending (待審核)
+    // 相容寫入：同時將驗證資料寫入 company_name (格式化字串) 與專屬欄位 (若已遷移)
+    const displayCompany = cleanCompany || `【個人房東】身分證號: ${cleanIdNumber || '未提供'}`;
+    const updateData = {
+      id: userId,
+      name: cleanName,
+      phone: safePhone,
+      company_name: verificationPayload, // 儲存結構化申請資料
+      status: 'pending',
+      ad_listing_enabled: false,
+      updated_at: new Date().toISOString(),
+    };
+
+    // 若資料庫已支援擴充欄位，一併寫入
+    if (cleanIdNumber) updateData.id_number = cleanIdNumber;
+    if (cleanAddress) updateData.contact_address = cleanAddress;
+    if (cleanBankName) updateData.bank_name = cleanBankName;
+    if (cleanBankAccount) updateData.bank_account = cleanBankAccount;
+    if (cleanNotes) updateData.application_notes = cleanNotes;
+
+    const { error: landlordErr } = await supabase.from('landlords').upsert(updateData);
+    if (landlordErr) {
+      // 容錯回退：若無擴充欄位，僅寫入標準欄位
+      await supabase.from('landlords').upsert({
+        id: userId,
+        name: cleanName,
+        phone: safePhone,
+        company_name: verificationPayload,
+        status: 'pending',
+        ad_listing_enabled: false,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    // 3. 同步寫入房東專屬地址庫 (若是有效地址)
+    if (cleanAddress) {
+      try {
+        await supabase.from('landlord_addresses').upsert({
+          landlord_id: userId,
+          address: cleanAddress,
+        });
+      } catch (addrErr) {
+        console.warn('Landlord address write notice:', addrErr);
+      }
+    }
+
+    return {
+      success: true,
+      role: 'landlord',
+      status: 'pending',
+      details: {
+        idNumber: cleanIdNumber,
+        contactAddress: cleanAddress,
+        companyName: cleanCompany,
+        bankName: cleanBankName,
+        bankAccount: cleanBankAccount,
+      },
+    };
+  } catch (err) {
+    console.error('submitLandlordApplication error:', err);
+    throw err;
+  }
 };
 
 /**

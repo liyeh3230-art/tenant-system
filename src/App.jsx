@@ -11,6 +11,8 @@ import {
   sanitizeText,
   sanitizeNumber,
   registerUser,
+  completeTenantOnboarding,
+  submitLandlordApplication,
   loginUser,
   logoutUser,
   transitionPaymentStatus,
@@ -205,6 +207,31 @@ export default function App() {
   const [tenantSelfPassword, setTenantSelfPassword] = useState('');
   const [tenantLoginPhone, setTenantLoginPhone] = useState('');
   const [tenantLoginPassword, setTenantLoginPassword] = useState('');
+
+  // --- 統一註冊與身分開通 (Unified Registration & Onboarding States) ---
+  const [portalAuthTab, setPortalAuthTab] = useState('login'); // 'login' | 'register'
+  const [portalRoleTarget, setPortalRoleTarget] = useState('tenant'); // 'tenant' | 'landlord'
+  const [unifiedRegisterName, setUnifiedRegisterName] = useState('');
+  const [unifiedRegisterPhone, setUnifiedRegisterPhone] = useState('');
+  const [unifiedRegisterPassword, setUnifiedRegisterPassword] = useState('');
+  const [unifiedRegisterLoading, setUnifiedRegisterLoading] = useState(false);
+
+  // 註冊後身分導引與詳細資料
+  const [onboardingUser, setOnboardingUser] = useState(null); // { id, phone, name }
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [landlordAppForm, setLandlordAppForm] = useState({
+    idNumber: '',
+    contactAddress: '',
+    companyName: '',
+    bankName: '',
+    bankAccount: '',
+    notes: '',
+  });
+  const [landlordAppLoading, setLandlordAppLoading] = useState(false);
+  const [pendingLandlordNotice, setPendingLandlordNotice] = useState({
+    open: false,
+    data: null,
+  });
 
   // Mobile Responsiveness
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -599,6 +626,11 @@ export default function App() {
             id: p.id,
             name: p.name || lndInfo.name || '房東',
             phone: p.phone || lndInfo.phone || '',
+            company_name: lndInfo.company_name || '',
+            id_number: lndInfo.id_number || '',
+            contact_address: lndInfo.contact_address || '',
+            bank_name: lndInfo.bank_name || '',
+            bank_account: lndInfo.bank_account || '',
             status: lndInfo.status || 'approved',
             adListingEnabled: lndInfo.ad_listing_enabled ?? false
           });
@@ -611,6 +643,11 @@ export default function App() {
               id: l.id,
               name: l.name || '房東',
               phone: l.phone || '',
+              company_name: l.company_name || '',
+              id_number: l.id_number || '',
+              contact_address: l.contact_address || '',
+              bank_name: l.bank_name || '',
+              bank_account: l.bank_account || '',
               status: l.status || 'approved',
               adListingEnabled: l.ad_listing_enabled ?? false
             });
@@ -943,35 +980,183 @@ export default function App() {
         localStorage.setItem('line_linked_user_id', finalId);
         localStorage.setItem('line_linked_phone', cleanPhone);
         localStorage.setItem('line_linked_name', cleanName);
-        localStorage.setItem('line_linked_role', targetRole);
       }
 
-      // 5. 設定登入身分
-      setCurrentUser({
+      // 5. 註冊基本資料完成，彈出身分分流導引 (我是房客 vs 我是房東)
+      setOnboardingUser({
         id: finalId,
         phone: cleanPhone,
-        user_metadata: { role: targetRole, name: cleanName, phone: cleanPhone }
+        name: cleanName,
+        lineUid: lineUid,
       });
 
-      if (targetRole === 'landlord') {
-        setRole('admin');
-        setCurrentLandlordId(finalId);
-        setCurrentLandlordPhone(cleanPhone);
-        setActiveTab('dashboard');
-      } else {
-        setRole('tenant');
-        setCurrentTenantPhone(cleanPhone);
-        setActiveTab('portal');
-      }
-
-      setActiveModal(null);
-      showToast(`🎉 會員資料登記完成！歡迎使用，${cleanName}！`, 'success');
+      setActiveModal('roleOnboarding');
+      showToast(`🎉 歡迎 ${cleanName}！請選擇您的會員身分（房客或房東）。`, 'success');
       fetchSupabaseData();
     } catch (err) {
       console.error('Save LINE first login error:', err);
       showToast('資料儲存異常：' + (err.message || '請重試'), 'error');
     } finally {
       setLineFirstLoginLoading(false);
+    }
+  };
+
+  // --- 統一註冊送出函式 (Unified Phone Registration) ---
+  const handleUnifiedRegister = async (e) => {
+    if (e) e.preventDefault();
+    const cleanName = sanitizeText(unifiedRegisterName).trim();
+    const cleanPhone = unifiedRegisterPhone.replace(/[^0-9]/g, '').trim();
+    const password = unifiedRegisterPassword;
+
+    if (!cleanName || cleanName.length < 2) {
+      showToast('請填寫真實姓名（至少2個字）！', 'warning');
+      return;
+    }
+    if (!cleanPhone || cleanPhone.length < 8) {
+      showToast('請填寫有效的手機號碼！', 'warning');
+      return;
+    }
+    if (!password || password.length < 6) {
+      showToast('密碼長度至少需 6 碼以上！', 'warning');
+      return;
+    }
+
+    setUnifiedRegisterLoading(true);
+    try {
+      const regResult = await registerUser({
+        name: cleanName,
+        phone: cleanPhone,
+        password: password,
+        requestedRole: 'unassigned',
+      });
+
+      setUnifiedRegisterName('');
+      setUnifiedRegisterPhone('');
+      setUnifiedRegisterPassword('');
+
+      setOnboardingUser({
+        id: regResult.id,
+        phone: cleanPhone,
+        name: cleanName,
+      });
+
+      setActiveModal('roleOnboarding');
+      showToast('🎉 帳號建立成功！請選擇您的會員身分（房客或房東）。', 'success');
+    } catch (err) {
+      showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
+    } finally {
+      setUnifiedRegisterLoading(false);
+    }
+  };
+
+  // --- 身分選擇：我是房客 (免審核即開即用) ---
+  const handleSelectTenantRole = async () => {
+    if (!onboardingUser) return;
+    setOnboardingLoading(true);
+    try {
+      await completeTenantOnboarding({
+        userId: onboardingUser.id,
+        phone: onboardingUser.phone,
+        name: onboardingUser.name,
+      });
+
+      setCurrentUser({
+        id: onboardingUser.id,
+        phone: onboardingUser.phone,
+        user_metadata: { role: 'tenant', name: onboardingUser.name }
+      });
+      setRole('tenant');
+      setCurrentTenantPhone(onboardingUser.phone);
+      setActiveTab('portal');
+
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({
+          id: onboardingUser.id,
+          phone: onboardingUser.phone,
+          name: onboardingUser.name,
+          role: 'tenant'
+        }));
+      } catch (e) {}
+
+      setActiveModal(null);
+      setOnboardingUser(null);
+      showToast(`🎉 歡迎加入！您已成功開通房客會員專區！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      showToast('開通失敗: ' + (err.message || '請重試'), 'error');
+    } finally {
+      setOnboardingLoading(false);
+    }
+  };
+
+  // --- 身分選擇：我是房東 (進入詳細資料填寫) ---
+  const handleSelectLandlordRole = () => {
+    if (!onboardingUser) return;
+    setLandlordAppForm(prev => ({
+      ...prev,
+      companyName: '',
+      idNumber: '',
+      contactAddress: '',
+      bankName: '',
+      bankAccount: '',
+      notes: '',
+    }));
+    setActiveModal('landlordApplication');
+  };
+
+  // --- 提交房東認證資料 (送出後狀態為待審核) ---
+  const handleSubmitLandlordApplication = async (e) => {
+    if (e) e.preventDefault();
+    if (!onboardingUser) return;
+
+    const idNum = sanitizeText(landlordAppForm.idNumber).trim();
+    const addr = sanitizeText(landlordAppForm.contactAddress).trim();
+
+    if (!idNum || idNum.length < 6) {
+      showToast('請填寫有效的身分證字號、居留證號或統一編號以供身分查核！', 'warning');
+      return;
+    }
+    if (!addr || addr.length < 5) {
+      showToast('請填寫完整通訊聯絡地址！', 'warning');
+      return;
+    }
+
+    setLandlordAppLoading(true);
+    try {
+      await submitLandlordApplication({
+        userId: onboardingUser.id,
+        phone: onboardingUser.phone,
+        name: onboardingUser.name,
+        idNumber: idNum,
+        contactAddress: addr,
+        companyName: landlordAppForm.companyName,
+        bankName: landlordAppForm.bankName,
+        bankAccount: landlordAppForm.bankAccount,
+        notes: landlordAppForm.notes,
+      });
+
+      setActiveModal(null);
+      setPendingLandlordNotice({
+        open: true,
+        data: {
+          name: onboardingUser.name,
+          phone: onboardingUser.phone,
+          idNumber: idNum,
+          contactAddress: addr,
+          companyName: landlordAppForm.companyName,
+          bankName: landlordAppForm.bankName,
+          bankAccount: landlordAppForm.bankAccount,
+          submittedAt: new Date().toLocaleDateString(),
+        }
+      });
+
+      setOnboardingUser(null);
+      showToast('🎉 房東身分申請已送出！請等待平台管理員確認開通。', 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      showToast('申請送出失敗: ' + (err.message || '請重試'), 'error');
+    } finally {
+      setLandlordAppLoading(false);
     }
   };
 
@@ -1173,7 +1358,16 @@ export default function App() {
 
       if (landlordAccount && (landlordAccount.status === 'pending' || landlordAccount.status === 'rejected')) {
         await logoutUser();
-        showToast('房東帳戶審核中，請待管理員核准後登入。', 'warning');
+        setPendingLandlordNotice({
+          open: true,
+          data: {
+            name: authResult.profile.name,
+            phone: cleanInputPhone,
+            companyName: landlordAccount.company_name,
+            submittedAt: landlordAccount.created_at ? new Date(landlordAccount.created_at).toLocaleDateString() : '近日',
+          }
+        });
+        showToast('房東帳戶身分審核中，請待管理員審核通過後登入。', 'warning');
         return;
       }
 
@@ -1293,10 +1487,17 @@ export default function App() {
 
   const handleApproveLandlord = async (landlordId, landlordName) => {
     try {
-      const { error } = await supabase.rpc('approve_landlord_account', { p_landlord_id: landlordId });
-      if (error) throw error;
+      const { error: rpcErr } = await supabase.rpc('approve_landlord_account', { p_landlord_id: landlordId });
+      if (rpcErr) {
+        // 降級容錯：直接更新 landlords 表
+        const { error: updateErr } = await supabase
+          .from('landlords')
+          .update({ status: 'approved', updated_at: new Date().toISOString() })
+          .eq('id', landlordId);
+        if (updateErr) throw updateErr;
+      }
       setLandlords(landlords.map(l =>
-        l.id === landlordId ? { ...l, status: 'active' } : l
+        l.id === landlordId ? { ...l, status: 'approved' } : l
       ));
       showToast(`已成功核准房東「${landlordName}」的註冊申請！`, 'success');
       fetchSupabaseData();
@@ -1309,8 +1510,14 @@ export default function App() {
     const confirmed = await showConfirmDialog(`確定要拒絕並停用房東「${landlordName}」的註冊申請嗎？`);
     if (confirmed) {
       try {
-        const { error } = await supabase.rpc('reject_landlord_account', { p_landlord_id: landlordId });
-        if (error) throw error;
+        const { error: rpcErr } = await supabase.rpc('reject_landlord_account', { p_landlord_id: landlordId });
+        if (rpcErr) {
+          const { error: updateErr } = await supabase
+            .from('landlords')
+            .update({ status: 'rejected', updated_at: new Date().toISOString() })
+            .eq('id', landlordId);
+          if (updateErr) throw updateErr;
+        }
         setLandlords(landlords.filter(l => l.id !== landlordId));
         showToast(`已成功停用房東「${landlordName}」`, 'info');
         fetchSupabaseData();
@@ -3340,14 +3547,14 @@ export default function App() {
                     </form>
                   </div>
                 ) : (
-                  <form onSubmit={handleLandlordSelfRegister} className="space-y-4">
+                  <form onSubmit={handleUnifiedRegister} className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">房東姓名</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">真實姓名</label>
                       <input
                         type="text"
                         placeholder="例如：陳大明"
-                        value={landlordSelfName}
-                        onChange={(e) => setLandlordSelfName(e.target.value)}
+                        value={unifiedRegisterName}
+                        onChange={(e) => setUnifiedRegisterName(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
                         required
                       />
@@ -3357,8 +3564,8 @@ export default function App() {
                       <input
                         type="text"
                         placeholder="例如：0912345678"
-                        value={landlordSelfPhone}
-                        onChange={(e) => setLandlordSelfPhone(e.target.value)}
+                        value={unifiedRegisterPhone}
+                        onChange={(e) => setUnifiedRegisterPhone(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
                         required
                       />
@@ -3367,18 +3574,20 @@ export default function App() {
                       <label className="block text-xs font-bold text-slate-600 mb-1.5">設定登入密碼</label>
                       <input
                         type="password"
-                        placeholder="請設定密碼"
-                        value={landlordSelfPassword}
-                        onChange={(e) => setLandlordSelfPassword(e.target.value)}
+                        placeholder="請設定密碼（6碼以上）"
+                        value={unifiedRegisterPassword}
+                        onChange={(e) => setUnifiedRegisterPassword(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
                         required
                       />
                     </div>
                     <button
                       type="submit"
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none"
+                      disabled={unifiedRegisterLoading}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      註冊並立即登入
+                      <span>{unifiedRegisterLoading ? '建立中...' : '立即註冊並選擇身分'}</span>
+                      <ArrowRight size={15} />
                     </button>
                   </form>
                 )}
@@ -3469,15 +3678,16 @@ export default function App() {
                     </form>
                   </div>
                 ) : (
-                  <form onSubmit={handleTenantSelfRegister} className="space-y-4">
+                  <form onSubmit={handleUnifiedRegister} className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">租客真實姓名</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1.5">真實姓名</label>
                       <input
                         type="text"
                         placeholder="例如：林小美"
-                        value={tenantSelfName}
-                        onChange={(e) => setTenantSelfName(e.target.value)}
+                        value={unifiedRegisterName}
+                        onChange={(e) => setUnifiedRegisterName(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
                       />
                     </div>
                     <div>
@@ -3485,26 +3695,30 @@ export default function App() {
                       <input
                         type="text"
                         placeholder="例如：0912345678"
-                        value={tenantSelfPhone}
-                        onChange={(e) => setTenantSelfPhone(e.target.value)}
+                        value={unifiedRegisterPhone}
+                        onChange={(e) => setUnifiedRegisterPhone(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1.5">設定登入密碼</label>
                       <input
                         type="password"
-                        placeholder="請設定密碼"
-                        value={tenantSelfPassword}
-                        onChange={(e) => setTenantSelfPassword(e.target.value)}
+                        placeholder="請設定密碼（6碼以上）"
+                        value={unifiedRegisterPassword}
+                        onChange={(e) => setUnifiedRegisterPassword(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
+                        required
                       />
                     </div>
                     <button
                       type="submit"
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none"
+                      disabled={unifiedRegisterLoading}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      確認註冊租客帳戶
+                      <span>{unifiedRegisterLoading ? '建立中...' : '立即註冊並選擇身分'}</span>
+                      <ArrowRight size={15} />
                     </button>
                   </form>
                 )}
@@ -3831,37 +4045,59 @@ export default function App() {
                           <table className="w-full text-left text-sm">
                             <thead>
                               <tr className="text-slate-500 border-b border-slate-100 text-xs">
-                                <th className="pb-3 px-4 font-bold">申請人姓名</th>
+                                <th className="pb-3 px-4 font-bold">申請房東姓名</th>
                                 <th className="pb-3 px-4 font-bold">聯絡電話</th>
+                                <th className="pb-3 px-4 font-bold">身分證 / 統編</th>
+                                <th className="pb-3 px-4 font-bold">通訊地址 / 備註</th>
                                 <th className="pb-3 px-4 font-bold text-right">審核操作</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 text-slate-600">
                               {landlords.filter(l => l.status === 'pending').length === 0 ? (
                                 <tr>
-                                  <td colSpan="3" className="py-8 text-center text-slate-400">目前無待審核的註冊申請</td>
+                                  <td colSpan="5" className="py-8 text-center text-slate-400">目前無待審核的註冊申請</td>
                                 </tr>
                               ) : (
-                                landlords.filter(l => l.status === 'pending').map(lnd => (
-                                  <tr key={lnd.id} className="hover:bg-slate-50/60 transition-colors">
-                                    <td className="py-3.5 px-4 font-bold text-slate-800">{lnd.name}</td>
-                                    <td className="py-3.5 px-4">{lnd.phone}</td>
-                                    <td className="py-3.5 px-4 text-right space-x-2">
-                                      <button
-                                        onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors focus:outline-none"
-                                      >
-                                        核准啟用
-                                      </button>
-                                      <button
-                                        onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
-                                        className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors focus:outline-none"
-                                      >
-                                        拒絕
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))
+                                landlords.filter(l => l.status === 'pending').map(lnd => {
+                                  let appDetails = null;
+                                  try {
+                                    if (lnd.company_name && lnd.company_name.startsWith('{')) {
+                                      appDetails = JSON.parse(lnd.company_name);
+                                    }
+                                  } catch (e) {}
+
+                                  const idNum = appDetails?.idNumber || lnd.id_number || '待查';
+                                  const addr = appDetails?.contactAddress || lnd.contact_address || '未提供';
+                                  const comp = appDetails?.companyName || lnd.company_name || '';
+
+                                  return (
+                                    <tr key={lnd.id} className="hover:bg-slate-50/60 transition-colors">
+                                      <td className="py-3.5 px-4 font-bold text-slate-800">
+                                        <div>{lnd.name}</div>
+                                        {comp && !comp.startsWith('{') && (
+                                          <div className="text-[11px] text-indigo-600 font-normal">{comp}</div>
+                                        )}
+                                      </td>
+                                      <td className="py-3.5 px-4 font-medium">{lnd.phone}</td>
+                                      <td className="py-3.5 px-4 font-mono text-xs font-bold text-slate-700">{idNum}</td>
+                                      <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs truncate" title={addr}>{addr}</td>
+                                      <td className="py-3.5 px-4 text-right space-x-2">
+                                        <button
+                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors focus:outline-none cursor-pointer"
+                                        >
+                                          核准啟用
+                                        </button>
+                                        <button
+                                          onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
+                                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors focus:outline-none cursor-pointer"
+                                        >
+                                          拒絕
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
                               )}
                             </tbody>
                           </table>
@@ -3872,31 +4108,45 @@ export default function App() {
                           {landlords.filter(l => l.status === 'pending').length === 0 ? (
                             <div className="py-8 text-center text-slate-400 text-sm">目前無待審核的註冊申請</div>
                           ) : (
-                            landlords.filter(l => l.status === 'pending').map(lnd => (
-                              <div key={`m-pend-${lnd.id}`} className="bg-amber-50/50 border border-amber-200/80 rounded-xl p-4 space-y-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="font-bold text-slate-800 text-sm">{lnd.name}</span>
-                                  <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold">待審核</span>
+                            landlords.filter(l => l.status === 'pending').map(lnd => {
+                              let appDetails = null;
+                              try {
+                                if (lnd.company_name && lnd.company_name.startsWith('{')) {
+                                  appDetails = JSON.parse(lnd.company_name);
+                                }
+                              } catch (e) {}
+
+                              const idNum = appDetails?.idNumber || lnd.id_number || '待查';
+                              const addr = appDetails?.contactAddress || lnd.contact_address || '未提供';
+
+                              return (
+                                <div key={`m-pend-${lnd.id}`} className="bg-amber-50/50 border border-amber-200/80 rounded-xl p-4 space-y-2.5">
+                                  <div className="flex justify-between items-center">
+                                    <span className="font-bold text-slate-800 text-sm">{lnd.name}</span>
+                                    <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold">待審核</span>
+                                  </div>
+                                  <div className="text-xs text-slate-600 space-y-1">
+                                    <div>電話：<a href={`tel:${lnd.phone}`} className="text-indigo-600 font-semibold underline">{lnd.phone}</a></div>
+                                    <div>身分證/統編：<span className="font-mono font-bold text-slate-800">{idNum}</span></div>
+                                    <div className="truncate">通訊地址：<span className="text-slate-800">{addr}</span></div>
+                                  </div>
+                                  <div className="flex gap-2 pt-2 border-t border-amber-200/50">
+                                    <button
+                                      onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
+                                    >
+                                      核准啟用
+                                    </button>
+                                    <button
+                                      onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
+                                      className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
+                                    >
+                                      拒絕
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="text-xs text-slate-600">
-                                  電話：<a href={`tel:${lnd.phone}`} className="text-indigo-600 font-semibold underline">{lnd.phone}</a>
-                                </div>
-                                <div className="flex gap-2 pt-2 border-t border-amber-200/50">
-                                  <button
-                                    onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
-                                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-xs font-bold text-center"
-                                  >
-                                    核准啟用
-                                  </button>
-                                  <button
-                                    onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
-                                    className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center"
-                                  >
-                                    拒絕
-                                  </button>
-                                </div>
-                              </div>
-                            ))
+                              );
+                            })
                           )}
                         </div>
                       </div>
@@ -6627,7 +6877,7 @@ export default function App() {
       {/* ALL MODALS */}
       {activeModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className={`bg-white rounded-2xl shadow-xl border border-slate-100 w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay') ? 'max-w-xl' : 'max-w-lg'
+          <div className={`bg-white rounded-2xl shadow-xl border border-slate-100 w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay' || activeModal === 'roleOnboarding' || activeModal === 'landlordApplication') ? 'max-w-xl' : 'max-w-lg'
             }`}>
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -6638,6 +6888,8 @@ export default function App() {
                 {activeModal === 'manageBankInfo' && '設定收款帳戶資訊'}
                 {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
                 {activeModal === 'lineFirstLogin' && '🎉 首次 LINE 登入 - 請完善會員資料'}
+                {activeModal === 'roleOnboarding' && '🎉 歡迎加入！請選擇您的會員身分'}
+                {activeModal === 'landlordApplication' && '🏢 填寫房東身分審核資料'}
                 {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
@@ -8203,6 +8455,247 @@ export default function App() {
                 </form>
               )}
 
+              {/* Role Onboarding Modal: 我是房客 vs 我是房東 */}
+              {activeModal === 'roleOnboarding' && (
+                <div className="space-y-6">
+                  <div className="text-center space-y-1.5 border-b border-slate-100 pb-4">
+                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-2 shadow-xs">
+                      <Sparkles size={24} />
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800">
+                      歡迎，{onboardingUser?.name || '新會員'}！請選擇您的系統身分
+                    </h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      請依據您的使用需求選擇身分，系統將即刻為您開啟專屬的租屋或管理專區。
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Option 1: Tenant */}
+                    <div className="bg-emerald-50/50 border-2 border-emerald-200 hover:border-emerald-500 rounded-2xl p-5 flex flex-col justify-between transition-all hover:shadow-sm">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <div className="p-3 bg-emerald-100 text-emerald-700 rounded-xl">
+                            <Home size={24} />
+                          </div>
+                          <span className="bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-2xs">
+                            ⚡ 即開即用・免審核
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-emerald-950">我是房客 (Tenant)</h4>
+                          <p className="text-xs text-emerald-850 mt-1 leading-relaxed">
+                            適合找房、承租中的房客，享有個人化專屬中心。
+                          </p>
+                        </div>
+                        <ul className="text-xs text-slate-600 space-y-1.5 pt-2 border-t border-emerald-200/60 font-medium">
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-emerald-600 flex-shrink-0" />
+                            <span>線上即時查看合約細節與履約押金</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-emerald-600 flex-shrink-0" />
+                            <span>查閱每月租金與水電帳單明細</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-emerald-600 flex-shrink-0" />
+                            <span>回報已繳費用與電子收據下載</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSelectTenantRole}
+                        disabled={onboardingLoading}
+                        className="mt-5 w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>{onboardingLoading ? '開通中...' : '開通房客專區 (直接進入)'}</span>
+                        <ArrowRight size={15} />
+                      </button>
+                    </div>
+
+                    {/* Option 2: Landlord */}
+                    <div className="bg-indigo-50/50 border-2 border-indigo-200 hover:border-indigo-500 rounded-2xl p-5 flex flex-col justify-between transition-all hover:shadow-sm">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <div className="p-3 bg-indigo-100 text-indigo-700 rounded-xl">
+                            <Building size={24} />
+                          </div>
+                          <span className="bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow-2xs">
+                            🛡️ 填寫認證・管理員審核
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-indigo-950">我是房東 (Landlord)</h4>
+                          <p className="text-xs text-indigo-850 mt-1 leading-relaxed">
+                            適合屋主、房產管理者、包租代管。
+                          </p>
+                        </div>
+                        <ul className="text-xs text-slate-600 space-y-1.5 pt-2 border-t border-indigo-200/60 font-medium">
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-indigo-600 flex-shrink-0" />
+                            <span>房源房間號與專屬地址庫管理</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-indigo-600 flex-shrink-0" />
+                            <span>建立租約、自動出帳與租金對帳</span>
+                          </li>
+                          <li className="flex items-center gap-1.5">
+                            <CheckCircle size={13} className="text-indigo-600 flex-shrink-0" />
+                            <span>租金收款入帳審核與收據開立</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSelectLandlordRole}
+                        className="mt-5 w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>下一步：填寫房東審核資料</span>
+                        <ArrowRight size={15} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Landlord Application Form Modal */}
+              {activeModal === 'landlordApplication' && (
+                <div className="space-y-4">
+                  <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 flex items-start gap-3">
+                    <div className="p-2 bg-indigo-600 text-white rounded-xl flex-shrink-0">
+                      <ShieldCheck size={20} />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h4 className="text-sm font-bold text-indigo-950">房東身分真實性查核</h4>
+                      <p className="text-xs text-indigo-800 leading-relaxed">
+                        為維護全平台租賃安全與租客權益，房東身分需填寫基本查核資料，送出後由平台管理員確認後方可開通完整房東權限。
+                      </p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSubmitLandlordApplication} className="space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          房東姓名 / 負責人姓名 <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={onboardingUser?.name || ''}
+                          disabled
+                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          聯絡電話號碼 <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={onboardingUser?.phone || ''}
+                          disabled
+                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        身分證字號 / 居留證號 / 統一編號 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="例如：A123456789 或 公司統編 8 碼"
+                        value={landlordAppForm.idNumber}
+                        onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold uppercase"
+                        required
+                      />
+                      <span className="text-[11px] text-slate-400 mt-0.5 block">
+                        供平台總管理員查核身分真實性與租屋合規，資料採高規格嚴密保護。
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="例如：台北市中正區忠孝東路一段 100 號 5 樓"
+                        value={landlordAppForm.contactAddress}
+                        onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          公司抬頭 / 物業品牌名稱 (選填)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="例如：安居物業管理 或 個人"
+                          value={landlordAppForm.companyName}
+                          onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          預設收款銀行機構與帳號 (選填)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="例如：玉山銀行(808) 1234567890"
+                          value={landlordAppForm.bankAccount}
+                          onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        補充說明 / 備註 (選填)
+                      </label>
+                      <textarea
+                        rows="2"
+                        placeholder="可填寫管理物業座落區域或額外說明..."
+                        value={landlordAppForm.notes}
+                        onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white"
+                      />
+                    </div>
+
+                    <div className="pt-3 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setActiveModal('roleOnboarding')}
+                        className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs sm:text-sm transition-colors focus:outline-none cursor-pointer"
+                      >
+                        返回上一步
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={landlordAppLoading}
+                        className="flex-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-colors focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <ShieldCheck size={16} />
+                        <span>{landlordAppLoading ? '申請送出中...' : '確認送出申請 (等待管理員開通)'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
               {/* First-Time LINE Login Profile Completion Modal */}
               {activeModal === 'lineFirstLogin' && (
                 <div className="space-y-4">
@@ -8666,6 +9159,69 @@ export default function App() {
                 </form>
               )}
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending Landlord Approval Notice Dialog */}
+      {pendingLandlordNotice.open && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 sm:p-8 text-center space-y-5">
+            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-3xl flex items-center justify-center mx-auto shadow-inner border border-amber-200">
+              <Clock size={32} />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-block bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full border border-amber-300">
+                ⏳ 房東身分審核中 (Pending Approval)
+              </span>
+              <h3 className="text-xl font-bold text-slate-800">您的房東帳號申請已送出！</h3>
+              <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                為了保障全平台租屋真實性與租客權益，管理員將於 24 小時內確認您的身分資訊。開通後即可登入使用完整房東管理系統。
+              </p>
+            </div>
+
+            {pendingLandlordNotice.data && (
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left text-xs space-y-2 text-slate-600 font-medium">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">申請人姓名：</span>
+                  <span className="font-bold text-slate-800">{pendingLandlordNotice.data.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">聯絡電話：</span>
+                  <span className="font-semibold text-slate-800">{pendingLandlordNotice.data.phone}</span>
+                </div>
+                {pendingLandlordNotice.data.idNumber && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">身分證/統編：</span>
+                    <span className="font-mono text-slate-800">{pendingLandlordNotice.data.idNumber}</span>
+                  </div>
+                )}
+                {pendingLandlordNotice.data.contactAddress && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">通訊地址：</span>
+                    <span className="font-medium text-slate-800 text-right truncate max-w-[200px]">{pendingLandlordNotice.data.contactAddress}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-1 border-t border-slate-200/60 text-[11px] text-slate-400">
+                  <span>送出時間：</span>
+                  <span>{pendingLandlordNotice.data.submittedAt || '近期'}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingLandlordNotice({ open: false, data: null });
+                  setRole('portal');
+                }}
+                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                我知道了，返回首頁
+              </button>
             </div>
           </div>
         </div>
