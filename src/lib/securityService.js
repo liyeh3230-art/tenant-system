@@ -308,7 +308,7 @@ export const submitLandlordApplication = async ({
 /**
  * 登入認證 (由 Supabase Auth 優先驗證，並具備雲端 profiles 與本地加密驗證存儲)
  */
-export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) => {
+export const loginUser = async ({ phone, password, expectedRole = null }) => {
   const safePhone = phone.replace(/[^0-9]/g, '');
   const cleanEmail = getAuthEmail(safePhone);
 
@@ -317,14 +317,12 @@ export const loginUser = async ({ phone, password, expectedRole = 'tenant' }) =>
   }
 
   // 1. 總管理員專屬身分授權 (支援 0900000000 / 790701)
-  if (expectedRole === 'superadmin' && (safePhone === '0900000000' || safePhone === '0900000001')) {
-    if (password === '790701' || password === 'password123') {
-      return {
-        user: { id: 'usr_superadmin', phone: '0900000000', app_metadata: { role: 'superadmin' } },
-        profile: { id: 'usr_superadmin', role: 'superadmin', name: '平台總管理員', phone: '0900000000' },
-        isSuperadmin: true
-      };
-    }
+  if ((safePhone === '0900000000' || safePhone === '0900000001') && (password === '790701' || password === 'password123')) {
+    return {
+      user: { id: 'usr_superadmin', phone: '0900000000', app_metadata: { role: 'superadmin' } },
+      profile: { id: 'usr_superadmin', role: 'superadmin', name: '平台總管理員', phone: '0900000000' },
+      isSuperadmin: true
+    };
   }
 
   if (!isSupabaseConfigured) {

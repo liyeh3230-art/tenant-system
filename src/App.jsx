@@ -208,13 +208,13 @@ export default function App() {
   const [tenantLoginPhone, setTenantLoginPhone] = useState('');
   const [tenantLoginPassword, setTenantLoginPassword] = useState('');
 
-  // --- 統一註冊與身分開通 (Unified Registration & Onboarding States) ---
-  const [portalAuthTab, setPortalAuthTab] = useState('login'); // 'login' | 'register'
-  const [portalRoleTarget, setPortalRoleTarget] = useState('tenant'); // 'tenant' | 'landlord'
-  const [unifiedRegisterName, setUnifiedRegisterName] = useState('');
-  const [unifiedRegisterPhone, setUnifiedRegisterPhone] = useState('');
-  const [unifiedRegisterPassword, setUnifiedRegisterPassword] = useState('');
-  const [unifiedRegisterLoading, setUnifiedRegisterLoading] = useState(false);
+  // --- 統一登入與註冊狀態 (Unified Auth & Onboarding States) ---
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authPhone, setAuthPhone] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authShowPassword, setAuthShowPassword] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
 
   // 註冊後身分導引與詳細資料
   const [onboardingUser, setOnboardingUser] = useState(null); // { id, phone, name }
@@ -1001,12 +1001,136 @@ export default function App() {
     }
   };
 
+  // --- 統一登入送出函式 (Unified Member Login: 房東/房客/管理員共用單一入口) ---
+  const handleUnifiedLogin = async (e) => {
+    if (e) e.preventDefault();
+    const cleanPhone = String(authPhone || '').replace(/[^0-9]/g, '').trim();
+    const cleanPassword = String(authPassword || '').trim();
+
+    if (!cleanPhone || cleanPhone.length < 8) {
+      showToast('請填寫有效的手機號碼！', 'warning');
+      return;
+    }
+    if (!cleanPassword) {
+      showToast('請輸入您的登入密碼！', 'warning');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const authResult = await loginUser({ phone: cleanPhone, password: cleanPassword });
+      const userProfile = authResult.profile;
+
+      // 1. 系統總管理員
+      if (authResult.isSuperadmin || userProfile?.role === 'superadmin') {
+        setCurrentUser(authResult.user);
+        setIsSuperadminAuthenticated(true);
+        setRole('superadmin');
+        setActiveTab('landlords');
+        setAuthPassword('');
+        showToast('🎉 系統總管理員身分認證成功！', 'success');
+        fetchSupabaseData();
+        return;
+      }
+
+      // 2. 房東帳號
+      if (userProfile?.role === 'landlord') {
+        const { data: landlordAccount } = await supabase
+          .from('landlords')
+          .select('*')
+          .eq('id', userProfile.id)
+          .maybeSingle();
+
+        if (landlordAccount && (landlordAccount.status === 'pending' || landlordAccount.status === 'rejected')) {
+          await logoutUser();
+          setPendingLandlordNotice({
+            open: true,
+            data: {
+              name: userProfile.name,
+              phone: cleanPhone,
+              companyName: landlordAccount.company_name,
+              submittedAt: landlordAccount.created_at ? new Date(landlordAccount.created_at).toLocaleDateString() : '近日',
+            }
+          });
+          showToast('房東帳戶身分審核中，請待管理員確認開通後登入。', 'warning');
+          return;
+        }
+
+        const targetId = userProfile.id;
+        setCurrentUser(authResult.user);
+        setCurrentLandlordId(targetId);
+        setCurrentLandlordPhone(cleanPhone);
+        setRole('admin');
+        setActiveTab('dashboard');
+        setAuthPassword('');
+
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify({
+            id: targetId,
+            phone: cleanPhone,
+            name: userProfile.name,
+            role: 'landlord'
+          }));
+        } catch (e) {}
+
+        showToast(`歡迎回來，${userProfile.name} 房東！`, 'success');
+        fetchSupabaseData();
+        return;
+      }
+
+      // 3. 租客帳號
+      if (userProfile?.role === 'tenant') {
+        const targetId = userProfile.id;
+        setCurrentUser(authResult.user);
+        setCurrentTenantPhone(cleanPhone);
+        setRole('tenant');
+        setActiveTab('portal');
+        setAuthPassword('');
+
+        const userLeases = leases.filter(l =>
+          l.phone.replace(/[^0-9]/g, '') === cleanPhone ||
+          (l.coPhone && l.coPhone.replace(/[^0-9]/g, '') === cleanPhone)
+        );
+        if (userLeases.length > 0) {
+          setCurrentTenantLeaseId(userLeases[0].id);
+        }
+
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify({
+            id: targetId,
+            phone: cleanPhone,
+            name: userProfile.name,
+            role: 'tenant'
+          }));
+        } catch (e) {}
+
+        showToast(`歡迎回來，${userProfile.name}！`, 'success');
+        fetchSupabaseData();
+        return;
+      }
+
+      // 4. 未選身分 (unassigned) -> 彈出身分選擇導引
+      setOnboardingUser({
+        id: userProfile?.id || authResult.user?.id,
+        phone: cleanPhone,
+        name: userProfile?.name || '新會員',
+      });
+      setActiveModal('roleOnboarding');
+      setAuthPassword('');
+      showToast('歡迎回來！請選擇您的系統身分（我是房客或我是房東）。', 'info');
+    } catch (err) {
+      showToast('登入失敗：帳號或密碼錯誤，請確認後重試。', 'error');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   // --- 統一註冊送出函式 (Unified Phone Registration) ---
   const handleUnifiedRegister = async (e) => {
     if (e) e.preventDefault();
-    const cleanName = sanitizeText(unifiedRegisterName).trim();
-    const cleanPhone = unifiedRegisterPhone.replace(/[^0-9]/g, '').trim();
-    const password = unifiedRegisterPassword;
+    const cleanName = sanitizeText(authName).trim();
+    const cleanPhone = String(authPhone || '').replace(/[^0-9]/g, '').trim();
+    const cleanPassword = String(authPassword || '').trim();
 
     if (!cleanName || cleanName.length < 2) {
       showToast('請填寫真實姓名（至少2個字）！', 'warning');
@@ -1016,23 +1140,22 @@ export default function App() {
       showToast('請填寫有效的手機號碼！', 'warning');
       return;
     }
-    if (!password || password.length < 6) {
+    if (!cleanPassword || cleanPassword.length < 6) {
       showToast('密碼長度至少需 6 碼以上！', 'warning');
       return;
     }
 
-    setUnifiedRegisterLoading(true);
+    setAuthLoading(true);
     try {
       const regResult = await registerUser({
         name: cleanName,
         phone: cleanPhone,
-        password: password,
+        password: cleanPassword,
         requestedRole: 'unassigned',
       });
 
-      setUnifiedRegisterName('');
-      setUnifiedRegisterPhone('');
-      setUnifiedRegisterPassword('');
+      setAuthName('');
+      setAuthPassword('');
 
       setOnboardingUser({
         id: regResult.id,
@@ -1041,11 +1164,11 @@ export default function App() {
       });
 
       setActiveModal('roleOnboarding');
-      showToast('🎉 帳號建立成功！請選擇您的會員身分（房客或房東）。', 'success');
+      showToast('🎉 帳號建立成功！請選擇您的系統身分（我是房客或我是房東）。', 'success');
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
     } finally {
-      setUnifiedRegisterLoading(false);
+      setAuthLoading(false);
     }
   };
 
@@ -3120,6 +3243,8 @@ export default function App() {
     );
   };
 
+  const isAuthScreen = role === 'portal' || (!currentLandlordId && !currentTenantPhone && !isSuperadminAuthenticated);
+
   return (
     <div className="flex h-screen bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
 
@@ -3176,9 +3301,10 @@ export default function App() {
         />
       )}
 
-      {/* Sidebar Navigation */}
-      <div className={`fixed md:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col justify-between transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}>
+      {/* Sidebar Navigation (Only shown when authenticated) */}
+      {!isAuthScreen && (
+        <div className={`fixed md:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 flex flex-col justify-between transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          }`}>
         <div>
           {/* Brand Logo & Switcher */}
           <div className="p-6 border-b border-slate-800 flex items-center justify-between">
@@ -3319,120 +3445,343 @@ export default function App() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Main Panel */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Header */}
         <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-4 sm:px-8 flex-shrink-0">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="md:hidden text-gray-500 hover:text-gray-700 focus:outline-none p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              <Menu size={22} />
-            </button>
-
-            {/* Search Bar */}
-            <div className="flex items-center text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg w-40 sm:w-64 transition-all">
-              <Search size={18} className="mr-2 text-gray-400 flex-shrink-0" />
-              <input
-                type="text"
-                placeholder="搜尋..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-transparent border-none outline-none text-sm w-full font-medium text-gray-750"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600 focus:outline-none">
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* User Section */}
-          <div className="flex items-center space-x-3 sm:space-x-4">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
-                {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
+          {isAuthScreen ? (
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
+                  <Building size={20} />
+                </div>
+                <div>
+                  <h1 className="font-bold text-base text-slate-800 tracking-wide">智慧租屋管理整合系統</h1>
+                  <p className="text-[10px] text-slate-400 font-medium">Smart Rental Cloud Platform</p>
+                </div>
               </div>
-              <span className="text-xs sm:text-sm font-semibold text-gray-700 max-w-[80px] sm:max-w-none truncate">
-                {role === 'superadmin' ? '總管理員' : (role === 'admin' && currentLandlordId) ? `${landlords.find(l => l.id === currentLandlordId)?.name || '房東'} (房東)` : role === 'admin' ? '未登入房東' : (role === 'tenant' && currentTenantPhone) ? `${registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'} (租客)` : '訪客 (未登入)'}
-              </span>
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-50 border border-slate-200 px-3.5 py-1.5 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>雲端服務運行中</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setIsMobileMenuOpen(true)}
+                  className="md:hidden text-gray-500 hover:text-gray-700 focus:outline-none p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <Menu size={22} />
+                </button>
+
+                {/* Search Bar */}
+                <div className="flex items-center text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg w-40 sm:w-64 transition-all">
+                  <Search size={18} className="mr-2 text-gray-400 flex-shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="搜尋..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="bg-transparent border-none outline-none text-sm w-full font-medium text-gray-750"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600 focus:outline-none">
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* User Section */}
+              <div className="flex items-center space-x-3 sm:space-x-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
+                    {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
+                  </div>
+                  <span className="text-xs sm:text-sm font-semibold text-gray-700 max-w-[80px] sm:max-w-none truncate">
+                    {role === 'superadmin' ? '總管理員' : (role === 'admin' && currentLandlordId) ? `${landlords.find(l => l.id === currentLandlordId)?.name || '房東'} (房東)` : role === 'admin' ? '未登入房東' : (role === 'tenant' && currentTenantPhone) ? `${registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'} (租客)` : '訪客 (未登入)'}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </header>
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-50/50">
           <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
 
-            {/* PORTAL / ROLE SELECTION SCREEN */}
-            {role === 'portal' && (
-              <div className="min-h-[75vh] flex flex-col justify-center items-center p-4">
-                <div className="max-w-3xl w-full text-center space-y-6">
-                  <div className="inline-flex p-4 bg-indigo-50 text-indigo-600 rounded-3xl shadow-sm mb-2">
-                    <Building size={48} />
+            {/* UNIFIED AUTH SCREEN (SINGLE ENTRY FOR LOGIN & REGISTER) */}
+            {(role === 'portal' || (!currentLandlordId && !currentTenantPhone && !isSuperadminAuthenticated)) && (
+              <div className="relative py-4 sm:py-8 flex flex-col justify-center items-center">
+                {/* Decorative Ambient Background */}
+                <div className="absolute top-1/4 -left-20 w-80 h-80 bg-indigo-200/35 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-10 -right-20 w-80 h-80 bg-emerald-200/35 rounded-full blur-3xl pointer-events-none" />
+
+                {/* Central Glassmorphic Card */}
+                <div className="relative z-10 max-w-md w-full bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  {/* Brand Header */}
+                  <div className="pt-8 pb-6 px-6 sm:px-8 text-center border-b border-slate-100 bg-gradient-to-b from-slate-50/80 to-white">
+                    <div className="w-14 h-14 bg-gradient-to-tr from-indigo-600 via-indigo-500 to-indigo-700 text-white rounded-2xl flex items-center justify-center mx-auto shadow-md shadow-indigo-200 mb-3">
+                      <Building size={28} />
+                    </div>
+                    <h1 className="text-2xl font-black text-slate-800 tracking-tight">
+                      智慧租屋管理整合系統
+                    </h1>
+                    <p className="text-xs text-slate-500 mt-1 font-medium">
+                      房東與租客專屬雲端入口・帳單・合約一站完成
+                    </p>
+                    <div className="flex items-center justify-center gap-2 mt-3 text-[11px] font-bold">
+                      <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-100">
+                        ⚡ 單一入口免分流
+                      </span>
+                      <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-100">
+                        🛡️ 雲端安全加密
+                      </span>
+                    </div>
                   </div>
-                  <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
-                    智慧租屋管理系統
-                  </h1>
-                  <p className="text-base sm:text-lg text-slate-500 max-w-xl mx-auto">
-                    請選取您的身分進入系統，體驗便捷的房源管理、租約紀錄與租客服務。
-                  </p>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 text-left">
-                    {/* Landlord Portal Card */}
-                    <div
-                      onClick={() => {
-                        setRole('admin');
-                        setActiveTab('dashboard');
-                      }}
-                      className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-indigo-500 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
+                  {/* Segmented Pill Tabs */}
+                  <div className="p-1.5 mx-6 sm:mx-8 mt-5 bg-slate-100/90 rounded-2xl flex relative">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('login')}
+                      className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        authMode === 'login'
+                          ? 'bg-white text-indigo-600 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
                     >
-                      <div className="space-y-4">
-                        <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                          <Building size={24} />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">我是房東</h3>
-                          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                            管理房間房號、廣告刊登、租約資訊紀錄、帳單產生與修繕進度。
-                          </p>
-                        </div>
-                      </div>
-                      <div className="pt-6 flex items-center text-xs font-bold text-indigo-600">
-                        <span>登入房東後台 →</span>
-                      </div>
-                    </div>
-
-                    {/* Tenant Portal Card */}
-                    <div
-                      onClick={() => {
-                        setRole('tenant');
-                        setActiveTab('portal');
-                      }}
-                      className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-emerald-500 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
+                      <KeyRound size={15} />
+                      <span>會員登入</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('register')}
+                      className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        authMode === 'register'
+                          ? 'bg-white text-emerald-600 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
                     >
-                      <div className="space-y-4">
-                        <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                          <Home size={24} />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">我是租客</h3>
-                          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                            註冊租客帳戶，即時檢視承租資訊、繳納租金帳單與查看電子收據。
-                          </p>
-                        </div>
-                      </div>
-                      <div className="pt-6 flex items-center text-xs font-bold text-emerald-600">
-                        <span>進入租客中心 →</span>
-                      </div>
-                    </div>
+                      <User size={15} />
+                      <span>免費註冊</span>
+                    </button>
+                  </div>
 
-                    {/* Super Admin Portal Card */}
-                    <div
+                  {/* Card Body */}
+                  <div className="p-6 sm:p-8 pt-5">
+                    {authMode === 'login' ? (
+                      <form onSubmit={handleUnifiedLogin} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                            手機號碼
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                              <Phone size={16} />
+                            </div>
+                            <input
+                              type="tel"
+                              placeholder="請輸入註冊的手機號碼 (例如：0912345678)"
+                              value={authPhone}
+                              onChange={(e) => setAuthPhone(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold transition-colors"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <label className="block text-xs font-bold text-slate-700">
+                              登入密碼
+                            </label>
+                          </div>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                              <Lock size={16} />
+                            </div>
+                            <input
+                              type={authShowPassword ? 'text' : 'password'}
+                              placeholder="請輸入您的登入密碼"
+                              value={authPassword}
+                              onChange={(e) => setAuthPassword(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold transition-colors"
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAuthShowPassword(!authShowPassword)}
+                              className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                            >
+                              {authShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={authLoading}
+                          className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-bold py-3 rounded-xl shadow-md shadow-indigo-200 transition-all text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <span>{authLoading ? '身分驗證中...' : '安全登入系統'}</span>
+                          <ArrowRight size={16} />
+                        </button>
+
+                        <div className="relative my-4">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-slate-200/80" />
+                          </div>
+                          <div className="relative flex justify-center text-xs">
+                            <span className="bg-white px-3 text-slate-400 font-semibold">或使用 LINE 帳號授權</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => redirectToLineLogin()}
+                          className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                        >
+                          <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                            <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                          </svg>
+                          <span>LINE 帳號一鍵授權登入</span>
+                        </button>
+
+                        <div className="pt-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setAuthMode('register')}
+                            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors cursor-pointer"
+                          >
+                            還沒有帳號？立即免費註冊新會員 →
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleUnifiedRegister} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                            真實姓名 <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                              <User size={16} />
+                            </div>
+                            <input
+                              type="text"
+                              placeholder="請輸入真實姓名 (例如：林小美)"
+                              value={authName}
+                              onChange={(e) => setAuthName(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold transition-colors"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                            手機號碼 <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                              <Phone size={16} />
+                            </div>
+                            <input
+                              type="tel"
+                              placeholder="請輸入手機號碼 (例如：0912345678)"
+                              value={authPhone}
+                              onChange={(e) => setAuthPhone(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold transition-colors"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                            設定登入密碼 <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                              <Lock size={16} />
+                            </div>
+                            <input
+                              type={authShowPassword ? 'text' : 'password'}
+                              placeholder="請設定密碼（6碼以上）"
+                              value={authPassword}
+                              onChange={(e) => setAuthPassword(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold transition-colors"
+                              required
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAuthShowPassword(!authShowPassword)}
+                              className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                            >
+                              {authShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <span className="text-[11px] text-slate-400 mt-1 block">
+                            註冊完成後，系統將讓您選擇「我是房客」或「我是房東」開通專屬功能。
+                          </span>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={authLoading}
+                          className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold py-3 rounded-xl shadow-md shadow-emerald-200 transition-all text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <span>{authLoading ? '帳號建立中...' : '立即建立帳號並選擇身分'}</span>
+                          <ArrowRight size={16} />
+                        </button>
+
+                        <div className="relative my-4">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-slate-200/80" />
+                          </div>
+                          <div className="relative flex justify-center text-xs">
+                            <span className="bg-white px-3 text-slate-400 font-semibold">或使用 LINE 帳號一鍵註冊</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => redirectToLineLogin()}
+                          className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
+                        >
+                          <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                            <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                          </svg>
+                          <span>LINE 帳號一鍵授權註冊</span>
+                        </button>
+
+                        <div className="pt-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setAuthMode('login')}
+                            className="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer"
+                          >
+                            已有帳號？直接登入 →
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Superadmin discrete link */}
+                  <div className="bg-slate-50/80 px-6 py-3.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <ShieldCheck size={13} className="text-emerald-600" />
+                      <span>256-bit SSL 安全防護</span>
+                    </span>
+                    <button
+                      type="button"
                       onClick={() => {
                         setRole('superadmin');
                         setActiveTab('landlords');
@@ -3440,288 +3789,13 @@ export default function App() {
                         setSuperadminLoginPhone('');
                         setSuperadminPasswordInput('');
                       }}
-                      className="bg-white p-6 rounded-3xl border border-slate-200 hover:border-slate-800 hover:shadow-xl transition-all cursor-pointer group flex flex-col justify-between"
+                      className="text-slate-400 hover:text-slate-700 hover:underline flex items-center gap-1 focus:outline-none cursor-pointer"
                     >
-                      <div className="space-y-4">
-                        <div className="w-12 h-12 bg-slate-100 text-slate-700 rounded-2xl flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-colors">
-                          <Shield size={24} />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900 group-hover:text-slate-900 transition-colors">系統管理員</h3>
-                          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                            全平台房東註冊審核、租客會員名冊管理與全站統計分析。
-                          </p>
-                        </div>
-                      </div>
-                      <div className="pt-6 flex items-center text-xs font-bold text-slate-700">
-                        <span>管理員驗證登入 →</span>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-            )}
-
-            {/* LANDLORD NOT LOGGED IN (LOGIN / REGISTER SCREEN) */}
-            {role === 'admin' && !currentLandlordId && (
-              <div className="max-w-md mx-auto my-8 bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
-                    <Building size={24} />
-                  </div>
-                  <h2 className="text-xl font-bold text-slate-800">房東管理專區</h2>
-                  <p className="text-xs text-slate-500">
-                    {landlordAuthMode === 'login' ? '請輸入您的聯絡電話登入管理後台' : '填寫資料申請註冊房東帳號'}
-                  </p>
-                </div>
-
-                <div className="flex bg-slate-100 p-1 rounded-xl">
-                  <button
-                    onClick={() => setLandlordAuthMode('login')}
-                    className={`flex-1 text-center py-2 rounded-lg text-xs font-bold transition-all ${landlordAuthMode === 'login' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                  >
-                    房東登入
-                  </button>
-                  <button
-                    onClick={() => setLandlordAuthMode('register')}
-                    className={`flex-1 text-center py-2 rounded-lg text-xs font-bold transition-all ${landlordAuthMode === 'register' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                  >
-                    註冊新房東
-                  </button>
-                </div>
-
-                {landlordAuthMode === 'login' ? (
-                  <div className="space-y-4">
-                    <form onSubmit={handleLandlordLogin} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">聯絡電話</label>
-                        <input
-                          type="text"
-                          placeholder="請輸入註冊的手機號碼"
-                          value={landlordLoginPhone}
-                          onChange={(e) => setLandlordLoginPhone(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">登入密碼</label>
-                        <input
-                          type="password"
-                          placeholder="請輸入您的登入密碼"
-                          value={landlordLoginPassword}
-                          onChange={(e) => setLandlordLoginPassword(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                          required
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none"
-                      >
-                        登入房東後台
-                      </button>
-
-                      <div className="relative my-3">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-slate-200" />
-                        </div>
-                        <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用 LINE 帳號登入</span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => redirectToLineLogin('landlord')}
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2.5 text-sm focus:outline-none cursor-pointer text-center"
-                      >
-                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                          <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
-                        </svg>
-                        <span>LINE 帳號一鍵授權登入</span>
-                      </button>
-                    </form>
-                  </div>
-                ) : (
-                  <form onSubmit={handleUnifiedRegister} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">真實姓名</label>
-                      <input
-                        type="text"
-                        placeholder="例如：陳大明"
-                        value={unifiedRegisterName}
-                        onChange={(e) => setUnifiedRegisterName(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">聯絡電話</label>
-                      <input
-                        type="text"
-                        placeholder="例如：0912345678"
-                        value={unifiedRegisterPhone}
-                        onChange={(e) => setUnifiedRegisterPhone(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">設定登入密碼</label>
-                      <input
-                        type="password"
-                        placeholder="請設定密碼（6碼以上）"
-                        value={unifiedRegisterPassword}
-                        onChange={(e) => setUnifiedRegisterPassword(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={unifiedRegisterLoading}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <span>{unifiedRegisterLoading ? '建立中...' : '立即註冊並選擇身分'}</span>
-                      <ArrowRight size={15} />
+                      <Lock size={11} />
+                      <span>系統總管理員專屬通道</span>
                     </button>
-                  </form>
-                )}
-              </div>
-            )}
-
-            {/* TENANT NOT LOGGED IN (LOGIN / REGISTER SCREEN) */}
-            {role === 'tenant' && !currentTenantPhone && (
-              <div className="max-w-md mx-auto my-8 bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
-                    <Home size={24} />
                   </div>
-                  <h2 className="text-xl font-bold text-slate-800">租客會員專區</h2>
-                  <p className="text-xs text-slate-500">
-                    {tenantAuthMode === 'login' ? '請輸入註冊的電話號碼與密碼登入' : '填寫真實姓名與電話完成快速註冊'}
-                  </p>
                 </div>
-
-                <div className="flex bg-slate-100 p-1 rounded-xl">
-                  <button
-                    onClick={() => setTenantAuthMode('login')}
-                    className={`flex-1 text-center py-2 rounded-lg text-xs font-bold transition-all ${tenantAuthMode === 'login' ? 'bg-white text-emerald-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                  >
-                    租客登入
-                  </button>
-                  <button
-                    onClick={() => setTenantAuthMode('register')}
-                    className={`flex-1 text-center py-2 rounded-lg text-xs font-bold transition-all ${tenantAuthMode === 'register' ? 'bg-white text-emerald-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                  >
-                    註冊新租客
-                  </button>
-                </div>
-
-                {tenantAuthMode === 'login' ? (
-                  <div className="space-y-4">
-                    <form onSubmit={handleTenantLogin} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">聯絡電話</label>
-                        <input
-                          type="text"
-                          placeholder="請輸入註冊的手機號碼"
-                          value={tenantLoginPhone}
-                          onChange={(e) => setTenantLoginPhone(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-600 mb-1.5">登入密碼</label>
-                        <input
-                          type="password"
-                          placeholder="請輸入您的登入密碼"
-                          value={tenantLoginPassword}
-                          onChange={(e) => setTenantLoginPassword(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
-                          required
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none"
-                      >
-                        登入租客中心
-                      </button>
-
-                      <div className="relative my-3">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-slate-200" />
-                        </div>
-                        <div className="relative flex justify-center text-xs">
-                          <span className="bg-white px-2 text-slate-400 font-semibold">或使用 LINE 帳號登入</span>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => redirectToLineLogin('tenant')}
-                        className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2.5 text-sm focus:outline-none cursor-pointer text-center"
-                      >
-                        <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                          <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
-                        </svg>
-                        <span>LINE 帳號一鍵授權登入</span>
-                      </button>
-                    </form>
-                  </div>
-                ) : (
-                  <form onSubmit={handleUnifiedRegister} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">真實姓名</label>
-                      <input
-                        type="text"
-                        placeholder="例如：林小美"
-                        value={unifiedRegisterName}
-                        onChange={(e) => setUnifiedRegisterName(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">聯絡電話</label>
-                      <input
-                        type="text"
-                        placeholder="例如：0912345678"
-                        value={unifiedRegisterPhone}
-                        onChange={(e) => setUnifiedRegisterPhone(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1.5">設定登入密碼</label>
-                      <input
-                        type="password"
-                        placeholder="請設定密碼（6碼以上）"
-                        value={unifiedRegisterPassword}
-                        onChange={(e) => setUnifiedRegisterPassword(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold"
-                        required
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={unifiedRegisterLoading}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-xs transition-colors text-sm focus:outline-none flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <span>{unifiedRegisterLoading ? '建立中...' : '立即註冊並選擇身分'}</span>
-                      <ArrowRight size={15} />
-                    </button>
-                  </form>
-                )}
               </div>
             )}
 
