@@ -67,9 +67,48 @@ const MOCK_HOUSE_PHOTOS = [
 ];
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [role, setRole] = useState('portal');
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'superadmin') {
+          return { id: 'usr_superadmin', phone: parsed.phone || '0900000000', role: 'superadmin' };
+        }
+        if (parsed?.id || parsed?.phone) {
+          return { id: parsed.id, phone: parsed.phone, user_metadata: { role: parsed.role, name: parsed.name } };
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const [role, setRole] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'superadmin') return 'superadmin';
+        if (parsed?.role === 'landlord' || parsed?.role === 'admin') return 'admin';
+        if (parsed?.role === 'tenant') return 'tenant';
+      }
+    } catch (e) {}
+    return 'portal';
+  });
+
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'superadmin') return 'landlords';
+        if (parsed?.role === 'tenant') return 'portal';
+        if (parsed?.role === 'landlord' || parsed?.role === 'admin') return 'dashboard';
+      }
+    } catch (e) {}
+    return 'dashboard';
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
 
   const [landlords, setLandlords] = useState([]);
@@ -78,10 +117,39 @@ export default function App() {
   const [payments, setPayments] = useState([]);
   const [historicalLeases, setHistoricalLeases] = useState([]);
 
-  const [currentLandlordId, setCurrentLandlordId] = useState(null);
-  const [currentLandlordPhone, setCurrentLandlordPhone] = useState(null);
+  const [currentLandlordId, setCurrentLandlordId] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'landlord' || parsed?.role === 'admin') return parsed.id;
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const [currentLandlordPhone, setCurrentLandlordPhone] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'landlord' || parsed?.role === 'admin') return parsed.phone;
+      }
+    } catch (e) {}
+    return null;
+  });
+
   const [currentTenantLeaseId, setCurrentTenantLeaseId] = useState(null);
-  const [currentTenantPhone, setCurrentTenantPhone] = useState(null);
+  const [currentTenantPhone, setCurrentTenantPhone] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'tenant') return parsed.phone;
+      }
+    } catch (e) {}
+    return null;
+  });
 
   const [landlordLoginPhone, setLandlordLoginPhone] = useState('');
   const [landlordLoginPassword, setLandlordLoginPassword] = useState('');
@@ -188,8 +256,16 @@ export default function App() {
   const [landlordSelfName, setLandlordSelfName] = useState('');
   const [landlordSelfPhone, setLandlordSelfPhone] = useState('');
   const [landlordSelfPassword, setLandlordSelfPassword] = useState('');
-  // 只在 Supabase Auth 的 app_metadata.role = superadmin 時才設為 true；不存入 localStorage。
-  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(false);
+  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(() => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.role === 'superadmin') return true;
+      }
+    } catch (e) {}
+    return false;
+  });
   const [superadminLoginPhone, setSuperadminLoginPhone] = useState('');
   const [superadminPasswordInput, setSuperadminPasswordInput] = useState('');
   const [superadminLoginLoading, setSuperadminLoginLoading] = useState(false);
@@ -356,6 +432,9 @@ export default function App() {
             note: l.note
           }));
           setLeases(activeLeases);
+          if (activeLeases.length > 0) {
+            setCurrentTenantLeaseId(prev => prev || activeLeases[0].id);
+          }
 
           const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
@@ -758,11 +837,11 @@ export default function App() {
 
             // 向雲端 profiles 核實該會員是否存在且未被刪除
             const query = savedSession.id ? `id.eq.${savedSession.id},phone.eq.${savedSession.phone}` : `phone.eq.${savedSession.phone}`;
-            const { data: profs } = await supabase.from('profiles').select('id, role, phone, name').or(query);
+            const { data: profs, error: pErr } = await supabase.from('profiles').select('id, role, phone, name, deleted_at').or(query);
             const profile = profs?.[0];
             if (!mounted) return;
 
-            if (profile) {
+            if (profile && !profile.deleted_at) {
               const userRole = profile.role || savedSession.role || 'tenant';
               const cleanPhone = String(profile.phone || savedSession.phone).replace(/[^0-9]/g, '');
 
@@ -780,9 +859,15 @@ export default function App() {
                 setCurrentTenantPhone(cleanPhone);
               }
               return;
-            } else {
-              // 會員已遭刪除/註銷
+            } else if (profile && profile.deleted_at) {
+              // 明確遭到管理員刪除/註銷
               localStorage.removeItem('app_auth_session');
+            } else if (!pErr && profs && profs.length === 0) {
+              // 資料庫中確定無此紀錄
+              localStorage.removeItem('app_auth_session');
+            } else {
+              // 網路或未預期錯誤，保持目前已從 localStorage 載入的登入狀態！
+              return;
             }
           }
         } catch (err) {
@@ -790,10 +875,12 @@ export default function App() {
         }
       }
 
-      // 3. 無登入狀態
-      setCurrentUser(null);
-      setIsSuperadminAuthenticated(false);
-      setRole('portal');
+      // 3. 無登入狀態 (僅在 localStorage 確定沒有任何 session 時才重置為 portal)
+      if (!savedSessionStr) {
+        setCurrentUser(null);
+        setIsSuperadminAuthenticated(false);
+        setRole('portal');
+      }
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
@@ -1023,11 +1110,20 @@ export default function App() {
 
       // 1. 系統總管理員
       if (authResult.isSuperadmin || userProfile?.role === 'superadmin') {
-        setCurrentUser(authResult.user);
+        const adminSession = {
+          id: 'usr_superadmin',
+          phone: cleanPhone || '0900000000',
+          name: userProfile?.name || '平台總管理員',
+          role: 'superadmin'
+        };
+        setCurrentUser(authResult.user || adminSession);
         setIsSuperadminAuthenticated(true);
         setRole('superadmin');
         setActiveTab('landlords');
         setAuthPassword('');
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify(adminSession));
+        } catch (e) {}
         showToast('🎉 系統總管理員身分認證成功！', 'success');
         fetchSupabaseData();
         return;
