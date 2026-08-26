@@ -3794,26 +3794,12 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Superadmin discrete link */}
-                  <div className="bg-slate-50/80 px-6 py-3.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1">
+                  {/* Card Security Footer */}
+                  <div className="bg-slate-50/80 px-6 py-3.5 border-t border-slate-100 flex items-center justify-center text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1.5 font-medium">
                       <ShieldCheck size={13} className="text-emerald-600" />
-                      <span>256-bit SSL 安全防護</span>
+                      <span>256-bit SSL 安全加密防護</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRole('superadmin');
-                        setActiveTab('landlords');
-                        setIsSuperadminAuthenticated(false);
-                        setSuperadminLoginPhone('');
-                        setSuperadminPasswordInput('');
-                      }}
-                      className="text-slate-400 hover:text-slate-700 hover:underline flex items-center gap-1 focus:outline-none cursor-pointer"
-                    >
-                      <Lock size={11} />
-                      <span>系統總管理員專屬通道</span>
-                    </button>
                   </div>
                 </div>
               </div>
