@@ -393,63 +393,23 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
 
   const { data: profiles, error: profileError } = await supabase
     .from('profiles')
-    .select('id, role, name, phone, avatar_url, password_hash')
+    .select('id, role, name, phone, avatar_url, password_hash, deleted_at')
     .or(queryClause);
 
   let matchedProfile = profiles?.[0];
 
-  // 🚀 自動修復機制 (Self-Healing)：
-  // 若 Supabase Auth 驗證成功（使用者密碼正確），但 profiles 表中缺少記錄（例如非同步寫入遺漏或先前被不完整清理之孤立帳號）
-  // 自動從 Auth user_metadata 還原並即時寫入 profiles 表與 landlords/tenants 表！
-  if (!matchedProfile && authUser) {
-    try {
-      const meta = authUser.user_metadata || {};
-      const restoredName = meta.name || meta.full_name || '會員';
-      const restoredRole = meta.role || (expectedRole || 'tenant');
-      const restoredPhone = meta.phone || safePhone;
-
-      const { data: restoredProfile } = await supabase
-        .from('profiles')
-        .upsert({
-          id: authUser.id,
-          role: restoredRole,
-          name: restoredName,
-          phone: restoredPhone,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select();
-
-      if (restoredRole === 'landlord') {
-        await supabase.from('landlords').upsert({
-          id: authUser.id,
-          name: restoredName,
-          phone: restoredPhone,
-          status: 'approved',
-          ad_listing_enabled: true,
-          updated_at: new Date().toISOString(),
-        });
-      }
-
-      matchedProfile = restoredProfile?.[0] || {
-        id: authUser.id,
-        role: restoredRole,
-        name: restoredName,
-        phone: restoredPhone,
-      };
-    } catch (healErr) {
-      console.warn('Profile self-healing notice:', healErr);
-    }
-  }
-
-  // ⚠️ 關鍵安全檢驗：若 profiles 表中仍無此會員，才判定帳密錯誤
-  if (!matchedProfile) {
+  // ⚠️ 關鍵安全檢驗：若 profiles 表中無此會員，或明確已被標記刪除/註銷，嚴格拒絕登入！
+  // 絕不自動復活已刪除的帳號！
+  if (!matchedProfile || matchedProfile.deleted_at) {
     if (authUser) {
       try {
         await supabase.auth.signOut();
       } catch (e) {}
     }
-    throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('app_auth_session');
+    }
+    throw new Error('此帳號已遭管理員刪除或註銷，無法登入！');
   }
 
   if (!authUser) {

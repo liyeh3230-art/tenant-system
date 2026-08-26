@@ -1250,7 +1250,7 @@ export default function App() {
       setAuthPassword('');
       showToast('歡迎回來！請選擇您的系統身分（我是房客或我是房東）。', 'info');
     } catch (err) {
-      showToast('登入失敗：帳號或密碼錯誤，請確認後重試。', 'error');
+      showToast(err.message || '登入失敗：帳號或密碼錯誤，請確認後重試。', 'error');
     } finally {
       setAuthLoading(false);
     }
