@@ -1045,14 +1045,24 @@ export default function App() {
           await logoutUser();
           setPendingLandlordNotice({
             open: true,
+            status: landlordAccount.status,
             data: {
+              id: userProfile.id,
               name: userProfile.name,
               phone: cleanPhone,
               companyName: landlordAccount.company_name,
+              idNumber: landlordAccount.id_number,
+              contactAddress: landlordAccount.contact_address,
+              bankName: landlordAccount.bank_name,
+              bankAccount: landlordAccount.bank_account,
               submittedAt: landlordAccount.created_at ? new Date(landlordAccount.created_at).toLocaleDateString() : '近日',
             }
           });
-          showToast('房東帳戶身分審核中，請待管理員確認開通後登入。', 'warning');
+          if (landlordAccount.status === 'rejected') {
+            showToast('您的房東身分審核未通過，請查看詳細說明以進行補件或身分切換。', 'error');
+          } else {
+            showToast('房東帳戶身分審核中，請待管理員確認開通後登入。', 'warning');
+          }
           return;
         }
 
@@ -9244,22 +9254,42 @@ export default function App() {
         </div>
       )}
 
-      {/* Pending Landlord Approval Notice Dialog */}
+      {/* Pending & Rejected Landlord Notice Dialog */}
       {pendingLandlordNotice.open && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-6 sm:p-8 text-center space-y-5">
-            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-3xl flex items-center justify-center mx-auto shadow-inner border border-amber-200">
-              <Clock size={32} />
-            </div>
+            {pendingLandlordNotice.status === 'rejected' ? (
+              <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner border border-rose-200">
+                <XCircle size={32} />
+              </div>
+            ) : (
+              <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-3xl flex items-center justify-center mx-auto shadow-inner border border-amber-200">
+                <Clock size={32} />
+              </div>
+            )}
 
             <div className="space-y-2">
-              <span className="inline-block bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full border border-amber-300">
-                ⏳ 房東身分審核中 (Pending Approval)
-              </span>
-              <h3 className="text-xl font-bold text-slate-800">您的房東帳號申請已送出！</h3>
-              <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
-                為了保障全平台租屋真實性與租客權益，管理員將於 24 小時內確認您的身分資訊。開通後即可登入使用完整房東管理系統。
-              </p>
+              {pendingLandlordNotice.status === 'rejected' ? (
+                <>
+                  <span className="inline-block bg-rose-100 text-rose-800 text-xs font-bold px-3 py-1 rounded-full border border-rose-300">
+                    ❌ 房東身分審核未通過 (Application Rejected)
+                  </span>
+                  <h3 className="text-xl font-bold text-slate-900">很抱歉，您的房東身分審核未獲通過</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                    可能因身分證字號／統編有誤、通訊地址不完整或資料需要補充。您可以重新修正資料後再次送審，或先切換為房客身分立即使用系統。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <span className="inline-block bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full border border-amber-300">
+                    ⏳ 房東身分審核中 (Pending Approval)
+                  </span>
+                  <h3 className="text-xl font-bold text-slate-800">您的房東帳號申請已送出！</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                    為了保障全平台租屋真實性與租客權益，管理員將於 24 小時內確認您的身分資訊。開通後即可登入使用完整房東管理系統。
+                  </p>
+                </>
+              )}
             </div>
 
             {pendingLandlordNotice.data && (
@@ -9291,18 +9321,106 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingLandlordNotice({ open: false, data: null });
-                  setRole('portal');
-                }}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
-              >
-                我知道了，返回首頁
-              </button>
-            </div>
+            {pendingLandlordNotice.status === 'rejected' ? (
+              <div className="space-y-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = pendingLandlordNotice.data;
+                    let appDetails = null;
+                    try {
+                      if (d?.companyName && d.companyName.startsWith('{')) {
+                        appDetails = JSON.parse(d.companyName);
+                      }
+                    } catch (e) {}
+
+                    setOnboardingUser({
+                      id: d?.id,
+                      phone: d?.phone,
+                      name: d?.name,
+                    });
+                    setLandlordAppForm({
+                      companyName: appDetails?.companyName || (!d?.companyName?.startsWith('{') ? d?.companyName : '') || '',
+                      idNumber: appDetails?.idNumber || d?.idNumber || '',
+                      contactAddress: appDetails?.contactAddress || d?.contactAddress || '',
+                      bankName: appDetails?.bankName || d?.bankName || '',
+                      bankAccount: appDetails?.bankAccount || d?.bankAccount || '',
+                      notes: appDetails?.notes || '',
+                    });
+                    setPendingLandlordNotice({ open: false, data: null });
+                    setActiveModal('landlordApplication');
+                  }}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw size={15} />
+                  <span>修改認證資料並重新送審</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const d = pendingLandlordNotice.data;
+                    if (!d?.id) return;
+                    try {
+                      await completeTenantOnboarding({
+                        userId: d.id,
+                        phone: d.phone,
+                        name: d.name,
+                      });
+                      setCurrentUser({
+                        id: d.id,
+                        phone: d.phone,
+                        user_metadata: { role: 'tenant', name: d.name }
+                      });
+                      setRole('tenant');
+                      setCurrentTenantPhone(d.phone);
+                      setActiveTab('portal');
+                      try {
+                        localStorage.setItem('app_auth_session', JSON.stringify({
+                          id: d.id,
+                          phone: d.phone,
+                          name: d.name,
+                          role: 'tenant'
+                        }));
+                      } catch (e) {}
+                      setPendingLandlordNotice({ open: false, data: null });
+                      showToast('🎉 已成功切換為房客身分！歡迎使用租客專區。', 'success');
+                      fetchSupabaseData();
+                    } catch (err) {
+                      showToast('切換身分失敗: ' + (err.message || '請重試'), 'error');
+                    }
+                  }}
+                  className="w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Home size={14} />
+                  <span>先切換為房客身分 (免審核即開即用)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingLandlordNotice({ open: false, data: null });
+                    setRole('portal');
+                  }}
+                  className="w-full py-2 text-slate-400 hover:text-slate-600 text-xs font-semibold cursor-pointer"
+                >
+                  返回首頁
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingLandlordNotice({ open: false, data: null });
+                    setRole('portal');
+                  }}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  我知道了，返回首頁
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
