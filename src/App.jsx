@@ -3480,11 +3480,11 @@ export default function App() {
     <div className="flex h-screen bg-slate-100 text-slate-800 font-sans antialiased overflow-hidden">
 
       {/* Toast notifications */}
-      <div className="fixed top-4 right-4 z-[110] space-y-2 max-w-sm pointer-events-none">
+      <div className="fixed top-4 right-4 left-4 sm:left-auto sm:right-4 z-[110] space-y-2 max-w-sm pointer-events-none">
         {toasts.map(toast => (
           <div
             key={toast.id}
-            className={`p-4 rounded-xl shadow-lg border text-sm font-semibold pointer-events-auto flex items-center gap-2 animate-in slide-in-from-top-2 duration-200 ${toast.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' :
+            className={`p-3.5 sm:p-4 rounded-xl shadow-lg border text-xs sm:text-sm font-semibold pointer-events-auto flex items-center gap-2 animate-in slide-in-from-top-2 duration-200 ${toast.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' :
               toast.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' :
                 'bg-emerald-50 border-emerald-200 text-emerald-800'
               }`}
@@ -3492,7 +3492,7 @@ export default function App() {
             {toast.type === 'error' ? <AlertCircle size={18} className="text-rose-500 flex-shrink-0" /> :
               toast.type === 'warning' ? <AlertCircle size={18} className="text-amber-500 flex-shrink-0" /> :
                 <CheckCircle size={18} className="text-emerald-500 flex-shrink-0" />}
-            <span>{toast.message}</span>
+            <span className="leading-snug">{toast.message}</span>
           </div>
         ))}
       </div>
@@ -3500,7 +3500,7 @@ export default function App() {
       {/* Confirm Dialog Modal (Highest Layer z-[100]) */}
       {confirmDialog && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl p-5 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100 space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
               <AlertCircle size={20} className="text-amber-500" />
               <span>系統確認</span>
@@ -3730,16 +3730,17 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2 sm:space-x-4">
                 <button
                   onClick={() => setIsMobileMenuOpen(true)}
-                  className="md:hidden text-gray-500 hover:text-gray-700 focus:outline-none p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                  className="md:hidden text-slate-600 hover:text-slate-900 focus:outline-none p-2 rounded-xl bg-slate-100 hover:bg-slate-200 transition-colors"
+                  title="開啟選單"
                 >
-                  <Menu size={22} />
+                  <Menu size={20} />
                 </button>
 
-                {/* Search Bar */}
-                <div className="flex items-center text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg w-40 sm:w-64 transition-all">
+                {/* Search Bar - hidden on mobile to give room to pill & profile, visible on sm+ */}
+                <div className="hidden sm:flex items-center text-gray-500 bg-gray-100 px-3 py-1.5 rounded-lg w-40 sm:w-64 transition-all">
                   <Search size={18} className="mr-2 text-gray-400 flex-shrink-0" />
                   <input
                     type="text"
@@ -3757,25 +3758,25 @@ export default function App() {
               </div>
 
               {/* User Section */}
-              <div className="flex items-center space-x-2 sm:space-x-4">
+              <div className="flex items-center space-x-1.5 sm:space-x-4">
                 {/* 頂部身分快速切換膠囊按鈕 (Top Header Role Switcher Pill) */}
                 {(role === 'admin' || role === 'tenant') && (
-                  <div className="flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200 shadow-xs flex-shrink-0">
                     <button
                       type="button"
                       onClick={() => handleSwitchRole('admin')}
-                      className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                         role === 'admin'
                           ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
                       }`}
                       title={isApprovedLandlord ? '切換至房東管理後台' : '申請開通房東身分'}
                     >
-                      <Building size={14} />
+                      <Building size={13} />
                       <span className="hidden sm:inline">房東管理</span>
                       <span className="sm:hidden">房東</span>
                       {!isApprovedLandlord && (
-                        <span className="ml-1 text-[9px] px-1 py-0.2 bg-amber-400/30 text-amber-800 rounded font-semibold">
+                        <span className="ml-0.5 text-[9px] px-1 py-0.2 bg-amber-400/30 text-amber-800 rounded font-semibold">
                           申請
                         </span>
                       )}
@@ -3783,25 +3784,25 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleSwitchRole('tenant')}
-                      className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
                         role === 'tenant'
                           ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
                       }`}
                       title="切換至租客個人中心"
                     >
-                      <Home size={14} />
+                      <Home size={13} />
                       <span className="hidden sm:inline">租客中心</span>
                       <span className="sm:hidden">租客</span>
                     </button>
                   </div>
                 )}
 
-                <div className="flex items-center space-x-2 pl-1 sm:pl-2 border-l border-slate-200/80">
-                  <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
+                <div className="flex items-center space-x-1.5 sm:space-x-2 pl-1 sm:pl-2 border-l border-slate-200/80">
+                  <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-xs sm:text-sm shadow-xs select-none flex-shrink-0">
                     {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (currentTenantName?.[0] || currentUser?.user_metadata?.name?.[0] || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
                   </div>
-                  <span className="text-xs sm:text-sm font-semibold text-gray-700 max-w-[80px] sm:max-w-none truncate">
+                  <span className="hidden md:inline text-xs sm:text-sm font-semibold text-gray-700 max-w-[100px] truncate">
                     {role === 'superadmin' ? '總管理員' : (role === 'admin' && currentLandlordId) ? `${landlords.find(l => l.id === currentLandlordId)?.name || '房東'} (房東)` : role === 'admin' ? '未登入房東' : (role === 'tenant' && currentTenantPhone) ? `${currentTenantName || currentUser?.user_metadata?.name || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'} (租客)` : '訪客 (未登入)'}
                   </span>
                 </div>
@@ -3811,12 +3812,12 @@ export default function App() {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-50/50">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-8 pb-20 sm:pb-8 bg-slate-50/50">
           <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-2 duration-300">
 
             {/* UNIFIED AUTH SCREEN (SINGLE ENTRY FOR LOGIN & REGISTER) */}
             {(role === 'portal' || (!currentLandlordId && !currentTenantPhone && !isSuperadminAuthenticated)) && (
-              <div className="relative py-4 sm:py-8 flex flex-col justify-center items-center">
+              <div className="relative py-4 sm:py-8 flex flex-col justify-center items-center overflow-hidden w-full max-w-full">
                 {/* Decorative Ambient Background */}
                 <div className="absolute top-1/4 -left-20 w-80 h-80 bg-indigo-200/35 rounded-full blur-3xl pointer-events-none" />
                 <div className="absolute bottom-10 -right-20 w-80 h-80 bg-emerald-200/35 rounded-full blur-3xl pointer-events-none" />
@@ -4645,20 +4646,21 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                    <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto">
                       <button
                         onClick={handleOpenLandlordBankModal}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center border border-slate-250 flex-1 sm:flex-none focus:outline-none"
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center border border-slate-250 focus:outline-none whitespace-nowrap"
                       >
-                        <CreditCard size={16} className="mr-1.5 text-slate-550" />
+                        <CreditCard size={15} className="mr-1 sm:mr-1.5 text-slate-550 flex-shrink-0" />
                         <span>設定收款帳戶</span>
                       </button>
                       <button
                         onClick={handleOpenAddCustomBill}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center shadow-xs flex-1 sm:flex-none"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center shadow-xs whitespace-nowrap"
                       >
-                        <Plus size={16} className="mr-1.5" />
-                        <span>登記帳單/已繳紀錄</span>
+                        <Plus size={15} className="mr-1 sm:mr-1.5 flex-shrink-0" />
+                        <span className="hidden sm:inline">登記帳單/已繳紀錄</span>
+                        <span className="sm:hidden">登記新帳單</span>
                       </button>
                     </div>
                   </div>
@@ -4920,10 +4922,10 @@ export default function App() {
                       <Filter size={18} className="text-indigo-600" />
                       <span className="text-sm font-bold text-slate-800">費用類別快速篩選：</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-1.5 scrollbar-none no-scrollbar flex-nowrap md:flex-wrap">
                       <button
                         onClick={() => setFilterPaymentCategory('all')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${filterPaymentCategory === 'all'
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${filterPaymentCategory === 'all'
                           ? 'bg-slate-800 text-white shadow-xs'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
@@ -4940,7 +4942,7 @@ export default function App() {
                           <button
                             key={catKey}
                             onClick={() => setFilterPaymentCategory(catKey)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center space-x-1 ${filterPaymentCategory === catKey
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center space-x-1 flex-shrink-0 whitespace-nowrap ${filterPaymentCategory === catKey
                               ? 'bg-indigo-600 text-white shadow-xs'
                               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
@@ -4952,7 +4954,7 @@ export default function App() {
                       })}
                       <button
                         onClick={() => setFilterPaymentCategory('void')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center space-x-1 ${filterPaymentCategory === 'void'
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center space-x-1 flex-shrink-0 whitespace-nowrap ${filterPaymentCategory === 'void'
                           ? 'bg-rose-600 text-white shadow-xs'
                           : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
                           }`}
@@ -7265,12 +7267,12 @@ export default function App() {
 
       {/* ALL MODALS */}
       {activeModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className={`bg-white rounded-2xl shadow-xl border border-slate-100 w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay' || activeModal === 'roleOnboarding' || activeModal === 'landlordApplication') ? 'max-w-xl' : 'max-w-lg'
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+          <div className={`bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-100 w-full overflow-hidden animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 max-h-[92vh] flex flex-col ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay' || activeModal === 'roleOnboarding' || activeModal === 'landlordApplication') ? 'max-w-xl' : 'max-w-lg'
             }`}>
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-bold text-slate-800">
+            <div className="px-4 py-3.5 sm:px-6 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 flex-shrink-0">
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">
                 {activeModal === 'addProperty' && '新增房間房號'}
                 {activeModal === 'editProperty' && '編輯房源資訊'}
                 {activeModal === 'manageAddresses' && '管理租屋地址'}
@@ -7291,13 +7293,13 @@ export default function App() {
                 {activeModal === 'tenantReportPayment' && '回報已繳費用'}
                 {activeModal === 'tenantPay' && '回報已繳費用'}
               </h3>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 focus:outline-none">
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 focus:outline-none p-1 rounded-lg hover:bg-slate-200/60">
                 <X size={18} />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 max-h-[80vh] overflow-y-auto">
+            <div className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain">
 
               {/* Add Property */}
               {activeModal === 'addProperty' && (
