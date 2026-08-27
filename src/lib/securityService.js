@@ -363,7 +363,7 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
   }
 
   // 1. 總管理員專屬身分授權 (支援 0900000000 / 790701)
-  if ((safePhone === '0900000000' || safePhone === '0900000001') && (password === '790701' || password === 'password123')) {
+  if (safePhone === '0900000000' && password === '790701') {
     return {
       user: { id: 'usr_superadmin', phone: '0900000000', app_metadata: { role: 'superadmin' } },
       profile: { id: 'usr_superadmin', role: 'superadmin', name: '平台總管理員', phone: '0900000000' },
@@ -413,15 +413,7 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
   }
 
   if (!authUser) {
-    // 若 Supabase Auth 尚未初始化該帳號，檢查 Profile 與通用密碼
-    if (password === '790701' || password === 'password123') {
-      authUser = {
-        id: matchedProfile.id,
-        user_metadata: { role: matchedProfile.role, name: matchedProfile.name, phone: matchedProfile.phone }
-      };
-    } else {
-      throw new Error('帳號或密碼錯誤，請重新輸入');
-    }
+    throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
   }
 
   const profile = matchedProfile;

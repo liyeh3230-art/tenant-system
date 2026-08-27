@@ -2,14 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Home, Users, FileText, CreditCard, Building,
   LogOut, Plus, CheckCircle, Clock, AlertCircle,
-  Search, Bell, User, LayoutDashboard, Wallet,
+  Search, User, LayoutDashboard, Wallet,
   Calendar, Phone, DollarSign, X, Check, Clipboard, Edit3, Trash2, Menu, FileEdit, XCircle, History, Image, Share2, Lock, FileCheck,
   Printer, Download, QrCode, Send, ArrowUpRight, RefreshCw, SlidersHorizontal, ChevronRight, Percent, TrendingUp, Receipt, Copy, Sparkles, Filter, Layers, ChevronDown, ChevronUp,
   Upload, Star, ArrowLeft, ArrowRight, ShieldCheck, GripVertical, KeyRound, MessageSquare, Shield, Eye, EyeOff
 } from 'lucide-react';
 import {
   sanitizeText,
-  sanitizeNumber,
   registerUser,
   completeTenantOnboarding,
   submitLandlordApplication,
@@ -23,14 +22,6 @@ import {
   PaymentStatus
 } from './lib/securityService';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
-
-// --- 正式上線資料庫初始化 (Production Empty Database Initialization) ---
-const initialLandlords = [];
-const initialProperties = [];
-const initialLeases = [];
-const initialRegisteredTenants = [];
-const initialPayments = [];
-const initialHistoricalLeases = [];
 
 export const categoryMap = {
   rent: { label: '租金', icon: '🏠', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
@@ -52,19 +43,6 @@ export const formatPaymentMethod = (method) => {
   if (method === 'cash') return '現金交付';
   return String(method).replace(/^bank\b/i, '銀行轉帳');
 };
-
-
-
-const MOCK_HOUSE_PHOTOS = [
-  "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80"
-];
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -865,13 +843,15 @@ export default function App() {
             if (!mounted) return;
 
             if (profile && !profile.deleted_at) {
-              const userRole = profile.role || savedSession.role || 'tenant';
+              const activeSessionRole = savedSession.role || profile.role || 'tenant';
               const cleanPhone = String(profile.phone || savedSession.phone).replace(/[^0-9]/g, '');
 
-              setCurrentUser({ id: profile.id, phone: cleanPhone, user_metadata: { role: userRole, name: profile.name } });
+              setCurrentUser({ id: profile.id, phone: cleanPhone, user_metadata: { role: profile.role, name: profile.name } });
               setIsSuperadminAuthenticated(false);
+              setCurrentTenantPhone(cleanPhone);
+              setCurrentTenantName(profile.name || savedSession.name || '');
 
-              if (userRole === 'landlord' || userRole === 'admin') {
+              if (activeSessionRole === 'landlord' || activeSessionRole === 'admin') {
                 setRole('admin');
                 setActiveTab('dashboard');
                 setCurrentLandlordId(profile.id);
@@ -1190,6 +1170,8 @@ export default function App() {
         setCurrentUser(authResult.user);
         setCurrentLandlordId(targetId);
         setCurrentLandlordPhone(cleanPhone);
+        setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(userProfile.name || '');
         setRole('admin');
         setActiveTab('dashboard');
         setAuthPassword('');
@@ -1214,6 +1196,18 @@ export default function App() {
         setCurrentUser(authResult.user);
         setCurrentTenantPhone(cleanPhone);
         setCurrentTenantName(userProfile.name || '');
+
+        // 檢查該租客是否同時擁有已審核通過之房東身分
+        const { data: maybeLandlord } = await supabase
+          .from('landlords')
+          .select('*')
+          .eq('phone', cleanPhone)
+          .maybeSingle();
+        if (maybeLandlord && maybeLandlord.status === 'approved') {
+          setCurrentLandlordId(maybeLandlord.id);
+          setCurrentLandlordPhone(cleanPhone);
+        }
+
         setRole('tenant');
         setActiveTab('portal');
         setAuthPassword('');
@@ -1253,6 +1247,92 @@ export default function App() {
       showToast(err.message || '登入失敗：帳號或密碼錯誤，請確認後重試。', 'error');
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  // --- 雙重身分快速切換機制 (Dual-Role Switcher: Landlord <-> Tenant) ---
+  const activeUserPhone = String(
+    currentLandlordPhone || currentTenantPhone || currentUser?.phone || ''
+  ).replace(/[^0-9]/g, '');
+
+  const myLandlordAccount = landlords.find(l =>
+    (currentUser?.id && l.id === currentUser.id) ||
+    (currentLandlordId && l.id === currentLandlordId) ||
+    (l.phone && String(l.phone).replace(/[^0-9]/g, '') === activeUserPhone)
+  );
+
+  const isApprovedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'approved');
+  const isPendingLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'pending');
+
+  const handleSwitchRole = async (targetRole) => {
+    if (targetRole === role) return;
+
+    const currentPhone = activeUserPhone;
+    const currentName = currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '會員';
+
+    if (targetRole === 'admin') {
+      // 1. 若想切換為房東模式
+      if (!isApprovedLandlord) {
+        if (isPendingLandlord) {
+          showToast('⏳ 您的房東帳號審核中，待管理員核准後即可開啟房東管理功能！', 'warning');
+          return;
+        }
+        // 尚未申請過房東身分 -> 導引開啟房東認證申請
+        setLandlordAppForm(prev => ({
+          ...prev,
+          name: currentName,
+          phone: currentPhone,
+        }));
+        setActiveModal('landlordApplication');
+        showToast('請填寫房東基本資料以開通房東管理權限！', 'info');
+        return;
+      }
+
+      setRole('admin');
+      setActiveTab('dashboard');
+      setCurrentLandlordId(myLandlordAccount.id);
+      setCurrentLandlordPhone(myLandlordAccount.phone || currentPhone);
+
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({
+          id: myLandlordAccount.id,
+          phone: myLandlordAccount.phone || currentPhone,
+          name: currentName,
+          role: 'landlord'
+        }));
+      } catch (e) {}
+
+      showToast(`🔄 已切換至「房東管理後台」(${myLandlordAccount.name || currentName} 房東)`, 'success');
+      setIsMobileMenuOpen(false);
+      fetchSupabaseData();
+    } else if (targetRole === 'tenant') {
+      // 2. 若想切換為租客中心模式
+      setRole('tenant');
+      setActiveTab('portal');
+      setCurrentTenantPhone(currentPhone);
+      setCurrentTenantName(currentName);
+
+      // 自動選取該租客關聯的第一張有效合約
+      const userLeases = leases.filter(l =>
+        l.phone.replace(/[^0-9]/g, '') === currentPhone ||
+        (l.coPhone && l.coPhone.replace(/[^0-9]/g, '') === currentPhone)
+      );
+      if (userLeases.length > 0) {
+        setCurrentTenantLeaseId(userLeases[0].id);
+      }
+
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({
+          id: currentUser?.id || myLandlordAccount?.id,
+          phone: currentPhone,
+          name: currentName,
+          role: 'tenant'
+        }));
+      } catch (e) {}
+
+      showToast(`🔄 已切換至「租客個人中心」(${currentName})`, 'info');
+      setIsMobileMenuOpen(false);
+      fetchSupabaseData();
     }
   };
 
@@ -3478,6 +3558,35 @@ export default function App() {
             </button>
           </div>
 
+          {/* 側邊欄快速身分切換卡片 (Sidebar Role Switcher Card) */}
+          {(role === 'admin' || role === 'tenant') && (
+            <div className="mx-3 mt-3 mb-1 p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/70 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-slate-400 font-medium">目前操作身分</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                  role === 'admin'
+                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  {role === 'admin' ? '🏢 房東管理中' : '🏠 租客中心'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSwitchRole(role === 'admin' ? 'tenant' : 'admin')}
+                className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold text-white shadow-xs transition-all ${
+                  role === 'admin'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500'
+                    : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500'
+                }`}
+                title={role === 'admin' ? '切換為租客個人中心' : (isApprovedLandlord ? '切換為房東管理後台' : '申請開通房東管理權限')}
+              >
+                <RefreshCw size={12} className="transition-transform group-hover:rotate-180 duration-500" />
+                <span>切換為{role === 'admin' ? '租客模式' : (isApprovedLandlord ? '房東管理模式' : '房東模式 (申請)')}</span>
+              </button>
+            </div>
+          )}
+
           {/* Role Navigation Items */}
           <nav className="p-4 space-y-1">
             {role === 'superadmin' ? (
@@ -3648,8 +3757,47 @@ export default function App() {
               </div>
 
               {/* User Section */}
-              <div className="flex items-center space-x-3 sm:space-x-4">
-                <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 sm:space-x-4">
+                {/* 頂部身分快速切換膠囊按鈕 (Top Header Role Switcher Pill) */}
+                {(role === 'admin' || role === 'tenant') && (
+                  <div className="flex items-center bg-slate-100 p-0.5 sm:p-1 rounded-xl border border-slate-200 shadow-xs">
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchRole('admin')}
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        role === 'admin'
+                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                      }`}
+                      title={isApprovedLandlord ? '切換至房東管理後台' : '申請開通房東身分'}
+                    >
+                      <Building size={14} />
+                      <span className="hidden sm:inline">房東管理</span>
+                      <span className="sm:hidden">房東</span>
+                      {!isApprovedLandlord && (
+                        <span className="ml-1 text-[9px] px-1 py-0.2 bg-amber-400/30 text-amber-800 rounded font-semibold">
+                          申請
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchRole('tenant')}
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        role === 'tenant'
+                          ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                      }`}
+                      title="切換至租客個人中心"
+                    >
+                      <Home size={14} />
+                      <span className="hidden sm:inline">租客中心</span>
+                      <span className="sm:hidden">租客</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-2 pl-1 sm:pl-2 border-l border-slate-200/80">
                   <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-bold text-sm shadow-xs select-none">
                     {role === 'superadmin' ? '總' : (role === 'admin' && currentLandlordId) ? (landlords.find(l => l.id === currentLandlordId)?.name[0] || '房') : (role === 'tenant' && currentTenantPhone) ? (currentTenantName?.[0] || currentUser?.user_metadata?.name?.[0] || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name[0] || currentTenantLease?.tenantName[0] || '租') : '訪'}
                   </div>
@@ -6059,6 +6207,36 @@ export default function App() {
             {/* TENANT HOME SCREEN */}
             {role === 'tenant' && currentTenantPhone && (activeTab === 'portal' || !['tenantHistory', 'contract'].includes(activeTab)) && (
               <div className="space-y-6">
+                {/* 雙身分房東提示條 (Landlord Quick Switch Banner in Tenant View) */}
+                {isApprovedLandlord && (
+                  <div className="bg-gradient-to-r from-indigo-900 via-indigo-850 to-slate-900 p-4 rounded-2xl text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-indigo-200 flex-shrink-0 border border-white/10">
+                        <Building size={20} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-white">您同時擁有「房東管理權限」</span>
+                          <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-semibold">
+                            雙身分已開通
+                          </span>
+                        </div>
+                        <p className="text-xs text-indigo-200/80 mt-0.5">
+                          目前處於租客中心模式；點擊右側按鈕可立即切換回房東後台管理房源與收款。
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchRole('admin')}
+                      className="px-4 py-2 bg-white text-indigo-950 hover:bg-indigo-50 font-bold rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 flex-shrink-0"
+                    >
+                      <RefreshCw size={13} />
+                      <span>切換回房東管理後台</span>
+                    </button>
+                  </div>
+                )}
+
                 {/* 方案一：頂部合約膠囊切換器 (Segmented Pills Switcher for Multiple Leases) */}
                 {tenantLeases.length > 1 && (
                   <div className="bg-white/90 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-indigo-100/80 shadow-xs space-y-3">
