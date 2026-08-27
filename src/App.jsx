@@ -6209,36 +6209,6 @@ export default function App() {
             {/* TENANT HOME SCREEN */}
             {role === 'tenant' && currentTenantPhone && (activeTab === 'portal' || !['tenantHistory', 'contract'].includes(activeTab)) && (
               <div className="space-y-6">
-                {/* 雙身分房東提示條 (Landlord Quick Switch Banner in Tenant View) */}
-                {isApprovedLandlord && (
-                  <div className="bg-gradient-to-r from-indigo-900 via-indigo-850 to-slate-900 p-4 rounded-2xl text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-1 duration-300">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-indigo-200 flex-shrink-0 border border-white/10">
-                        <Building size={20} />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-white">您同時擁有「房東管理權限」</span>
-                          <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-semibold">
-                            雙身分已開通
-                          </span>
-                        </div>
-                        <p className="text-xs text-indigo-200/80 mt-0.5">
-                          目前處於租客中心模式；點擊右側按鈕可立即切換回房東後台管理房源與收款。
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSwitchRole('admin')}
-                      className="px-4 py-2 bg-white text-indigo-950 hover:bg-indigo-50 font-bold rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 flex-shrink-0"
-                    >
-                      <RefreshCw size={13} />
-                      <span>切換回房東管理後台</span>
-                    </button>
-                  </div>
-                )}
-
                 {/* 方案一：頂部合約膠囊切換器 (Segmented Pills Switcher for Multiple Leases) */}
                 {tenantLeases.length > 1 && (
                   <div className="bg-white/90 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-indigo-100/80 shadow-xs space-y-3">
