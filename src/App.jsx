@@ -1119,6 +1119,19 @@ export default function App() {
       return;
     }
 
+    if (chosenRole === 'landlord') {
+      const idNum = sanitizeText(landlordAppForm.idNumber).trim();
+      const addr = sanitizeText(landlordAppForm.contactAddress).trim();
+      if (!idNum || idNum.length < 6) {
+        showToast('請填寫有效的身分證字號、居留證號或統一編號以供身分查核！', 'warning');
+        return;
+      }
+      if (!addr || addr.length < 5) {
+        showToast('請填寫完整通訊聯絡地址！', 'warning');
+        return;
+      }
+    }
+
     setLineFirstLoginLoading(true);
     try {
       const u = lineFirstLoginUser || {};
@@ -1197,24 +1210,39 @@ export default function App() {
         setActiveModal(null);
         showToast(`🎉 歡迎 ${cleanName}！已成功為您開通房客會員專區！`, 'success');
       } else {
-        // 房東身分 → 進入房東身分審核資料填寫表
-        setOnboardingUser({
-          id: finalId,
+        // 房東身分 → 直接寫入審核資料並開啟審核狀態告示
+        const idNum = sanitizeText(landlordAppForm.idNumber).trim();
+        const addr = sanitizeText(landlordAppForm.contactAddress).trim();
+
+        await submitLandlordApplication({
+          userId: finalId,
           phone: cleanPhone,
           name: cleanName,
-          lineUid: lineUid,
+          idNumber: idNum,
+          contactAddress: addr,
+          companyName: landlordAppForm.companyName,
+          bankName: landlordAppForm.bankName,
+          bankAccount: landlordAppForm.bankAccount,
+          notes: landlordAppForm.notes,
         });
-        setLandlordAppForm(prev => ({
-          ...prev,
-          companyName: '',
-          idNumber: '',
-          contactAddress: '',
-          bankName: '',
-          bankAccount: '',
-          notes: '',
-        }));
-        setActiveModal('landlordApplication');
-        showToast(`🎉 基本資料已完成，請填寫房東身分審核資料！`, 'info');
+
+        setActiveModal(null);
+        setPendingLandlordNotice({
+          open: true,
+          status: 'pending',
+          data: {
+            id: finalId,
+            name: cleanName,
+            phone: cleanPhone,
+            companyName: landlordAppForm.companyName,
+            idNumber: idNum,
+            contactAddress: addr,
+            bankName: landlordAppForm.bankName,
+            bankAccount: landlordAppForm.bankAccount,
+            submittedAt: new Date().toLocaleDateString(),
+          }
+        });
+        showToast(`🎉 基本資料已完成，房東身分審核申請已送出！請等待平台管理員審核開通。`, 'success');
       }
       fetchSupabaseData();
     } catch (err) {
@@ -9421,6 +9449,85 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* When Landlord is selected, expand landlord verification fields directly */}
+                    {lineFirstLoginRole === 'landlord' && (
+                      <div className="space-y-3 p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950 pb-1 border-b border-indigo-100">
+                          <ShieldCheck size={16} className="text-indigo-600" />
+                          <span>請填寫房東身分查核資料</span>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            身分證字號 / 居留證號 / 統一編號 <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="例如：A123456789 或 公司統編 8 碼"
+                            value={landlordAppForm.idNumber}
+                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value }))}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold uppercase"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="例如：台北市中正區忠孝東路一段 100 號 5 樓"
+                            value={landlordAppForm.contactAddress}
+                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                            required
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              公司抬頭 / 物業名稱 (選填)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="例如：安居物業管理 或 個人"
+                              value={landlordAppForm.companyName}
+                              onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              預設收款機構與帳號 (選填)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="例如：玉山銀行 1234567890"
+                              value={landlordAppForm.bankAccount}
+                              onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            補充說明 / 備註 (選填)
+                          </label>
+                          <textarea
+                            rows="2"
+                            placeholder="可填寫管理物業座落區域或額外說明..."
+                            value={landlordAppForm.notes}
+                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-medium"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <div className="pt-2">
                       <button
                         type="submit"
@@ -9438,8 +9545,8 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <span>{lineFirstLoginLoading ? '資料儲存中...' : '下一步：填寫房東審核資料'}</span>
-                            <ArrowRight size={16} />
+                            <ShieldCheck size={16} />
+                            <span>{lineFirstLoginLoading ? '申請送出中...' : '🏢 確認送出房東身分申請 (等待管理員開通)'}</span>
                           </>
                         )}
                       </button>
