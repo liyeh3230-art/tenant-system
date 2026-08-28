@@ -386,34 +386,42 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
     authUser = authData.user;
   }
 
-  // 3. 查詢 Profile 資料（支援 ID 或電話跨別名精確比對）
-  const queryClause = authUser
-    ? `id.eq.${authUser.id},phone.eq.${safePhone}`
-    : `phone.eq.${safePhone}`;
+  if (!authUser) {
+    throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
+  }
 
+  // 3. 查詢 Profile 資料（必須精確比對 Auth User ID，嚴格杜絕跨帳號密碼冒領）
   const { data: profiles, error: profileError } = await supabase
     .from('profiles')
     .select('id, role, name, phone, avatar_url, password_hash, deleted_at')
-    .or(queryClause);
+    .eq('id', authUser.id);
 
   let matchedProfile = profiles?.[0];
 
-  // ⚠️ 關鍵安全檢驗：若 profiles 表中無此會員，或明確已被標記刪除/註銷，嚴格拒絕登入！
-  // 絕不自動復活已刪除的帳號！
+  // ⚠️ 關鍵安全檢驗：
+  // 1. 若該 profiles 查無此 Auth ID（例如透過 LINE 建立之純 OAuth 帳號，未曾建立此密碼關聯）：
+  // 2. 或帳號已被管理員標記刪除/註銷：
+  // 嚴格拒絕登入！
   if (!matchedProfile || matchedProfile.deleted_at) {
-    if (authUser) {
-      try {
-        await supabase.rpc('delete_user_by_admin', { target_user_id: authUser.id, target_phone: safePhone });
-        await supabase.auth.signOut();
-      } catch (e) {}
-    }
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {}
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('app_auth_session');
     }
-    throw new Error('此帳號已遭管理員刪除或註銷，無法登入！');
-  }
 
-  if (!authUser) {
+    // 檢查該手機是否為 LINE 註冊之帳號
+    const { data: lineProfile } = await supabase
+      .from('profiles')
+      .select('id, name')
+      .eq('phone', safePhone)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (lineProfile) {
+      throw new Error('此手機門號為 LINE 註冊帳號，未設定密碼，請點擊「LINE 帳號一鍵授權登入」！');
+    }
+
     throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
   }
 
