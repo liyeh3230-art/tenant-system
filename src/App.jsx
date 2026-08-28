@@ -277,6 +277,7 @@ export default function App() {
   const [authPhone, setAuthPhone] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authName, setAuthName] = useState('');
+  const [authRole, setAuthRole] = useState('tenant'); // 'tenant' | 'landlord'
   const [authShowPassword, setAuthShowPassword] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -1474,6 +1475,7 @@ export default function App() {
     const cleanName = sanitizeText(authName).trim();
     const cleanPhone = String(authPhone || '').replace(/[^0-9]/g, '').trim();
     const cleanPassword = String(authPassword || '').trim();
+    const chosenRole = authRole || 'tenant';
 
     if (!cleanName || cleanName.length < 2) {
       showToast('請填寫真實姓名（至少2個字）！', 'warning');
@@ -1494,20 +1496,54 @@ export default function App() {
         name: cleanName,
         phone: cleanPhone,
         password: cleanPassword,
-        requestedRole: 'unassigned',
+        requestedRole: chosenRole,
       });
 
       setAuthName('');
       setAuthPassword('');
 
-      setOnboardingUser({
-        id: regResult.id,
-        phone: cleanPhone,
-        name: cleanName,
-      });
+      if (chosenRole === 'tenant') {
+        // 房客身分 → 直接開通並登入房客專區
+        setCurrentUser({
+          id: regResult.id,
+          phone: cleanPhone,
+          user_metadata: { role: 'tenant', name: cleanName }
+        });
+        setRole('tenant');
+        setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(cleanName);
+        setActiveTab('portal');
 
-      setActiveModal('roleOnboarding');
-      showToast('🎉 帳號建立成功！請選擇您的系統身分（我是房客或我是房東）。', 'success');
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify({
+            id: regResult.id,
+            phone: cleanPhone,
+            name: cleanName,
+            role: 'tenant'
+          }));
+        } catch (e) {}
+
+        showToast(`🎉 歡迎加入！已成功為您建立帳號並開通房客專區！`, 'success');
+        fetchSupabaseData();
+      } else {
+        // 房東身分 → 進入房東身分審核資料填寫
+        setOnboardingUser({
+          id: regResult.id,
+          phone: cleanPhone,
+          name: cleanName,
+        });
+        setLandlordAppForm(prev => ({
+          ...prev,
+          companyName: '',
+          idNumber: '',
+          contactAddress: '',
+          bankName: '',
+          bankAccount: '',
+          notes: '',
+        }));
+        setActiveModal('landlordApplication');
+        showToast('🎉 帳號建立成功！請填寫房東身分審核資料。', 'info');
+      }
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
     } finally {
@@ -4163,18 +4199,92 @@ export default function App() {
                               {authShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                             </button>
                           </div>
-                          <span className="text-[11px] text-slate-400 mt-1 block">
-                            註冊完成後，系統將讓您選擇「我是房客」或「我是房東」開通專屬功能。
-                          </span>
+                        </div>
+
+                        {/* Direct Role Selection Cards on Registration */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-2">
+                            請選擇您的會員身分 <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {/* Tenant Card */}
+                            <div
+                              onClick={() => setAuthRole('tenant')}
+                              className={`border-2 rounded-2xl p-3.5 cursor-pointer transition-all flex flex-col justify-between ${
+                                authRole === 'tenant'
+                                  ? 'border-emerald-500 bg-emerald-50/70 shadow-xs ring-2 ring-emerald-400/20'
+                                  : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className={`p-1.5 rounded-lg ${authRole === 'tenant' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                  <Home size={16} />
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                  ⚡ 免審核・即開即用
+                                </span>
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                                  <span>我是房客 (Tenant)</span>
+                                  {authRole === 'tenant' && <CheckCircle size={13} className="text-emerald-600" />}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                                  查閱租金帳單、線上合約明細與繳費回報。
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Landlord Card */}
+                            <div
+                              onClick={() => setAuthRole('landlord')}
+                              className={`border-2 rounded-2xl p-3.5 cursor-pointer transition-all flex flex-col justify-between ${
+                                authRole === 'landlord'
+                                  ? 'border-indigo-500 bg-indigo-50/70 shadow-xs ring-2 ring-indigo-400/20'
+                                  : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className={`p-1.5 rounded-lg ${authRole === 'landlord' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                  <Building size={16} />
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                                  🛡️ 管理員審核
+                                </span>
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                                  <span>我是房東 (Landlord)</span>
+                                  {authRole === 'landlord' && <CheckCircle size={13} className="text-indigo-600" />}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                                  房源房間管理、自動出帳、收款入帳審核。
+                                </p>
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
                         <button
                           type="submit"
                           disabled={authLoading}
-                          className="w-full bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold py-3 rounded-xl shadow-md shadow-emerald-200 transition-all text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                          className={`w-full font-bold py-3 rounded-xl shadow-md transition-all text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer text-white disabled:opacity-50 ${
+                            authRole === 'tenant'
+                              ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 shadow-emerald-200'
+                              : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 shadow-indigo-200'
+                          }`}
                         >
-                          <span>{authLoading ? '帳號建立中...' : '立即建立帳號並選擇身分'}</span>
-                          <ArrowRight size={16} />
+                          {authRole === 'tenant' ? (
+                            <>
+                              <CheckCircle size={16} />
+                              <span>{authLoading ? '帳號建立中...' : '🎉 免費註冊並直接開通房客專區'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>{authLoading ? '帳號建立中...' : '下一步：填寫房東審核資料'}</span>
+                              <ArrowRight size={16} />
+                            </>
+                          )}
                         </button>
 
                         <div className="relative my-4">
@@ -7373,8 +7483,8 @@ export default function App() {
 
       {/* ALL MODALS */}
       {activeModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-          <div className={`bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-100 w-full overflow-hidden animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 max-h-[92vh] flex flex-col ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay' || activeModal === 'roleOnboarding' || activeModal === 'landlordApplication') ? 'max-w-xl' : 'max-w-lg'
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
+          <div className={`bg-white rounded-2xl shadow-2xl border border-slate-100 w-full overflow-hidden max-h-[90vh] flex flex-col my-auto ${activeModal === 'managePhotos' || activeModal === 'viewLandlordProperties' || activeModal === 'viewLease' || activeModal === 'viewReceipt' ? 'max-w-2xl' : (activeModal === 'tenantReportPayment' || activeModal === 'tenantPay' || activeModal === 'roleOnboarding' || activeModal === 'landlordApplication' || activeModal === 'lineFirstLogin') ? 'max-w-xl' : 'max-w-lg'
             }`}>
             {/* Modal Header */}
             <div className="px-4 py-3.5 sm:px-6 sm:py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 flex-shrink-0">
