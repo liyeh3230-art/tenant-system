@@ -9040,18 +9040,11 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="pt-3 flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setActiveModal('roleOnboarding')}
-                        className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs sm:text-sm transition-colors focus:outline-none cursor-pointer"
-                      >
-                        返回上一步
-                      </button>
+                    <div className="pt-3">
                       <button
                         type="submit"
                         disabled={landlordAppLoading}
-                        className="flex-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm shadow-xs transition-colors focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                       >
                         <ShieldCheck size={16} />
                         <span>{landlordAppLoading ? '申請送出中...' : '確認送出申請 (等待管理員開通)'}</span>
