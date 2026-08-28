@@ -653,99 +653,48 @@ export const handleLineOAuthCallback = async () => {
     console.warn('Edge Function line-auth unreachable, activating direct database resolution fallback:', err);
   }
 
-  // Resilient Cloud Fallback (保證授權後 100% 成功登入)
+  // Resilient Fallback (安全防護機制：絕不任意配對其他用戶帳號)
   try {
     const savedUserId = typeof localStorage !== 'undefined' ? localStorage.getItem('line_linked_user_id') : null;
     const savedPhone = typeof localStorage !== 'undefined' ? localStorage.getItem('line_linked_phone') : null;
 
     let matchedUser = null;
 
-    // 1. 優先透過本機記錄之 User ID 或手機號碼查詢真實 Profile
+    // 1. 僅限透過本機已明確記錄且有效綁定之 User ID 或電話查詢個人 Profile
     if (savedUserId || savedPhone) {
       const orClause = savedUserId ? `id.eq.${savedUserId},phone.eq.${savedPhone}` : `phone.eq.${savedPhone}`;
       const { data: profs } = await supabase
         .from('profiles')
         .select('*')
-        .or(orClause);
+        .or(orClause)
+        .is('deleted_at', null);
 
       if (profs && profs.length > 0) {
         matchedUser = profs[0];
       }
     }
 
-    // 2. 若為全新設備登入，查詢該身分中已建立真實電話之會員
-    if (!matchedUser) {
-      const { data: realProfiles } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', targetRole)
-        .not('phone', 'like', 'line_%')
-        .order('updated_at', { ascending: false });
+    // 2. 若為本機查無紀錄的新裝置/新使用者，嚴格建立全新的待完善帳號，絕不抓取他人帳號
+    const isFirstTime = !matchedUser || !matchedUser.phone || String(matchedUser.phone).startsWith('line_') || matchedUser.phone.length < 8;
 
-      if (realProfiles && realProfiles.length > 0) {
-        matchedUser = realProfiles[0];
-      }
-    }
-
-    // 3. 若為完全未曾建立過資料的新用戶
     if (!matchedUser) {
       const fallbackId = `line_usr_${Date.now()}`;
-      const fallbackName = targetRole === 'landlord' ? 'LINE 房東會員' : 'LINE 租客會員';
-      const fallbackPhone = `line_${Date.now().toString().slice(-8)}`;
-
       matchedUser = {
         id: fallbackId,
-        name: fallbackName,
-        phone: fallbackPhone,
+        name: '',
+        phone: '',
         role: targetRole,
       };
-
-      await supabase.from('profiles').upsert({
-        id: fallbackId,
-        role: targetRole,
-        name: fallbackName,
-        phone: fallbackPhone,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-
-      if (targetRole === 'landlord') {
-        await supabase.from('landlords').upsert({
-          id: fallbackId,
-          name: fallbackName,
-          phone: fallbackPhone,
-          status: 'approved',
-          ad_listing_enabled: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      } else {
-        await supabase.from('tenants').upsert({
-          id: fallbackId,
-          status: 'active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      }
     }
-
-    // 4. 若已是完整資料用戶，同步存回 localStorage 供後續免輸入登入
-    if (matchedUser && !String(matchedUser.phone).startsWith('line_') && typeof localStorage !== 'undefined') {
-      localStorage.setItem('line_linked_user_id', matchedUser.id);
-      localStorage.setItem('line_linked_phone', matchedUser.phone);
-      localStorage.setItem('line_linked_name', matchedUser.name);
-      localStorage.setItem('line_linked_role', matchedUser.role);
-    }
-
-    const isFirstTime = !matchedUser || String(matchedUser.phone).startsWith('line_') || matchedUser.phone.length < 8;
 
     return {
       user: matchedUser,
       isNewUser: isFirstTime,
       targetRole: matchedUser.role || targetRole,
+      lineProfile: null,
     };
   } catch (dbFallbackErr) {
-    console.error('LINE login DB resolution error:', dbFallbackErr);
+    console.error('LINE login fallback resolution error:', dbFallbackErr);
     throw new Error('LINE 登入處理失敗，請改用手機號碼與密碼登入。');
   }
 };
