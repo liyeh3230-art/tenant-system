@@ -28,3 +28,7 @@ backups
 .env
 .env.*
 !.env.example
+
+# Supabase temp
+.temp
+supabase/.temp
