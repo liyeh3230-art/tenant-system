@@ -806,19 +806,51 @@ export default function App() {
 
         setIsSuperadminAuthenticated(false);
         if (userRole === 'landlord' || userRole === 'admin') {
-          setRole('admin');
-          setActiveTab('dashboard');
-          setCurrentLandlordId(profile.id);
-          setCurrentLandlordPhone(cleanPhone);
+          const { data: lndRec } = await supabase
+            .from('landlords')
+            .select('*')
+            .eq('id', profile.id)
+            .maybeSingle();
+
+          if (lndRec && lndRec.status === 'approved') {
+            setRole('admin');
+            setActiveTab('dashboard');
+            setCurrentLandlordId(profile.id);
+            setCurrentLandlordPhone(cleanPhone);
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
+            } catch (e) {}
+          } else {
+            // 待審核或拒絕：不得進入房東後台！
+            await logoutUser();
+            if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
+              setPendingLandlordNotice({
+                open: true,
+                status: lndRec.status,
+                data: {
+                  id: profile.id,
+                  name: profile.name,
+                  phone: cleanPhone,
+                  companyName: lndRec.company_name,
+                  idNumber: lndRec.id_number,
+                  contactAddress: lndRec.contact_address,
+                  bankName: lndRec.bank_name,
+                  bankAccount: lndRec.bank_account,
+                  submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
+                }
+              });
+            }
+            return;
+          }
         } else {
           setRole('tenant');
           setActiveTab('portal');
           setCurrentTenantPhone(cleanPhone);
           setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
+          try {
+            localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
+          } catch (e) {}
         }
-        try {
-          localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
-        } catch (e) {}
         return;
       }
 
@@ -852,10 +884,39 @@ export default function App() {
               setCurrentTenantName(profile.name || savedSession.name || '');
 
               if (activeSessionRole === 'landlord' || activeSessionRole === 'admin') {
-                setRole('admin');
-                setActiveTab('dashboard');
-                setCurrentLandlordId(profile.id);
-                setCurrentLandlordPhone(cleanPhone);
+                const { data: lndRec } = await supabase
+                  .from('landlords')
+                  .select('*')
+                  .eq('id', profile.id)
+                  .maybeSingle();
+
+                if (lndRec && lndRec.status === 'approved') {
+                  setRole('admin');
+                  setActiveTab('dashboard');
+                  setCurrentLandlordId(profile.id);
+                  setCurrentLandlordPhone(cleanPhone);
+                } else {
+                  // 待審核、拒絕或尚未通過審核：清除 Session 並顯示審核中告示
+                  await logoutUser();
+                  if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
+                    setPendingLandlordNotice({
+                      open: true,
+                      status: lndRec.status,
+                      data: {
+                        id: profile.id,
+                        name: profile.name,
+                        phone: cleanPhone,
+                        companyName: lndRec.company_name,
+                        idNumber: lndRec.id_number,
+                        contactAddress: lndRec.contact_address,
+                        bankName: lndRec.bank_name,
+                        bankAccount: lndRec.bank_account,
+                        submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
+                      }
+                    });
+                  }
+                  return;
+                }
               } else {
                 setRole('tenant');
                 setActiveTab('portal');
@@ -965,25 +1026,73 @@ export default function App() {
             setActiveModal('lineFirstLogin');
             showToast('🎉 LINE 授權成功！請填寫姓名、電話並選擇您的會員身分。', 'info');
           } else {
-            setCurrentUser({
-              id: u.id,
-              phone: u.phone,
-              user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
-            });
             if (u.role === 'landlord') {
-              setRole('admin');
-              setCurrentLandlordId(u.id);
-              setCurrentLandlordPhone(u.phone);
-              setActiveTab('dashboard');
+              const { data: lndRec } = await supabase
+                .from('landlords')
+                .select('*')
+                .eq('id', u.id)
+                .maybeSingle();
+
+              if (lndRec && lndRec.status === 'approved') {
+                setCurrentUser({
+                  id: u.id,
+                  phone: u.phone,
+                  user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
+                });
+                setRole('admin');
+                setCurrentLandlordId(u.id);
+                setCurrentLandlordPhone(u.phone);
+                setActiveTab('dashboard');
+                try {
+                  localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
+                } catch (e) {}
+                showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
+              } else {
+                // 待審核、拒絕或尚未通過審核：不得進入房東後台！
+                await logoutUser();
+                if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
+                  setPendingLandlordNotice({
+                    open: true,
+                    status: lndRec.status,
+                    data: {
+                      id: u.id,
+                      name: u.name,
+                      phone: u.phone,
+                      companyName: lndRec.company_name,
+                      idNumber: lndRec.id_number,
+                      contactAddress: lndRec.contact_address,
+                      bankName: lndRec.bank_name,
+                      bankAccount: lndRec.bank_account,
+                      submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
+                    }
+                  });
+                  if (lndRec.status === 'rejected') {
+                    showToast('您的房東身分審核未通過，請查看詳細說明。', 'error');
+                  } else {
+                    showToast('您的房東身分正在審核中，請等待平台總管理員開通。', 'info');
+                  }
+                } else {
+                  // 尚未填寫房東查核資料，引導填寫
+                  setOnboardingUser({ id: u.id, phone: u.phone, name: u.name });
+                  setActiveModal('landlordApplication');
+                  showToast('請填寫房東查核資料以供管理員審核開通！', 'info');
+                }
+                return;
+              }
             } else {
+              setCurrentUser({
+                id: u.id,
+                phone: u.phone,
+                user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
+              });
               setRole('tenant');
               setCurrentTenantPhone(u.phone);
               setActiveTab('portal');
+              try {
+                localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
+              } catch (e) {}
+              showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
             }
-            try {
-              localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
-            } catch (e) {}
-            showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
           }
         }
       } catch (oauthErr) {
@@ -9063,11 +9172,25 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="pt-3">
+                    <div className="pt-3 flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lineFirstLoginUser) {
+                            setActiveModal('lineFirstLogin');
+                          } else {
+                            setActiveModal('roleOnboarding');
+                          }
+                        }}
+                        className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors focus:outline-none cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <ArrowLeft size={16} />
+                        <span>返回上一步</span>
+                      </button>
                       <button
                         type="submit"
                         disabled={landlordAppLoading}
-                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                       >
                         <ShieldCheck size={16} />
                         <span>{landlordAppLoading ? '申請送出中...' : '確認送出申請 (等待管理員開通)'}</span>

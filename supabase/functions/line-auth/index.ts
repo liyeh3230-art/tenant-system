@@ -133,7 +133,7 @@ serve(async (req: Request) => {
           id: newUserId,
           name: lineDisplayName,
           phone: newPhone,
-          status: "approved",
+          status: "pending",
           ad_listing_enabled: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
