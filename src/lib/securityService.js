@@ -403,6 +403,7 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
   if (!matchedProfile || matchedProfile.deleted_at) {
     if (authUser) {
       try {
+        await supabase.rpc('delete_user_by_admin', { target_user_id: authUser.id, target_phone: safePhone });
         await supabase.auth.signOut();
       } catch (e) {}
     }

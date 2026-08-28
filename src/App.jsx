@@ -1871,7 +1871,7 @@ export default function App() {
       // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
       try {
         await supabase.rpc('delete_user_by_admin', { 
-          target_user_id: landlordId, 
+          target_user_id: String(landlordId || ''), 
           target_phone: cleanPhone 
         });
       } catch (rpcErr) {
@@ -1893,13 +1893,17 @@ export default function App() {
         await supabase.from('properties').delete().eq('landlord_id', landlordId);
       }
 
-      // 3. 刪除房東地址庫
+      // 3. 刪除房東地址庫與 LINE 綁定
       await supabase.from('landlord_addresses').delete().eq('landlord_id', landlordId);
+      if (landlordId) {
+        await supabase.from('line_bindings').delete().or(`tenant_id.eq.${landlordId},line_user_id.eq.${landlordId}`);
+        await supabase.from('line_binding_tokens').delete().eq('tenant_id', landlordId);
+      }
 
       // 4. 刪除 landlords 表與 profiles 表
-      await supabase.from('landlords').delete().eq('id', landlordId);
+      await supabase.from('landlords').delete().or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone}`);
       if (cleanPhone) {
-        await supabase.from('profiles').delete().or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+        await supabase.from('profiles').delete().or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone}`);
       } else {
         await supabase.from('profiles').delete().eq('id', landlordId);
       }
@@ -1927,7 +1931,7 @@ export default function App() {
       // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
       try {
         await supabase.rpc('delete_user_by_admin', { 
-          target_user_id: tenantId, 
+          target_user_id: String(tenantId || ''), 
           target_phone: cleanPhone 
         });
       } catch (rpcErr) {
@@ -1936,7 +1940,7 @@ export default function App() {
 
       // 1. 刪除 LINE 綁定表記錄
       if (tenantId) {
-        await supabase.from('line_bindings').delete().eq('tenant_id', tenantId);
+        await supabase.from('line_bindings').delete().or(`tenant_id.eq.${tenantId},line_user_id.eq.${tenantId}`);
         await supabase.from('line_binding_tokens').delete().eq('tenant_id', tenantId);
       }
 
