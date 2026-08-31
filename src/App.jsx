@@ -421,9 +421,6 @@ export default function App() {
             note: l.note
           }));
           setLeases(activeLeases);
-          if (activeLeases.length > 0) {
-            setCurrentTenantLeaseId(prev => prev || activeLeases[0].id);
-          }
 
           const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
@@ -1540,7 +1537,9 @@ export default function App() {
     if (targetRole === role) return;
 
     const currentPhone = activeUserPhone;
-    const currentName = currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '會員';
+    const currentName = (role === 'admin' && (myLandlordAccount?.name || currentUser?.user_metadata?.name))
+      ? (myLandlordAccount?.name || currentUser?.user_metadata?.name)
+      : (currentUser?.user_metadata?.name || myLandlordAccount?.name || currentTenantName || '會員');
 
     if (targetRole === 'admin') {
       // 1. 若想切換為房東模式
@@ -1573,12 +1572,13 @@ export default function App() {
       setActiveTab('dashboard');
       setCurrentLandlordId(myLandlordAccount.id);
       setCurrentLandlordPhone(myLandlordAccount.phone || currentPhone);
+      setCurrentTenantLeaseId(null);
 
       try {
         localStorage.setItem('app_auth_session', JSON.stringify({
           id: myLandlordAccount.id,
           phone: myLandlordAccount.phone || currentPhone,
-          name: currentName,
+          name: myLandlordAccount.name || currentName,
           role: 'landlord'
         }));
       } catch (e) {}
@@ -1598,9 +1598,7 @@ export default function App() {
         l.phone.replace(/[^0-9]/g, '') === currentPhone ||
         (l.coPhone && l.coPhone.replace(/[^0-9]/g, '') === currentPhone)
       );
-      if (userLeases.length > 0) {
-        setCurrentTenantLeaseId(userLeases[0].id);
-      }
+      setCurrentTenantLeaseId(userLeases.length > 0 ? userLeases[0].id : null);
 
       try {
         localStorage.setItem('app_auth_session', JSON.stringify({
@@ -3845,7 +3843,7 @@ export default function App() {
     l.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, '') ||
     (l.coPhone && l.coPhone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))
   ) : [];
-  const currentTenantLease = leases.find(l => l.id === currentTenantLeaseId) || (tenantLeases.length > 0 ? tenantLeases[0] : null);
+  const currentTenantLease = tenantLeases.find(l => l.id === currentTenantLeaseId) || (tenantLeases.length > 0 ? tenantLeases[0] : null);
   const currentTenantProperty = properties.find(p => p.id === currentTenantLease?.propertyId);
   const currentTenantPayments = payments.filter(p => p.leaseId === currentTenantLease?.id);
 
@@ -6881,7 +6879,7 @@ export default function App() {
                       </div>
                       <div className="z-10">
                         <h2 className="text-2xl font-bold mb-2">
-                          早安，{registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'}
+                          早安，{currentTenantName || currentUser?.user_metadata?.name || registeredTenants.find(t => t.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))?.name || currentTenantLease?.tenantName || '租客'}
                         </h2>
                         <p className="text-indigo-100 text-sm flex items-center font-medium">
                           <Building size={16} className="mr-1.5 text-indigo-200" />
