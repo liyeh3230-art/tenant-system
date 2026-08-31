@@ -930,26 +930,14 @@ export default function App() {
               localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
             } catch (e) {}
           } else {
-            // 待審核或拒絕：不得進入房東後台！
-            await logoutUser();
-            if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
-              setPendingLandlordNotice({
-                open: true,
-                status: lndRec.status,
-                data: {
-                  id: profile.id,
-                  name: profile.name,
-                  phone: cleanPhone,
-                  companyName: lndRec.company_name,
-                  idNumber: lndRec.id_number,
-                  contactAddress: lndRec.contact_address,
-                  bankName: lndRec.bank_name,
-                  bankAccount: lndRec.bank_account,
-                  submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
-                }
-              });
-            }
-            return;
+            // 待審核或退回：維持租客身分進入租客專區
+            setRole('tenant');
+            setActiveTab('portal');
+            setCurrentTenantPhone(cleanPhone);
+            setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: 'tenant' }));
+            } catch (e) {}
           }
         } else {
           setRole('tenant');
@@ -1005,26 +993,14 @@ export default function App() {
                   setCurrentLandlordId(profile.id);
                   setCurrentLandlordPhone(cleanPhone);
                 } else {
-                  // 待審核、拒絕或尚未通過審核：清除 Session 並顯示審核中告示
-                  await logoutUser();
-                  if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
-                    setPendingLandlordNotice({
-                      open: true,
-                      status: lndRec.status,
-                      data: {
-                        id: profile.id,
-                        name: profile.name,
-                        phone: cleanPhone,
-                        companyName: lndRec.company_name,
-                        idNumber: lndRec.id_number,
-                        contactAddress: lndRec.contact_address,
-                        bankName: lndRec.bank_name,
-                        bankAccount: lndRec.bank_account,
-                        submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
-                      }
-                    });
-                  }
-                  return;
+                  // 待審核或退回：維持租客身分進入租客專區
+                  setRole('tenant');
+                  setActiveTab('portal');
+                  setCurrentTenantPhone(cleanPhone);
+                  setCurrentTenantName(profile.name || savedSession.name || '');
+                  try {
+                    localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: 'tenant' }));
+                  } catch (e) {}
                 }
               } else {
                 setRole('tenant');
@@ -1157,35 +1133,20 @@ export default function App() {
                 } catch (e) {}
                 showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
               } else {
-                // 待審核、拒絕或尚未通過審核：不得進入房東後台！
-                await logoutUser();
-                if (lndRec && (lndRec.status === 'pending' || lndRec.status === 'rejected')) {
-                  setPendingLandlordNotice({
-                    open: true,
-                    status: lndRec.status,
-                    data: {
-                      id: u.id,
-                      name: u.name,
-                      phone: u.phone,
-                      companyName: lndRec.company_name,
-                      idNumber: lndRec.id_number,
-                      contactAddress: lndRec.contact_address,
-                      bankName: lndRec.bank_name,
-                      bankAccount: lndRec.bank_account,
-                      submittedAt: lndRec.created_at ? new Date(lndRec.created_at).toLocaleDateString() : '近日',
-                    }
-                  });
-                  if (lndRec.status === 'rejected') {
-                    showToast('您的房東身分審核未通過，請查看詳細說明。', 'error');
-                  } else {
-                    showToast('您的房東身分正在審核中，請等待平台總管理員開通。', 'info');
-                  }
+                // 待審核或退回：維持租客身分進入租客專區
+                setRole('tenant');
+                setActiveTab('portal');
+                setCurrentTenantPhone(u.phone);
+                setCurrentTenantName(u.name);
+                try {
+                  localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: 'tenant' }));
+                } catch (e) {}
+                if (lndRec && lndRec.status === 'rejected') {
+                  showToast(`歡迎回來，${u.name}！您的房東申請未通過，期間您可繼續使用租客中心。`, 'info');
                 } else {
-                  // 尚未填寫房東查核資料，引導填寫
-                  setOnboardingUser({ id: u.id, phone: u.phone, name: u.name });
-                  setActiveModal('landlordApplication');
-                  showToast('請填寫房東查核資料以供管理員審核開通！', 'info');
+                  showToast(`歡迎回來，${u.name}！您的房東身分審核中，期間您可正常使用租客中心。`, 'info');
                 }
+                fetchSupabaseData();
                 return;
               }
             } else {
@@ -1335,22 +1296,21 @@ export default function App() {
         });
 
         setActiveModal(null);
-        setPendingLandlordNotice({
-          open: true,
-          status: 'pending',
-          data: {
+        setRole('tenant');
+        setActiveTab('portal');
+        setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(cleanName);
+
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify({
             id: finalId,
-            name: cleanName,
             phone: cleanPhone,
-            companyName: landlordAppForm.companyName,
-            idNumber: idNum,
-            contactAddress: addr,
-            bankName: landlordAppForm.bankName,
-            bankAccount: landlordAppForm.bankAccount,
-            submittedAt: new Date().toLocaleDateString(),
-          }
-        });
-        showToast(`🎉 基本資料已完成，房東身分審核申請已送出！請等待平台管理員審核開通。`, 'success');
+            name: cleanName,
+            role: 'tenant'
+          }));
+        } catch (e) {}
+
+        showToast('🎉 基本資料已完成，房東審核申請已送出！管理員審核中（期間您可以先使用租客中心），核准後將自動開通房東功能。', 'success');
       }
       fetchSupabaseData();
     } catch (err) {
@@ -1411,27 +1371,29 @@ export default function App() {
           .maybeSingle();
 
         if (landlordAccount && (landlordAccount.status === 'pending' || landlordAccount.status === 'rejected')) {
-          await logoutUser();
-          setPendingLandlordNotice({
-            open: true,
-            status: landlordAccount.status,
-            data: {
-              id: userProfile.id,
-              name: userProfile.name,
+          const targetId = userProfile.id;
+          setCurrentUser(authResult.user);
+          setCurrentTenantPhone(cleanPhone);
+          setCurrentTenantName(userProfile.name || '');
+          setRole('tenant');
+          setActiveTab('portal');
+          setAuthPassword('');
+
+          try {
+            localStorage.setItem('app_auth_session', JSON.stringify({
+              id: targetId,
               phone: cleanPhone,
-              companyName: landlordAccount.company_name,
-              idNumber: landlordAccount.id_number,
-              contactAddress: landlordAccount.contact_address,
-              bankName: landlordAccount.bank_name,
-              bankAccount: landlordAccount.bank_account,
-              submittedAt: landlordAccount.created_at ? new Date(landlordAccount.created_at).toLocaleDateString() : '近日',
-            }
-          });
+              name: userProfile.name,
+              role: 'tenant'
+            }));
+          } catch (e) {}
+
           if (landlordAccount.status === 'rejected') {
-            showToast('您的房東身分審核未通過，請查看詳細說明以進行補件或身分切換。', 'error');
+            showToast(`歡迎回來，${userProfile.name}！您的房東申請未通過，期間您可繼續使用租客中心。`, 'info');
           } else {
-            showToast('房東帳戶身分審核中，請待管理員確認開通後登入。', 'warning');
+            showToast(`歡迎回來，${userProfile.name}！您的房東帳號審核中，期間您可正常使用租客中心。`, 'info');
           }
+          fetchSupabaseData();
           return;
         }
 
@@ -1792,24 +1754,24 @@ export default function App() {
       });
 
       setActiveModal(null);
-      setPendingLandlordNotice({
-        open: true,
-        status: 'pending',
-        data: {
-          id: targetUserId,
-          name: targetName,
-          phone: targetPhone,
-          companyName: landlordAppForm.companyName,
-          idNumber: idNum,
-          contactAddress: addr,
-          bankName: landlordAppForm.bankName,
-          bankAccount: landlordAppForm.bankAccount,
-          submittedAt: new Date().toLocaleDateString(),
-        }
-      });
-
       setOnboardingUser(null);
-      showToast('🎉 房東身分申請已送出！請等待平台管理員確認開通。', 'success');
+
+      // 保持租客登入狀態並回到租客首頁
+      setRole('tenant');
+      setActiveTab('portal');
+      setCurrentTenantPhone(targetPhone);
+      setCurrentTenantName(targetName);
+
+      try {
+        localStorage.setItem('app_auth_session', JSON.stringify({
+          id: targetUserId,
+          phone: targetPhone,
+          name: targetName,
+          role: 'tenant'
+        }));
+      } catch (e) {}
+
+      showToast('🎉 房東認證資料已成功送出！管理員審核中（期間您可繼續使用租客中心），核准後將自動開通房東功能。', 'success');
       fetchSupabaseData();
     } catch (err) {
       showToast('申請送出失敗: ' + (err.message || '請重試'), 'error');
@@ -4805,7 +4767,7 @@ export default function App() {
                     <Building size={16} />
                     <span>房東會員資料</span>
                     <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-medium">
-                      {landlords.length}
+                      {landlords.filter(l => l.status === 'approved').length}
                     </span>
                   </button>
                   <button
@@ -4825,21 +4787,21 @@ export default function App() {
                 {superadminCategory === 'landlord' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-4 mb-4 gap-4">
-                      <h3 className="text-base sm:text-lg font-bold text-slate-800">房東名冊管理</h3>
-                      <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+                      <h3 className="text-base sm:text-lg font-bold text-slate-800">房東名冊與申請審核</h3>
+                      <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
                         <button
                           onClick={() => setSuperadminTab('approved')}
-                          className={`flex-1 sm:flex-none text-center px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${superadminTab === 'approved' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          className={`flex-1 sm:flex-none text-center px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${superadminTab === 'approved' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                             }`}
                         >
-                          已啟用帳戶 ({landlords.filter(l => l.status !== 'pending').length})
+                          已啟用名冊 ({landlords.filter(l => l.status === 'approved').length})
                         </button>
                         <button
                           onClick={() => setSuperadminTab('pending')}
-                          className={`flex-1 sm:flex-none text-center px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${superadminTab === 'pending' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                          className={`flex-1 sm:flex-none text-center px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${superadminTab === 'pending' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                             }`}
                         >
-                          <span>待審核申請 ({landlords.filter(l => l.status === 'pending').length})</span>
+                          <span>待審核 ({landlords.filter(l => l.status === 'pending').length})</span>
                           {landlords.some(l => l.status === 'pending') && (
                             <span className="relative flex h-2 w-2">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -4847,11 +4809,17 @@ export default function App() {
                             </span>
                           )}
                         </button>
+                        <button
+                          onClick={() => setSuperadminTab('rejected')}
+                          className={`flex-1 sm:flex-none text-center px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${superadminTab === 'rejected' ? 'bg-white text-rose-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                        >
+                          已退回申請 ({landlords.filter(l => l.status === 'rejected').length})
+                        </button>
                       </div>
                     </div>
 
-
-                    {superadminTab === 'approved' ? (
+                    {superadminTab === 'approved' && (
                       <div>
                         {/* Desktop Table View */}
                         <div className="hidden md:block overflow-x-auto">
@@ -4866,12 +4834,12 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50 text-slate-600">
-                              {landlords.filter(l => l.status !== 'pending').length === 0 ? (
+                              {landlords.filter(l => l.status === 'approved').length === 0 ? (
                                 <tr>
                                   <td colSpan="5" className="py-8 text-center text-slate-400">目前無已啟用的房東帳號</td>
                                 </tr>
                               ) : (
-                                landlords.filter(l => l.status !== 'pending').map(lnd => (
+                                landlords.filter(l => l.status === 'approved').map(lnd => (
                                   <tr key={lnd.id} className="hover:bg-slate-50/60 transition-colors">
                                     <td className="py-3.5 px-4 font-bold text-slate-800">{lnd.name}</td>
                                     <td className="py-3.5 px-4">{lnd.phone}</td>
@@ -4924,10 +4892,10 @@ export default function App() {
 
                         {/* Mobile Stacked Card View (No Horizontal Scroll) */}
                         <div className="md:hidden space-y-3">
-                          {landlords.filter(l => l.status !== 'pending').length === 0 ? (
+                          {landlords.filter(l => l.status === 'approved').length === 0 ? (
                             <div className="py-8 text-center text-slate-400 text-sm">目前無已啟用的房東帳號</div>
                           ) : (
-                            landlords.filter(l => l.status !== 'pending').map(lnd => (
+                            landlords.filter(l => l.status === 'approved').map(lnd => (
                               <div key={`m-${lnd.id}`} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
                                 <div className="flex justify-between items-center">
                                   <span className="font-bold text-slate-800 text-sm">{lnd.name}</span>
@@ -4979,7 +4947,9 @@ export default function App() {
                           )}
                         </div>
                       </div>
-                    ) : (
+                    )}
+
+                    {superadminTab === 'pending' && (
                       <div>
                         {/* Desktop Table View */}
                         <div className="hidden md:block overflow-x-auto">
@@ -5033,7 +5003,7 @@ export default function App() {
                                           onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
                                           className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors focus:outline-none cursor-pointer"
                                         >
-                                          拒絕
+                                          退回申請
                                         </button>
                                       </td>
                                     </tr>
@@ -5082,12 +5052,114 @@ export default function App() {
                                       onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
                                       className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
                                     >
-                                      拒絕
+                                      退回申請
                                     </button>
                                   </div>
                                 </div>
                               );
                             })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {superadminTab === 'rejected' && (
+                      <div>
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                            <thead>
+                              <tr className="text-slate-500 border-b border-slate-100 text-xs">
+                                <th className="pb-3 px-4 font-bold">申請人姓名</th>
+                                <th className="pb-3 px-4 font-bold">聯絡電話</th>
+                                <th className="pb-3 px-4 font-bold">身分證 / 統編</th>
+                                <th className="pb-3 px-4 font-bold">通訊地址</th>
+                                <th className="pb-3 px-4 font-bold text-center">當前身分</th>
+                                <th className="pb-3 px-4 font-bold text-right">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50 text-slate-600">
+                              {landlords.filter(l => l.status === 'rejected').length === 0 ? (
+                                <tr>
+                                  <td colSpan="6" className="py-8 text-center text-slate-400">目前無已退回的申請紀錄</td>
+                                </tr>
+                              ) : (
+                                landlords.filter(l => l.status === 'rejected').map(lnd => {
+                                  let appDetails = null;
+                                  try {
+                                    if (lnd.company_name && lnd.company_name.startsWith('{')) {
+                                      appDetails = JSON.parse(lnd.company_name);
+                                    }
+                                  } catch (e) {}
+
+                                  const idNum = appDetails?.idNumber || lnd.id_number || '待查';
+                                  const addr = appDetails?.contactAddress || lnd.contact_address || '未提供';
+
+                                  return (
+                                    <tr key={`rej-${lnd.id}`} className="hover:bg-slate-50/60 transition-colors">
+                                      <td className="py-3.5 px-4 font-bold text-slate-800">{lnd.name}</td>
+                                      <td className="py-3.5 px-4 font-medium">{lnd.phone}</td>
+                                      <td className="py-3.5 px-4 font-mono text-xs font-bold text-slate-700">{idNum}</td>
+                                      <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs truncate" title={addr}>{addr}</td>
+                                      <td className="py-3.5 px-4 text-center">
+                                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                          租客會員
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-right space-x-2">
+                                        <button
+                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                          className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors focus:outline-none cursor-pointer"
+                                        >
+                                          重新核准
+                                        </button>
+                                        <button
+                                          onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
+                                          className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
+                                        >
+                                          <Trash2 size={13} className="mr-0.5" />
+                                          <span>刪除紀錄</span>
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Stacked Card View */}
+                        <div className="md:hidden space-y-3">
+                          {landlords.filter(l => l.status === 'rejected').length === 0 ? (
+                            <div className="py-8 text-center text-slate-400 text-sm">目前無已退回的申請紀錄</div>
+                          ) : (
+                            landlords.filter(l => l.status === 'rejected').map(lnd => (
+                              <div key={`m-rej-${lnd.id}`} className="bg-rose-50/40 border border-rose-200/70 rounded-xl p-4 space-y-2.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-slate-800 text-sm">{lnd.name}</span>
+                                  <span className="text-xs px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full font-bold">已退回</span>
+                                </div>
+                                <div className="text-xs text-slate-600 space-y-1">
+                                  <div>電話：<a href={`tel:${lnd.phone}`} className="text-indigo-600 font-semibold underline">{lnd.phone}</a></div>
+                                  <div>身分狀態：<span className="font-semibold text-slate-700">保留為租客會員</span></div>
+                                </div>
+                                <div className="flex gap-2 pt-2 border-t border-rose-200/50">
+                                  <button
+                                    onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
+                                  >
+                                    重新核准
+                                  </button>
+                                  <button
+                                    onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
+                                    className="flex-1 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
+                                  >
+                                    刪除紀錄
+                                  </button>
+                                </div>
+                              </div>
+                            ))
                           )}
                         </div>
                       </div>
@@ -6790,6 +6862,56 @@ export default function App() {
             {/* TENANT HOME SCREEN */}
             {role === 'tenant' && currentTenantPhone && (activeTab === 'portal' || !['tenantHistory', 'contract'].includes(activeTab)) && (
               <div className="space-y-6">
+                {/* 房東申請審核狀態提示條 */}
+                {myLandlordAccount?.status === 'pending' && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50/50 border border-amber-200/90 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-950 shadow-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 bg-amber-100 text-amber-800 rounded-xl flex-shrink-0 shadow-2xs">
+                        <Clock size={20} />
+                      </span>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-800">房東身分審核中 (Pending Approval)</span>
+                          <span className="px-2 py-0.5 bg-amber-200/80 text-amber-800 rounded-full font-bold text-[10px]">
+                            審核中
+                          </span>
+                        </div>
+                        <p className="text-slate-600 text-xs">
+                          您提交的房東認證資料正在由管理員確認中。審核通過前，您可以正常使用租客專區的所有功能。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {myLandlordAccount?.status === 'rejected' && (
+                  <div className="bg-gradient-to-r from-rose-50 to-orange-50/40 border border-rose-200/90 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-rose-950 shadow-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="p-2.5 bg-rose-100 text-rose-700 rounded-xl flex-shrink-0 shadow-2xs">
+                        <XCircle size={20} />
+                      </span>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-slate-800">房東身分申請未獲通過</span>
+                          <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full font-bold text-[10px]">
+                            已退回
+                          </span>
+                        </div>
+                        <p className="text-slate-600 text-xs">
+                          您的租客身分與功能完全不受影響。若您需開通房東功能，可修改認證資料後重新送審。
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchRole('admin')}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs transition-colors flex-shrink-0 flex items-center gap-1.5 cursor-pointer text-xs self-end sm:self-auto"
+                    >
+                      <RefreshCw size={13} />
+                      <span>修改資料並重新送審</span>
+                    </button>
+                  </div>
+                )}
                 {/* 方案一：頂部合約膠囊切換器 (Segmented Pills Switcher for Multiple Leases) */}
                 {tenantLeases.length > 1 && (
                   <div className="bg-white/90 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl border border-indigo-100/80 shadow-xs space-y-3">
