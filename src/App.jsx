@@ -1439,10 +1439,19 @@ export default function App() {
           return;
         }
         // 尚未申請過房東身分 -> 導引開啟房東認證申請
+        setOnboardingUser({
+          id: currentUser?.id || myLandlordAccount?.id || `usr_${currentPhone}`,
+          phone: currentPhone,
+          name: currentName,
+        });
         setLandlordAppForm(prev => ({
           ...prev,
-          name: currentName,
-          phone: currentPhone,
+          companyName: '',
+          idNumber: '',
+          contactAddress: '',
+          bankName: '',
+          bankAccount: '',
+          notes: '',
         }));
         setActiveModal('landlordApplication');
         showToast('請填寫房東基本資料以開通房東管理權限！', 'info');
@@ -1637,7 +1646,15 @@ export default function App() {
   // --- 提交房東認證資料 (送出後狀態為待審核) ---
   const handleSubmitLandlordApplication = async (e) => {
     if (e) e.preventDefault();
-    if (!onboardingUser) return;
+
+    const targetUserId = onboardingUser?.id || currentUser?.id || myLandlordAccount?.id || `usr_${activeUserPhone}`;
+    const targetPhone = onboardingUser?.phone || activeUserPhone || currentTenantPhone;
+    const targetName = onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '房東';
+
+    if (!targetPhone) {
+      showToast('缺少聯絡電話，請重新登入後再試！', 'error');
+      return;
+    }
 
     const idNum = sanitizeText(landlordAppForm.idNumber).trim();
     const addr = sanitizeText(landlordAppForm.contactAddress).trim();
@@ -1654,9 +1671,9 @@ export default function App() {
     setLandlordAppLoading(true);
     try {
       await submitLandlordApplication({
-        userId: onboardingUser.id,
-        phone: onboardingUser.phone,
-        name: onboardingUser.name,
+        userId: targetUserId,
+        phone: targetPhone,
+        name: targetName,
         idNumber: idNum,
         contactAddress: addr,
         companyName: landlordAppForm.companyName,
@@ -1668,12 +1685,14 @@ export default function App() {
       setActiveModal(null);
       setPendingLandlordNotice({
         open: true,
+        status: 'pending',
         data: {
-          name: onboardingUser.name,
-          phone: onboardingUser.phone,
+          id: targetUserId,
+          name: targetName,
+          phone: targetPhone,
+          companyName: landlordAppForm.companyName,
           idNumber: idNum,
           contactAddress: addr,
-          companyName: landlordAppForm.companyName,
           bankName: landlordAppForm.bankName,
           bankAccount: landlordAppForm.bankAccount,
           submittedAt: new Date().toLocaleDateString(),
@@ -9219,7 +9238,7 @@ export default function App() {
                         </label>
                         <input
                           type="text"
-                          value={onboardingUser?.name || ''}
+                          value={onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || ''}
                           disabled
                           className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
                         />
@@ -9231,7 +9250,7 @@ export default function App() {
                         </label>
                         <input
                           type="text"
-                          value={onboardingUser?.phone || ''}
+                          value={onboardingUser?.phone || activeUserPhone || currentTenantPhone || ''}
                           disabled
                           className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
                         />
