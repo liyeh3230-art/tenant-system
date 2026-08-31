@@ -2145,19 +2145,24 @@ export default function App() {
 
   const handleApproveLandlord = async (landlordId, landlordName) => {
     try {
+      const nowIso = new Date().toISOString();
       const { error: rpcErr } = await supabase.rpc('approve_landlord_account', { p_landlord_id: landlordId });
       if (rpcErr) {
-        // 降級容錯：直接更新 landlords 表
-        const { error: updateErr } = await supabase
+        // 降級容錯：直接更新 landlords 表與 profiles 表
+        await supabase
           .from('landlords')
-          .update({ status: 'approved', updated_at: new Date().toISOString() })
+          .update({ status: 'approved', updated_at: nowIso })
           .eq('id', landlordId);
-        if (updateErr) throw updateErr;
       }
+      await supabase
+        .from('profiles')
+        .update({ role: 'landlord', updated_at: nowIso })
+        .eq('id', landlordId);
+
       setLandlords(landlords.map(l =>
         l.id === landlordId ? { ...l, status: 'approved' } : l
       ));
-      showToast(`已成功核准房東「${landlordName}」的註冊申請！`, 'success');
+      showToast(`已成功核准房東「${landlordName}」的申請！該會員已正式升級為房東。`, 'success');
       fetchSupabaseData();
     } catch (err) {
       showToast(`核准失敗: ${err.message}`, 'error');
@@ -2165,22 +2170,28 @@ export default function App() {
   };
 
   const handleRejectLandlord = async (landlordId, landlordName) => {
-    const confirmed = await showConfirmDialog(`確定要拒絕並停用房東「${landlordName}」的註冊申請嗎？`);
+    const confirmed = await showConfirmDialog(`確定要拒絕並退回房東「${landlordName}」的申請嗎？\n\n💡 說明：退回後該會員將完整保留原「租客身分」，租客中心各項功能不受影響，但無法使用房東管理後台。`);
     if (confirmed) {
       try {
+        const nowIso = new Date().toISOString();
         const { error: rpcErr } = await supabase.rpc('reject_landlord_account', { p_landlord_id: landlordId });
         if (rpcErr) {
-          const { error: updateErr } = await supabase
+          await supabase
             .from('landlords')
-            .update({ status: 'rejected', updated_at: new Date().toISOString() })
+            .update({ status: 'rejected', updated_at: nowIso })
             .eq('id', landlordId);
-          if (updateErr) throw updateErr;
         }
+        // 確保該會員的 profiles.role 保持/恢復為 tenant
+        await supabase
+          .from('profiles')
+          .update({ role: 'tenant', updated_at: nowIso })
+          .eq('id', landlordId);
+
         setLandlords(landlords.filter(l => l.id !== landlordId));
-        showToast(`已成功停用房東「${landlordName}」`, 'info');
+        showToast(`已退回「${landlordName}」的房東申請，該會員已恢復為正常租客身分。`, 'info');
         fetchSupabaseData();
       } catch (err) {
-        showToast(`刪除失敗: ${err.message}`, 'error');
+        showToast(`操作失敗: ${err.message}`, 'error');
       }
     }
   };

@@ -278,10 +278,10 @@ export const submitLandlordApplication = async ({
   });
 
   try {
-    // 1. 更新 profiles 為 landlord
+    // 1. 維持 profiles 基礎身分為 tenant (審核通過前不提前升級為 landlord)
     await supabase.from('profiles').upsert({
       id: userId,
-      role: 'landlord',
+      role: 'tenant',
       name: cleanName,
       phone: safePhone,
       updated_at: new Date().toISOString(),
