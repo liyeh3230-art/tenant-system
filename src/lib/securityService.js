@@ -278,6 +278,23 @@ export const submitLandlordApplication = async ({
   });
 
   try {
+    // 防禦機制：若目前已有待審核之申請，避免重複提交覆蓋資料
+    const { data: existingLandlord } = await supabase
+      .from('landlords')
+      .select('status')
+      .or(`id.eq.${userId},phone.eq.${safePhone}`)
+      .maybeSingle();
+
+    if (existingLandlord && existingLandlord.status === 'pending') {
+      return {
+        success: true,
+        alreadyPending: true,
+        role: 'tenant',
+        status: 'pending',
+        message: '您的房東身分申請已送出，目前正由管理員審核中，請待審核結果！',
+      };
+    }
+
     // 1. 維持 profiles 基礎身分為 tenant (審核通過前不提前升級為 landlord)
     await supabase.from('profiles').upsert({
       id: userId,

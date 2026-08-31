@@ -616,16 +616,23 @@ export default function App() {
             ...(propIds.length > 0 ? (properties.map(p => p.landlordId)) : [])
           ].filter(Boolean)));
 
+          let combinedLandlords = [];
           if (lndIds.length > 0) {
             const { data: lndProfs } = await supabase.from('profiles').select('id, name, phone, bank_info').in('id', lndIds);
-            const { data: lndTable } = await supabase.from('landlords').select('id, name, phone, bank_info, ad_listing_enabled, status').in('id', lndIds);
+            const { data: lndTable } = await supabase.from('landlords').select('*').in('id', lndIds);
 
-            const combinedLandlords = (lndTable || []).map(l => {
+            combinedLandlords = (lndTable || []).map(l => {
               const matchedProf = (lndProfs || []).find(p => p.id === l.id);
               return {
                 id: l.id,
                 name: l.name || matchedProf?.name || '房東',
                 phone: l.phone || matchedProf?.phone || '',
+                company_name: l.company_name || '',
+                id_number: l.id_number || '',
+                contact_address: l.contact_address || '',
+                bank_name: l.bank_name || '',
+                bank_account: l.bank_account || '',
+                application_notes: l.application_notes || '',
                 status: l.status || 'approved',
                 adListingEnabled: l.ad_listing_enabled || false,
                 bankInfo: l.bank_info || matchedProf?.bank_info
@@ -638,14 +645,18 @@ export default function App() {
                   id: p.id,
                   name: p.name || '房東',
                   phone: p.phone || '',
+                  company_name: '',
+                  id_number: '',
+                  contact_address: '',
+                  bank_name: '',
+                  bank_account: '',
+                  application_notes: '',
                   status: 'approved',
                   adListingEnabled: false,
                   bankInfo: p.bank_info
                 });
               }
             });
-
-            setLandlords(combinedLandlords);
 
             const targetBank = combinedLandlords[0]?.bankInfo;
             if (targetBank) {
@@ -660,9 +671,58 @@ export default function App() {
               setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
             }
           } else {
-            setLandlords([]);
             setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
           }
+
+          // 🚀 關鍵修復：同步查詢當前登入者本人的房東身分申請狀態 (包含 pending, approved, rejected)
+          try {
+            const selfConditions = [];
+            if (cleanTenantPhone) selfConditions.push(`phone.eq.${cleanTenantPhone}`);
+            if (currentUser?.id) selfConditions.push(`id.eq.${currentUser.id}`);
+
+            if (selfConditions.length > 0) {
+              const { data: mySelfLandlordData } = await supabase
+                .from('landlords')
+                .select('*')
+                .or(selfConditions.join(','));
+
+              const mySelfLandlord = mySelfLandlordData?.[0];
+              if (mySelfLandlord) {
+                const existingIdx = combinedLandlords.findIndex(l =>
+                  l.id === mySelfLandlord.id ||
+                  (mySelfLandlord.phone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanTenantPhone)
+                );
+
+                const selfLndObj = {
+                  id: mySelfLandlord.id,
+                  name: mySelfLandlord.name || currentTenantName || '房東',
+                  phone: mySelfLandlord.phone || cleanTenantPhone,
+                  company_name: mySelfLandlord.company_name || '',
+                  id_number: mySelfLandlord.id_number || '',
+                  contact_address: mySelfLandlord.contact_address || '',
+                  bank_name: mySelfLandlord.bank_name || '',
+                  bank_account: mySelfLandlord.bank_account || '',
+                  application_notes: mySelfLandlord.application_notes || '',
+                  status: mySelfLandlord.status || 'pending',
+                  adListingEnabled: mySelfLandlord.ad_listing_enabled ?? false,
+                  bankInfo: mySelfLandlord.bank_info
+                };
+
+                if (existingIdx >= 0) {
+                  combinedLandlords[existingIdx] = {
+                    ...combinedLandlords[existingIdx],
+                    ...selfLndObj
+                  };
+                } else {
+                  combinedLandlords.push(selfLndObj);
+                }
+              }
+            }
+          } catch (selfLndErr) {
+            console.warn('載入當前租客之房東申請狀態失敗:', selfLndErr);
+          }
+
+          setLandlords(combinedLandlords);
 
           // 抓取該租客合約關聯的帳單
           const leaseIds = leaseData.map(l => l.id);
