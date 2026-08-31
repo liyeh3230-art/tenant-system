@@ -1494,6 +1494,36 @@ export default function App() {
 
   const isApprovedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'approved');
   const isPendingLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'pending');
+  const isRejectedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'rejected');
+
+  const handleOpenLandlordApplication = (isResubmit = false) => {
+    const currentPhone = activeUserPhone || currentTenantPhone;
+    const currentName = currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '會員';
+
+    setOnboardingUser({
+      id: currentUser?.id || myLandlordAccount?.id || `usr_${currentPhone}`,
+      phone: currentPhone,
+      name: currentName,
+    });
+
+    let appDetails = null;
+    try {
+      if (myLandlordAccount?.company_name && myLandlordAccount.company_name.startsWith('{')) {
+        appDetails = JSON.parse(myLandlordAccount.company_name);
+      }
+    } catch (e) {}
+
+    setLandlordAppForm({
+      companyName: appDetails?.companyName || (!myLandlordAccount?.company_name?.startsWith('{') ? myLandlordAccount?.company_name : '') || '',
+      idNumber: appDetails?.idNumber || myLandlordAccount?.id_number || '',
+      contactAddress: appDetails?.contactAddress || myLandlordAccount?.contact_address || '',
+      bankName: appDetails?.bankName || myLandlordAccount?.bank_name || '',
+      bankAccount: appDetails?.bankAccount || myLandlordAccount?.bank_account || '',
+      notes: appDetails?.notes || myLandlordAccount?.application_notes || '',
+    });
+
+    setActiveModal('landlordApplication');
+  };
 
   const handleSwitchRole = async (targetRole) => {
     if (targetRole === role) return;
@@ -1507,25 +1537,16 @@ export default function App() {
       // 1. 若想切換為房東模式
       if (!isApprovedLandlord) {
         if (isPendingLandlord) {
-          showToast('⏳ 您的房東帳號審核中，待管理員核准後即可開啟房東管理功能！', 'warning');
+          showToast('⏳ 您的房東帳號正在審核中，待管理員核准後即可開啟房東管理功能！', 'warning');
+          return;
+        }
+        if (isRejectedLandlord) {
+          handleOpenLandlordApplication(true);
+          showToast('您的房東申請先前未通過，已為您載入先前資料，請修正後重新送審！', 'info');
           return;
         }
         // 尚未申請過房東身分 -> 導引開啟房東認證申請
-        setOnboardingUser({
-          id: currentUser?.id || myLandlordAccount?.id || `usr_${currentPhone}`,
-          phone: currentPhone,
-          name: currentName,
-        });
-        setLandlordAppForm(prev => ({
-          ...prev,
-          companyName: '',
-          idNumber: '',
-          contactAddress: '',
-          bankName: '',
-          bankAccount: '',
-          notes: '',
-        }));
-        setActiveModal('landlordApplication');
+        handleOpenLandlordApplication(false);
         showToast('請填寫房東基本資料以開通房東管理權限！', 'info');
         return;
       }
@@ -4035,23 +4056,55 @@ export default function App() {
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
                   role === 'admin'
                     ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : isPendingLandlord
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : isRejectedLandlord
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                 }`}>
-                  {role === 'admin' ? '🏢 房東管理中' : '🏠 租客中心'}
+                  {role === 'admin'
+                    ? '🏢 房東管理中'
+                    : isPendingLandlord
+                      ? '⏳ 房東審核中'
+                      : isRejectedLandlord
+                        ? '❌ 房東退回待補件'
+                        : '🏠 租客中心'}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => handleSwitchRole(role === 'admin' ? 'tenant' : 'admin')}
-                className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold text-white shadow-xs transition-all ${
+                className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold text-white shadow-xs transition-all cursor-pointer ${
                   role === 'admin'
                     ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500'
-                    : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500'
+                    : isPendingLandlord
+                      ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500'
+                      : isRejectedLandlord
+                        ? 'bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500'
+                        : 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500'
                 }`}
-                title={role === 'admin' ? '切換為租客個人中心' : (isApprovedLandlord ? '切換為房東管理後台' : '申請開通房東管理權限')}
+                title={role === 'admin'
+                  ? '切換為租客個人中心'
+                  : isApprovedLandlord
+                    ? '切換為房東管理後台'
+                    : isPendingLandlord
+                      ? '房東身分正在由管理員審核中'
+                      : isRejectedLandlord
+                        ? '房東申請未通過，點此重新編輯送審'
+                        : '申請開通房東管理權限'}
               >
                 <RefreshCw size={12} className="transition-transform group-hover:rotate-180 duration-500" />
-                <span>切換為{role === 'admin' ? '租客模式' : (isApprovedLandlord ? '房東管理模式' : '房東模式 (申請)')}</span>
+                <span>
+                  {role === 'admin'
+                    ? '切換為租客模式'
+                    : isApprovedLandlord
+                      ? '切換為房東管理模式'
+                      : isPendingLandlord
+                        ? '房東身分審核中'
+                        : isRejectedLandlord
+                          ? '房東申請未通過 (重新編輯)'
+                          : '申請開通房東權限'}
+                </span>
               </button>
             </div>
           )}
@@ -4234,17 +4287,53 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleSwitchRole('admin')}
-                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                         role === 'admin'
                           ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
-                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+                          : isPendingLandlord
+                            ? 'text-amber-800 bg-amber-100/90 hover:bg-amber-200 border border-amber-300 shadow-2xs'
+                            : isRejectedLandlord
+                              ? 'text-rose-800 bg-rose-100/90 hover:bg-rose-200 border border-rose-300 shadow-2xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
                       }`}
-                      title={isApprovedLandlord ? '切換至房東管理後台' : '申請開通房東身分'}
+                      title={isApprovedLandlord
+                        ? '切換至房東管理後台'
+                        : isPendingLandlord
+                          ? '房東身分正在由管理員審核中'
+                          : isRejectedLandlord
+                            ? '房東申請未通過，點此重新編輯並送審'
+                            : '申請開通房東身分'}
                     >
-                      <Building size={13} />
-                      <span className="hidden sm:inline">房東管理</span>
-                      <span className="sm:hidden">房東</span>
-                      {!isApprovedLandlord && (
+                      {isPendingLandlord ? (
+                        <Clock size={13} className="text-amber-700 animate-pulse" />
+                      ) : isRejectedLandlord ? (
+                        <RefreshCw size={13} className="text-rose-600" />
+                      ) : (
+                        <Building size={13} />
+                      )}
+                      <span className="hidden sm:inline">
+                        {role === 'admin'
+                          ? '房東管理'
+                          : isApprovedLandlord
+                            ? '房東管理'
+                            : isPendingLandlord
+                              ? '房東 (審核中)'
+                              : isRejectedLandlord
+                                ? '房東 (重新送審)'
+                                : '申請房東'}
+                      </span>
+                      <span className="sm:hidden">
+                        {role === 'admin'
+                          ? '房東'
+                          : isApprovedLandlord
+                            ? '房東'
+                            : isPendingLandlord
+                              ? '審核中'
+                              : isRejectedLandlord
+                                ? '重新送審'
+                                : '申請房東'}
+                      </span>
+                      {!isApprovedLandlord && !isPendingLandlord && !isRejectedLandlord && (
                         <span className="ml-0.5 text-[9px] px-1 py-0.2 bg-amber-400/30 text-amber-800 rounded font-semibold">
                           申請
                         </span>
@@ -4253,7 +4342,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => handleSwitchRole('tenant')}
-                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
+                      className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                         role === 'tenant'
                           ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-200'
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
@@ -7952,8 +8041,7 @@ export default function App() {
                 {activeModal === 'manageBankInfo' && '設定收款帳戶資訊'}
                 {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
                 {activeModal === 'lineFirstLogin' && '🎉 首次 LINE 登入 - 請完善會員資料'}
-                {activeModal === 'roleOnboarding' && '🎉 歡迎加入！請選擇您的會員身分'}
-                {activeModal === 'landlordApplication' && '🏢 填寫房東身分審核資料'}
+                {activeModal === 'landlordApplication' && (isRejectedLandlord ? '🏢 修改房東審核資料 (重新送審)' : '🏢 填寫房東身分審核資料')}
                 {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
@@ -9628,14 +9716,28 @@ export default function App() {
               {/* Landlord Application Form Modal */}
               {activeModal === 'landlordApplication' && (
                 <div className="space-y-4">
-                  <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 flex items-start gap-3">
-                    <div className="p-2 bg-indigo-600 text-white rounded-xl flex-shrink-0">
-                      <ShieldCheck size={20} />
+                  <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                    isRejectedLandlord
+                      ? 'bg-rose-50 border-rose-200'
+                      : 'bg-indigo-50/70 border-indigo-100'
+                  }`}>
+                    <div className={`p-2 text-white rounded-xl flex-shrink-0 shadow-2xs ${
+                      isRejectedLandlord ? 'bg-rose-600' : 'bg-indigo-600'
+                    }`}>
+                      {isRejectedLandlord ? <RefreshCw size={20} /> : <ShieldCheck size={20} />}
                     </div>
                     <div className="space-y-0.5">
-                      <h4 className="text-sm font-bold text-indigo-950">房東身分真實性查核</h4>
-                      <p className="text-xs text-indigo-800 leading-relaxed">
-                        為維護全平台租賃安全與租客權益，房東身分需填寫基本查核資料，送出後由平台管理員確認後方可開通完整房東權限。
+                      <h4 className={`text-sm font-bold ${
+                        isRejectedLandlord ? 'text-rose-950' : 'text-indigo-950'
+                      }`}>
+                        {isRejectedLandlord ? '修改房東認證資料 (重新送審)' : '房東身分真實性查核'}
+                      </h4>
+                      <p className={`text-xs leading-relaxed ${
+                        isRejectedLandlord ? 'text-rose-800' : 'text-indigo-800'
+                      }`}>
+                        {isRejectedLandlord
+                          ? '您先前的房東申請未通過。系統已為您自動載入先前填寫之資訊，請檢查並修正有誤的身分證/統編或通訊地址等資料後重新送審。'
+                          : '為維護全平台租賃安全與租客權益，房東身分需填寫基本查核資料，送出後由平台管理員確認後方可開通完整房東權限。'}
                       </p>
                     </div>
                   </div>
@@ -9735,7 +9837,7 @@ export default function App() {
                         placeholder="可填寫管理物業座落區域或額外說明..."
                         value={landlordAppForm.notes}
                         onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-medium"
                       />
                     </div>
 
@@ -9745,22 +9847,28 @@ export default function App() {
                         onClick={() => {
                           if (lineFirstLoginUser) {
                             setActiveModal('lineFirstLogin');
-                          } else {
+                          } else if (onboardingUser && !currentTenantPhone) {
                             setActiveModal('roleOnboarding');
+                          } else {
+                            setActiveModal(null);
                           }
                         }}
                         className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors focus:outline-none cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         <ArrowLeft size={16} />
-                        <span>返回上一步</span>
+                        <span>{onboardingUser && !currentTenantPhone ? '返回上一步' : '取消'}</span>
                       </button>
                       <button
                         type="submit"
                         disabled={landlordAppLoading}
-                        className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        className={`flex-1 py-3 text-white font-bold rounded-xl text-sm shadow-md transition-all focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                          isRejectedLandlord
+                            ? 'bg-rose-600 hover:bg-rose-700'
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
                       >
                         <ShieldCheck size={16} />
-                        <span>{landlordAppLoading ? '申請送出中...' : '確認送出申請 (等待管理員開通)'}</span>
+                        <span>{landlordAppLoading ? '送出中...' : (isRejectedLandlord ? '確認重新送審 (等待管理員開通)' : '確認送出申請 (等待管理員開通)')}</span>
                       </button>
                     </div>
                   </form>
