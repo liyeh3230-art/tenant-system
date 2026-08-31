@@ -1755,6 +1755,12 @@ export default function App() {
   const handleSubmitLandlordApplication = async (e) => {
     if (e) e.preventDefault();
 
+    if (isPendingLandlord) {
+      setActiveModal('pendingLandlordAlert');
+      showToast('⏳ 您的房東身分申請已送出，目前正由管理員審核中，請待審核結果！', 'warning');
+      return;
+    }
+
     const targetUserId = onboardingUser?.id || currentUser?.id || myLandlordAccount?.id || `usr_${activeUserPhone}`;
     const targetPhone = onboardingUser?.phone || activeUserPhone || currentTenantPhone;
     const targetName = onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '房東';
@@ -1870,7 +1876,12 @@ export default function App() {
 
       if (matchedProfile) {
         setCurrentUser({ id: matchedProfile.id, phone: matchedProfile.phone, user_metadata: { role: matchedProfile.role, name: matchedProfile.name } });
-        if (matchedProfile.role === 'landlord' || lineLoginRole === 'landlord') {
+
+        const { data: lds } = await supabase.from('landlords').select('*').eq('id', matchedProfile.id);
+        const ld = lds?.[0];
+        const isApproved = ld && ld.status === 'approved';
+
+        if (matchedProfile.role === 'landlord' && isApproved) {
           setRole('admin');
           setCurrentLandlordId(matchedProfile.id);
           setCurrentLandlordPhone(matchedProfile.phone);
