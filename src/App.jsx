@@ -1441,6 +1441,8 @@ export default function App() {
 
         setRole('tenant');
         setActiveTab('portal');
+        setCurrentTenantPhone(userProfile.phone || cleanPhone);
+        setCurrentTenantName(userProfile.name);
         setAuthPassword('');
 
         const userLeases = leases.filter(l =>
@@ -1486,11 +1488,36 @@ export default function App() {
     currentLandlordPhone || currentTenantPhone || currentUser?.phone || ''
   ).replace(/[^0-9]/g, '');
 
-  const myLandlordAccount = landlords.find(l =>
-    (currentUser?.id && l.id === currentUser.id) ||
-    (currentLandlordId && l.id === currentLandlordId) ||
-    (l.phone && String(l.phone).replace(/[^0-9]/g, '') === activeUserPhone)
-  );
+  const activeUserName = String(
+    currentTenantName || currentUser?.user_metadata?.name || currentUser?.name || ''
+  ).trim();
+
+  const myLandlordAccount = landlords.find(l => {
+    if (!l) return false;
+    const lPhone = String(l.phone || '').replace(/[^0-9]/g, '');
+    const lName = String(l.name || '').trim();
+
+    const idMatch = Boolean(
+      (currentUser?.id && l.id === currentUser.id) ||
+      (currentLandlordId && l.id === currentLandlordId)
+    );
+
+    const phoneMatch = Boolean(
+      activeUserPhone && lPhone && (
+        lPhone === activeUserPhone ||
+        lPhone.endsWith(activeUserPhone) ||
+        activeUserPhone.endsWith(lPhone)
+      )
+    );
+
+    const nameMatch = Boolean(
+      activeUserName && lName && (
+        lName.toLowerCase() === activeUserName.toLowerCase()
+      )
+    );
+
+    return idMatch || phoneMatch || nameMatch;
+  });
 
   const isApprovedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'approved');
   const isPendingLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'pending');
