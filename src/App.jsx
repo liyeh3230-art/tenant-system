@@ -2312,19 +2312,38 @@ export default function App() {
       return;
     }
 
-    const nextStateText = !currentIsAdvertised ? '刊登中' : '未刊登';
+    const nextState = !currentIsAdvertised;
+    const nextStateText = nextState ? '刊登中' : '未刊登';
     const confirmed = await showConfirmDialog(
-      `確定要將房源「${propertyName}」的廣告刊登狀態變更為「${nextStateText}」嗎？`
+      `確定要將房源「${propertyName}」的廣告刊登狀態變更為「${nextStateText}」嗎？\n\n💡 刊登後將公開於租屋廣告牆，讓租客即時瀏覽房源與實景照片。`
     );
     if (!confirmed) return;
 
-    setProperties(prev => prev.map(p => {
-      if (p.id === propertyId) {
-        return { ...p, isAdvertised: !currentIsAdvertised };
+    try {
+      if (isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('properties')
+          .update({
+            is_advertised: nextState,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', propertyId);
+
+        if (error) throw error;
       }
-      return p;
-    }));
-    showToast(`房源「${propertyName}」廣告狀態已變更為「${nextStateText}」！`, 'success');
+
+      setProperties(prev => prev.map(p => {
+        if (p.id === propertyId) {
+          return { ...p, isAdvertised: nextState };
+        }
+        return p;
+      }));
+      showToast(`房源「${propertyName}」廣告狀態已成功變更為「${nextStateText}」並同步至雲端！`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Toggle advertise error:', err);
+      showToast(`廣告刊登變更失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleToggleLandlordAdPermission = async (landlordId, currentStatus) => {
@@ -2468,6 +2487,7 @@ export default function App() {
       setActiveModal(null);
       setPhotoModalProperty(null);
       showToast('房源照片已成功更新並儲存至雲端！', 'success');
+      fetchSupabaseData();
     } catch (err) {
       showToast(`照片儲存失敗: ${err.message}`, 'error');
     }
@@ -2518,7 +2538,8 @@ export default function App() {
         return [...prev, newProp];
       });
       setActiveModal(null);
-      showToast(`房源「${propName}」新增成功！`, 'success');
+      showToast(`房源「${propName}」新增成功並同步至雲端！`, 'success');
+      fetchSupabaseData();
     } catch (err) {
       showToast(`新增失敗: ${err.message}`, 'error');
     }
@@ -2547,7 +2568,8 @@ export default function App() {
           rent_period: propRentPeriod,
           status: propStatus,
           address: propAddress.trim(),
-          is_advertised: propIsAdvertised
+          is_advertised: propIsAdvertised,
+          updated_at: new Date().toISOString()
         }).eq('id', editingProperty.id);
       }
       setProperties(properties.map(p =>
@@ -2563,7 +2585,8 @@ export default function App() {
         } : p
       ));
       setActiveModal(null);
-      showToast(`房源「${propName}」修改成功！`, 'success');
+      showToast(`房源「${propName}」修改成功並同步至雲端！`, 'success');
+      fetchSupabaseData();
     } catch (err) {
       showToast(`修改失敗: ${err.message}`, 'error');
     }
@@ -2579,7 +2602,8 @@ export default function App() {
           await supabase.from('properties').update({ deleted_at: nowIso }).eq('id', propertyId);
         }
         setProperties(prev => prev.map(p => p.id === propertyId ? { ...p, deletedAt: nowIso } : p));
-        showToast('房源已成功下架！歷史紀錄已安全留存。', 'success');
+        showToast('房源已成功下架！歷史紀錄已安全留存於雲端。', 'success');
+        fetchSupabaseData();
       } catch (err) {
         showToast(`刪除失敗: ${err.message}`, 'error');
       }
@@ -2836,9 +2860,9 @@ export default function App() {
   };
 
   const handleAddLeaseOpen = () => {
-    const landlordProps = properties.filter(p => p.landlordId === currentLandlordId);
+    const landlordProps = properties.filter(p => !p.deletedAt && (p.landlordId === currentLandlordId || !p.landlordId));
     if (landlordProps.length === 0) {
-      showToast('目前名下沒有建立任何房源！請先新增房源。', 'error');
+      showToast('目前名下沒有建立任何房源！請先在「房源管理」新增房源。', 'error');
       return;
     }
     const vacantProp = landlordProps.find(p => p.status === 'vacant') || landlordProps[0];
@@ -8209,9 +8233,9 @@ export default function App() {
                       onChange={(e) => handleLeasePropertySelect(e.target.value)}
                       className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
                     >
-                      {properties.filter(p => p.landlordId === currentLandlordId).map(p => (
+                      {properties.filter(p => !p.deletedAt && (p.landlordId === currentLandlordId || !p.landlordId)).map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.name} ({p.rentPeriod === 'yearly' ? `年繳 NT$ ${p.rent.toLocaleString()}/年` : `月繳 NT$ ${p.rent.toLocaleString()}/月`} · {p.status === 'occupied' ? '目前已出租' : '空置'})
+                          {p.name} {p.address ? `(${p.address})` : ''} — {p.rentPeriod === 'yearly' ? `年繳 NT$ ${p.rent.toLocaleString()}/年` : `月繳 NT$ ${p.rent.toLocaleString()}/月`} · {p.status === 'occupied' ? '⚠️ 已出租' : '✅ 空置中'}
                         </option>
                       ))}
                     </select>
