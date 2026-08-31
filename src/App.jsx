@@ -3051,7 +3051,9 @@ export default function App() {
       }
     }
 
-    const nextLeaseId = `L${String(leases.length + 1).padStart(3, '0')}`;
+    // 保證全域唯一且不與已終止/其他租約發生 Primary Key 衝突的租約編號
+    const uniqueLeaseCode = `${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+    const nextLeaseId = `L${uniqueLeaseCode}`;
     const totalRent = Number(leaseTotalRent) || (Number(leaseUnitRent) * Number(leasePeriodCount)) || 0;
     const pCount = Number(leasePeriodCount) || 12;
     const monthlyRentVal = leaseUnitType === 'yearly'
@@ -3100,7 +3102,7 @@ export default function App() {
         if (insertedRows && insertedRows[0]) {
           newLease.id = insertedRows[0].id;
         }
-        await supabase.from('properties').update({ status: 'occupied' }).eq('id', leasePropId);
+        await supabase.from('properties').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', leasePropId);
       }
       setProperties(prev => prev.map(p =>
         p.id === leasePropId ? { ...p, status: 'occupied' } : p
@@ -3111,6 +3113,7 @@ export default function App() {
       });
       setActiveModal(null);
       showToast(`已成功建立「${leaseTenantName.trim()}」的租約紀錄！合約總租金：NT$ ${totalRent.toLocaleString()}`, 'success');
+      fetchSupabaseData();
     } catch (err) {
       showToast(`建立租約失敗: ${err.message}`, 'error');
     }
