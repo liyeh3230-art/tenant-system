@@ -1497,6 +1497,12 @@ export default function App() {
   const isRejectedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'rejected');
 
   const handleOpenLandlordApplication = (isResubmit = false) => {
+    if (isPendingLandlord) {
+      setActiveModal('pendingLandlordAlert');
+      showToast('⏳ 您的房東身分申請已送出，目前正由管理員審核中，請待審核結果！', 'warning');
+      return;
+    }
+
     const currentPhone = activeUserPhone || currentTenantPhone;
     const currentName = currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '會員';
 
@@ -1537,6 +1543,7 @@ export default function App() {
       // 1. 若想切換為房東模式
       if (!isApprovedLandlord) {
         if (isPendingLandlord) {
+          setActiveModal('pendingLandlordAlert');
           showToast('⏳ 您的房東帳號正在審核中，待管理員核准後即可開啟房東管理功能！', 'warning');
           return;
         }
@@ -1723,6 +1730,15 @@ export default function App() {
   // --- 身分選擇：我是房東 (進入詳細資料填寫) ---
   const handleSelectLandlordRole = () => {
     if (!onboardingUser) return;
+    if (isPendingLandlord) {
+      setActiveModal('pendingLandlordAlert');
+      showToast('⏳ 您的房東身分申請已送出，目前正由管理員審核中，請待審核結果！', 'warning');
+      return;
+    }
+    if (isRejectedLandlord) {
+      handleOpenLandlordApplication(true);
+      return;
+    }
     setLandlordAppForm(prev => ({
       ...prev,
       companyName: '',
@@ -6970,6 +6986,14 @@ export default function App() {
                         </p>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal('pendingLandlordAlert')}
+                      className="px-4 py-2 bg-amber-200/80 hover:bg-amber-300/80 text-amber-900 font-bold rounded-xl shadow-2xs transition-colors flex-shrink-0 flex items-center gap-1.5 cursor-pointer text-xs self-end sm:self-auto border border-amber-300"
+                    >
+                      <Clock size={13} />
+                      <span>查看審核進度說明</span>
+                    </button>
                   </div>
                 )}
 
@@ -8042,6 +8066,7 @@ export default function App() {
                 {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
                 {activeModal === 'lineFirstLogin' && '🎉 首次 LINE 登入 - 請完善會員資料'}
                 {activeModal === 'landlordApplication' && (isRejectedLandlord ? '🏢 修改房東審核資料 (重新送審)' : '🏢 填寫房東身分審核資料')}
+                {activeModal === 'pendingLandlordAlert' && '⏳ 房東身分審核狀態說明'}
                 {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
@@ -9709,6 +9734,65 @@ export default function App() {
                         <ArrowRight size={15} />
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending Landlord Notice Modal */}
+              {activeModal === 'pendingLandlordAlert' && (
+                <div className="space-y-5 text-center py-2 sm:py-4">
+                  <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mx-auto shadow-md shadow-amber-100 ring-8 ring-amber-50">
+                    <Clock size={36} className="animate-pulse" />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                      <span>審核處理中 (Pending Approval)</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-slate-800">
+                      您的房東身分申請已送出，正在審核中
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                      您已於日前提出房東權限開通申請，目前平台總管理員正在查核您的身分資料。
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-left space-y-2.5 text-xs text-slate-600">
+                    <div className="flex items-start gap-2.5">
+                      <span className="p-1 bg-amber-100 text-amber-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                        <Clock size={14} />
+                      </span>
+                      <span><strong>暫無法重複送出：</strong>在管理員完成審核前，系統為保護您的資料一致性，暫不開放重複填寫或再次提交。</span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="p-1 bg-emerald-100 text-emerald-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                        <CheckCircle size={14} />
+                      </span>
+                      <span><strong>審核通過時：</strong>管理員核准後，系統將自動為您啟用房東後台與刊登功能。</span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="p-1 bg-rose-100 text-rose-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                        <RefreshCw size={14} />
+                      </span>
+                      <span><strong>若審核未通過：</strong>若資料有誤被管理員駁回，您將可再次點選「重新送審」並自動載入原資料修改。</span>
+                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <span className="p-1 bg-indigo-100 text-indigo-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                        <Home size={14} />
+                      </span>
+                      <span><strong>租客權益不受影響：</strong>審核期間您可以正常使用租客專區的所有功能與合約查閱。</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-sm rounded-xl shadow-md shadow-indigo-100 transition-all cursor-pointer"
+                    >
+                      我知道了，返回租客中心
+                    </button>
                   </div>
                 </div>
               )}
