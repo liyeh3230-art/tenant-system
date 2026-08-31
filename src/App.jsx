@@ -484,8 +484,13 @@ export default function App() {
               .select('*')
               .in('lease_id', leaseIds)
               .is('deleted_at', null);
-            if (paymentData) {
-              setPayments(paymentData.map(p => ({
+
+            const allPaymentRows = paymentData || [];
+            const activeLeaseIds = new Set(activeLeases.map(l => l.id));
+
+            setPayments(allPaymentRows
+              .filter(p => activeLeaseIds.has(p.lease_id))
+              .map(p => ({
                 id: p.id,
                 leaseId: p.lease_id,
                 tenantName: p.tenant_name,
@@ -500,9 +505,31 @@ export default function App() {
                 transferLast5: p.transfer_last5,
                 note: p.note
               })));
-            }
+
+            const histLeasesWithPayments = histLeases.map(hl => ({
+              ...hl,
+              archivedPayments: allPaymentRows
+                .filter(p => p.lease_id === hl.id)
+                .map(p => ({
+                  id: p.id,
+                  leaseId: p.lease_id,
+                  tenantName: p.tenant_name,
+                  propertyName: p.property_name,
+                  amount: p.amount,
+                  status: p.status,
+                  billType: p.bill_type || 'rent',
+                  title: p.title,
+                  dueDate: p.due_date,
+                  paidDate: p.paid_date,
+                  paymentMethod: p.payment_method,
+                  transferLast5: p.transfer_last5,
+                  note: p.note
+                }))
+            }));
+            setHistoricalLeases(histLeasesWithPayments);
           } else {
             setPayments([]);
+            setHistoricalLeases(histLeases);
           }
         }
       }
@@ -559,7 +586,6 @@ export default function App() {
             note: l.note,
             archivedPayments: []
           }));
-          setHistoricalLeases(histLeases);
 
           // 抓取該租客合約關聯的房源
           const propIds = Array.from(new Set(leaseData.map(l => l.property_id).filter(Boolean)));
@@ -614,8 +640,13 @@ export default function App() {
               .select('*')
               .in('lease_id', leaseIds)
               .is('deleted_at', null);
-            if (paymentData) {
-              setPayments(paymentData.map(p => ({
+
+            const allPaymentRows = paymentData || [];
+            const activeLeaseIds = new Set(activeLeases.map(l => l.id));
+
+            setPayments(allPaymentRows
+              .filter(p => activeLeaseIds.has(p.lease_id))
+              .map(p => ({
                 id: p.id,
                 leaseId: p.lease_id,
                 tenantName: p.tenant_name,
@@ -630,7 +661,31 @@ export default function App() {
                 transferLast5: p.transfer_last5,
                 note: p.note
               })));
-            }
+
+            const histLeasesWithPayments = histLeases.map(hl => ({
+              ...hl,
+              archivedPayments: allPaymentRows
+                .filter(p => p.lease_id === hl.id)
+                .map(p => ({
+                  id: p.id,
+                  leaseId: p.lease_id,
+                  tenantName: p.tenant_name,
+                  propertyName: p.property_name,
+                  amount: p.amount,
+                  status: p.status,
+                  billType: p.bill_type || 'rent',
+                  title: p.title,
+                  dueDate: p.due_date,
+                  paidDate: p.paid_date,
+                  paymentMethod: p.payment_method,
+                  transferLast5: p.transfer_last5,
+                  note: p.note
+                }))
+            }));
+            setHistoricalLeases(histLeasesWithPayments);
+          } else {
+            setPayments([]);
+            setHistoricalLeases(histLeases);
           }
         }
       }
@@ -3067,7 +3122,7 @@ export default function App() {
     setActiveModal('editLease');
   };
 
-  const handleEditLeaseSubmit = (e) => {
+  const handleEditLeaseSubmit = async (e) => {
     e.preventDefault();
     if (!editingLease) return;
     if (!leasePhone.trim()) {
@@ -3075,7 +3130,7 @@ export default function App() {
       return;
     }
     if (!leaseTenantName.trim()) {
-      showToast('查無此電話之註冊租客！請確認電話號碼或請租客先註冊帳戶。', 'error');
+      showToast('請輸入承租人姓名！', 'error');
       return;
     }
 
@@ -3085,28 +3140,57 @@ export default function App() {
       ? Math.round(Number(leaseUnitRent) / 12) || Math.round(totalRent / (pCount * 12)) || totalRent
       : Number(leaseUnitRent) || (pCount > 0 ? Math.round(totalRent / pCount) : totalRent);
 
-    setLeases(leases.map(l =>
-      l.id === editingLease.id ? {
-        ...l,
-        propertyId: leasePropId,
-        tenantName: leaseTenantName.trim(),
-        phone: leasePhone.trim(),
-        coTenantName: (showCoTenant && leaseCoTenantName.trim()) ? leaseCoTenantName.trim() : null,
-        coPhone: (showCoTenant && leaseCoPhone.trim()) ? leaseCoPhone.trim() : null,
-        startDate: leaseStartDate,
-        endDate: leaseEndDate,
-        deposit: Number(leaseDeposit) || 0,
-        monthlyRent: monthlyRentVal,
-        totalContractRent: totalRent,
-        unitRent: Number(leaseUnitRent) || monthlyRentVal,
-        periodCount: pCount,
-        unitType: leaseUnitType,
-        note: leaseNote.trim()
-      } : l
-    ));
-    setActiveModal(null);
-    setEditingLease(null);
-    showToast('租約資訊已成功更新！', 'success');
+    const updatedLeaseData = {
+      propertyId: leasePropId,
+      tenantName: leaseTenantName.trim(),
+      phone: leasePhone.trim(),
+      coTenantName: (showCoTenant && leaseCoTenantName.trim()) ? leaseCoTenantName.trim() : null,
+      coPhone: (showCoTenant && leaseCoPhone.trim()) ? leaseCoPhone.trim() : null,
+      startDate: leaseStartDate,
+      endDate: leaseEndDate,
+      deposit: Number(leaseDeposit) || 0,
+      monthlyRent: monthlyRentVal,
+      totalContractRent: totalRent,
+      unitRent: Number(leaseUnitRent) || monthlyRentVal,
+      periodCount: pCount,
+      unitType: leaseUnitType,
+      note: leaseNote.trim()
+    };
+
+    try {
+      if (isSupabaseConfigured) {
+        const { error: updateErr } = await supabase
+          .from('leases')
+          .update({
+            property_id: updatedLeaseData.propertyId,
+            tenant_name: updatedLeaseData.tenantName,
+            phone: updatedLeaseData.phone,
+            co_tenant_name: updatedLeaseData.coTenantName,
+            co_phone: updatedLeaseData.coPhone,
+            start_date: updatedLeaseData.startDate,
+            end_date: updatedLeaseData.endDate,
+            deposit: updatedLeaseData.deposit,
+            monthly_rent: updatedLeaseData.monthlyRent,
+            total_contract_rent: updatedLeaseData.totalContractRent,
+            note: updatedLeaseData.note,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingLease.id);
+
+        if (updateErr) throw updateErr;
+      }
+
+      setLeases(prev => prev.map(l =>
+        l.id === editingLease.id ? { ...l, ...updatedLeaseData } : l
+      ));
+      setActiveModal(null);
+      setEditingLease(null);
+      showToast('租約資訊已成功更新並同步至雲端！', 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Update lease error:', err);
+      showToast(`更新租約失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleDeleteLease = async (leaseId, propertyId) => {
@@ -3115,30 +3199,65 @@ export default function App() {
     const relatedPayments = payments.filter(p => p.leaseId === leaseId);
 
     const confirmed = await showConfirmDialog(
-      `確定要終止此租約紀錄嗎？\n\n承租人：${leaseToEnd.tenantName}\n合約期間：${leaseToEnd.startDate} ~ ${leaseToEnd.endDate}\n\n⚠️ 終止後：\n1. 該租約將移入「歷史合約」留存。\n2. 原本在「帳單與已繳紀錄清單」的 ${relatedPayments.length} 筆帳單與款項將同步輸出並完整封存至歷史合約中供日後查閱，並從當前活躍帳單清單中清除。\n3. 房源將釋出為未出租狀態。`
+      `確定要終止此租約紀錄（退租結案）嗎？\n\n承租人：${leaseToEnd.tenantName}\n合約期間：${leaseToEnd.startDate} ~ ${leaseToEnd.endDate}\n\n⚠️ 終止後：\n1. 該租約將移入「歷史合約」永久留存。\n2. 原本在「帳單與已繳紀錄清單」的 ${relatedPayments.length} 筆帳單將同步輸出並完整封存至歷史合約中供日後查閱，並從當前活躍帳單清單中清除。\n3. 房源將自動釋出為「空置」狀態。\n4. 資料將同步上傳至雲端資料庫 (Supabase)，所有手機與電腦皆同步更新。`
     );
     if (!confirmed) return;
 
-    const archivedLease = {
-      ...leaseToEnd,
-      status: 'terminated',
-      terminatedAt: new Date().toISOString().split('T')[0],
-      archivedPayments: relatedPayments, // 完整輸出並保存該合約所有帳單與已繳紀錄
-    };
+    try {
+      const nowIso = new Date().toISOString();
+      const todayStr = nowIso.split('T')[0];
 
-    setHistoricalLeases(prev => [...prev, archivedLease]);
-    setLeases(leases.filter(l => l.id !== leaseId));
-    setPayments(payments.filter(p => p.leaseId !== leaseId)); // 從活躍清單中清除
-    setProperties(properties.map(p =>
-      p.id === propertyId ? { ...p, status: 'vacant' } : p
-    ));
+      if (isSupabaseConfigured) {
+        // 1. 更新 Supabase 租約狀態為 terminated
+        const { error: leaseErr } = await supabase
+          .from('leases')
+          .update({
+            status: 'terminated',
+            updated_at: nowIso
+          })
+          .eq('id', leaseId);
 
-    if (currentTenantLeaseId === leaseId) {
-      const remainingLeases = leases.filter(l => l.id !== leaseId);
-      setCurrentTenantLeaseId(remainingLeases.length > 0 ? remainingLeases[0].id : null);
+        if (leaseErr) throw leaseErr;
+
+        // 2. 更新房源狀態為 vacant (空置)
+        if (propertyId) {
+          await supabase
+            .from('properties')
+            .update({
+              status: 'vacant',
+              updated_at: nowIso
+            })
+            .eq('id', propertyId);
+        }
+      }
+
+      const archivedLease = {
+        ...leaseToEnd,
+        status: 'terminated',
+        terminatedAt: todayStr,
+        archivedPayments: relatedPayments, // 完整輸出並保存該合約所有帳單與已繳紀錄
+      };
+
+      setHistoricalLeases(prev => [...prev, archivedLease]);
+      setLeases(prev => prev.filter(l => l.id !== leaseId));
+      setPayments(prev => prev.filter(p => p.leaseId !== leaseId)); // 從活躍清單中清除
+      if (propertyId) {
+        setProperties(prev => prev.map(p =>
+          p.id === propertyId ? { ...p, status: 'vacant' } : p
+        ));
+      }
+
+      if (currentTenantLeaseId === leaseId) {
+        const remainingLeases = leases.filter(l => l.id !== leaseId);
+        setCurrentTenantLeaseId(remainingLeases.length > 0 ? remainingLeases[0].id : null);
+      }
+
+      showToast(`租約已順利退租結案！房源已釋出為空置，歷史合約與 ${relatedPayments.length} 筆帳單已同步保存至雲端。`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Terminate lease error:', err);
+      showToast(`退租結案失敗: ${err.message}`, 'error');
     }
-
-    showToast(`租約已順利結案！共 ${relatedPayments.length} 筆帳單已繳紀錄已同步輸出至歷史合約中保存。`, 'success');
   };
 
   const formatChineseCurrency = (n) => {
@@ -3573,20 +3692,39 @@ export default function App() {
     const pad = (n) => String(n).padStart(2, '0');
     const voidedAtStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-    setPayments(payments.map(p => {
-      if (p.id === paymentId) {
-        return {
-          ...p,
-          status: 'void',
-          approvalStatus: 'void',
-          voidedBy: operator,
-          voidedAt: voidedAtStr,
-          voidedRole: role
-        };
+    try {
+      if (isSupabaseConfigured) {
+        const { error: voidErr } = await supabase
+          .from('payments')
+          .update({
+            status: 'void',
+            note: target.note ? `${target.note} (作廢: ${operator} 於 ${voidedAtStr})` : `(作廢: ${operator} 於 ${voidedAtStr})`,
+            updated_at: now.toISOString(),
+          })
+          .eq('id', paymentId);
+
+        if (voidErr) throw voidErr;
       }
-      return p;
-    }));
-    showToast(`已成功將此筆帳單標記為「已作廢」！紀錄已同步保留於雙方清單中。`, 'warning');
+
+      setPayments(prev => prev.map(p => {
+        if (p.id === paymentId) {
+          return {
+            ...p,
+            status: 'void',
+            approvalStatus: 'void',
+            voidedBy: operator,
+            voidedAt: voidedAtStr,
+            voidedRole: role
+          };
+        }
+        return p;
+      }));
+      showToast(`已成功將此筆帳單標記為「已作廢」並同步至雲端！紀錄已保留於雙方清單中。`, 'warning');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Void payment error:', err);
+      showToast(`作廢失敗: ${err.message}`, 'error');
+    }
   };
 
   const handleOpenTenantPay = (bill) => {
