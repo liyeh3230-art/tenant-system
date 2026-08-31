@@ -439,7 +439,7 @@ export default function App() {
           }));
           setHistoricalLeases(histLeases);
 
-          // 從合約中提取房客名冊
+          // 從合約中提取房客名冊，並同步加載所有已註冊房客 Profile
           const tMap = new Map();
           leaseData.forEach(l => {
             const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
@@ -453,6 +453,27 @@ export default function App() {
               }
             }
           });
+
+          // 同步加載已註冊之房客 Profile
+          try {
+            const { data: tenantProfs } = await supabase
+              .from('profiles')
+              .select('id, name, phone, role')
+              .eq('role', 'tenant')
+              .is('deleted_at', null);
+
+            if (tenantProfs) {
+              tenantProfs.forEach(p => {
+                const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
+                if (cleanP && p.name) {
+                  tMap.set(cleanP, { id: p.id, name: p.name, phone: p.phone, isSelfRegistered: true });
+                }
+              });
+            }
+          } catch (pErr) {
+            console.warn('Preload tenant profiles warning:', pErr);
+          }
+
           setRegisteredTenants(Array.from(tMap.values()));
 
           // 只抓取該房東合約相關的帳單，避免全庫下載
@@ -2793,57 +2814,115 @@ export default function App() {
     setActiveModal('addLease');
   };
 
-  const handlePhoneInputChange = (phoneVal) => {
+  const handlePhoneInputChange = async (phoneVal) => {
     setLeasePhone(phoneVal);
-    const cleaned = String(phoneVal || '').replace(/[-\s]/g, '').trim();
+    const cleaned = String(phoneVal || '').replace(/[^0-9]/g, '').trim();
     if (!cleaned) {
       setLeaseTenantName('');
       return;
     }
 
-    // Search across registered tenants, active leases, and historical leases
-    const matchedReg = registeredTenants.find(t => String(t.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    // 1. 本地快取快速搜尋 (Local Cache: registeredTenants, leases, historicalLeases)
+    const matchedReg = registeredTenants.find(t => String(t.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedReg && matchedReg.name) {
       setLeaseTenantName(matchedReg.name);
       return;
     }
-    const matchedLease = leases.find(l => String(l.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    const matchedLease = leases.find(l => String(l.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedLease && matchedLease.tenantName) {
       setLeaseTenantName(matchedLease.tenantName);
       return;
     }
-    const matchedHist = historicalLeases.find(l => String(l.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    const matchedHist = historicalLeases.find(l => String(l.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedHist && matchedHist.tenantName) {
       setLeaseTenantName(matchedHist.tenantName);
       return;
     }
-    setLeaseTenantName('');
+
+    // 2. 線上即時查詢 Supabase profiles 資料庫（支援所有已註冊或 LINE 綁定租客）
+    if (cleaned.length >= 8) {
+      try {
+        const { data: profData } = await supabase
+          .from('profiles')
+          .select('name, phone')
+          .eq('phone', cleaned)
+          .maybeSingle();
+
+        if (profData && profData.name) {
+          setLeaseTenantName(profData.name);
+          setRegisteredTenants(prev => {
+            const filtered = prev.filter(t => String(t.phone).replace(/[^0-9]/g, '') !== cleaned);
+            return [...filtered, { id: `TEN_${cleaned}`, name: profData.name, phone: cleaned, isSelfRegistered: true }];
+          });
+          return;
+        }
+
+        // 3. 查詢全系統既有租約歷史紀錄
+        const { data: leaseData } = await supabase
+          .from('leases')
+          .select('tenant_name, phone')
+          .eq('phone', cleaned)
+          .is('deleted_at', null)
+          .limit(1);
+
+        if (leaseData && leaseData.length > 0 && leaseData[0].tenant_name) {
+          setLeaseTenantName(leaseData[0].tenant_name);
+          setRegisteredTenants(prev => {
+            const filtered = prev.filter(t => String(t.phone).replace(/[^0-9]/g, '') !== cleaned);
+            return [...filtered, { id: `TEN_${cleaned}`, name: leaseData[0].tenant_name, phone: cleaned, isSelfRegistered: false }];
+          });
+          return;
+        }
+      } catch (dbErr) {
+        console.warn('Auto match tenant name from Supabase notice:', dbErr);
+      }
+    }
   };
 
-  const handleCoPhoneInputChange = (phoneVal) => {
+  const handleCoPhoneInputChange = async (phoneVal) => {
     setLeaseCoPhone(phoneVal);
-    const cleaned = String(phoneVal || '').replace(/[-\s]/g, '').trim();
+    const cleaned = String(phoneVal || '').replace(/[^0-9]/g, '').trim();
     if (!cleaned) {
       setLeaseCoTenantName('');
       return;
     }
 
-    const matchedReg = registeredTenants.find(t => String(t.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    const matchedReg = registeredTenants.find(t => String(t.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedReg && matchedReg.name) {
       setLeaseCoTenantName(matchedReg.name);
       return;
     }
-    const matchedLease = leases.find(l => String(l.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    const matchedLease = leases.find(l => String(l.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedLease && matchedLease.tenantName) {
       setLeaseCoTenantName(matchedLease.tenantName);
       return;
     }
-    const matchedHist = historicalLeases.find(l => String(l.phone || '').replace(/[-\s]/g, '').trim() === cleaned);
+    const matchedHist = historicalLeases.find(l => String(l.phone || '').replace(/[^0-9]/g, '').trim() === cleaned);
     if (matchedHist && matchedHist.tenantName) {
       setLeaseCoTenantName(matchedHist.tenantName);
       return;
     }
-    setLeaseCoTenantName('');
+
+    if (cleaned.length >= 8) {
+      try {
+        const { data: profData } = await supabase
+          .from('profiles')
+          .select('name, phone')
+          .eq('phone', cleaned)
+          .maybeSingle();
+
+        if (profData && profData.name) {
+          setLeaseCoTenantName(profData.name);
+          setRegisteredTenants(prev => {
+            const filtered = prev.filter(t => String(t.phone).replace(/[^0-9]/g, '') !== cleaned);
+            return [...filtered, { id: `TEN_${cleaned}`, name: profData.name, phone: cleaned, isSelfRegistered: true }];
+          });
+          return;
+        }
+      } catch (dbErr) {
+        console.warn('Auto match co-tenant name from Supabase notice:', dbErr);
+      }
+    }
   };
 
   const handleAddLeaseSubmit = async (e) => {
