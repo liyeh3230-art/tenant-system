@@ -560,6 +560,7 @@ export default function App() {
           const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             coPhone: l.co_phone,
@@ -577,6 +578,7 @@ export default function App() {
           const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             startDate: l.start_date,
@@ -611,12 +613,44 @@ export default function App() {
             }
           }
 
-          // 抓取該租客房東的收款帳戶資訊
-          const lndIds = Array.from(new Set(leaseData.map(l => l.landlord_id).filter(Boolean)));
+          // 抓取該租客房東的完整資訊與收款帳戶
+          const lndIds = Array.from(new Set([
+            ...leaseData.map(l => l.landlord_id),
+            ...(propIds.length > 0 ? (properties.map(p => p.landlordId)) : [])
+          ].filter(Boolean)));
+
           if (lndIds.length > 0) {
-            const { data: lndProfs } = await supabase.from('profiles').select('id, bank_info').in('id', lndIds);
-            const { data: lndTable } = await supabase.from('landlords').select('id, bank_info').in('id', lndIds);
-            const targetBank = lndProfs?.[0]?.bank_info || lndTable?.[0]?.bank_info;
+            const { data: lndProfs } = await supabase.from('profiles').select('id, name, phone, bank_info').in('id', lndIds);
+            const { data: lndTable } = await supabase.from('landlords').select('id, name, phone, bank_info, ad_listing_enabled, status').in('id', lndIds);
+
+            const combinedLandlords = (lndTable || []).map(l => {
+              const matchedProf = (lndProfs || []).find(p => p.id === l.id);
+              return {
+                id: l.id,
+                name: l.name || matchedProf?.name || '房東',
+                phone: l.phone || matchedProf?.phone || '',
+                status: l.status || 'approved',
+                adListingEnabled: l.ad_listing_enabled || false,
+                bankInfo: l.bank_info || matchedProf?.bank_info
+              };
+            });
+
+            (lndProfs || []).forEach(p => {
+              if (!combinedLandlords.some(l => l.id === p.id)) {
+                combinedLandlords.push({
+                  id: p.id,
+                  name: p.name || '房東',
+                  phone: p.phone || '',
+                  status: 'approved',
+                  adListingEnabled: false,
+                  bankInfo: p.bank_info
+                });
+              }
+            });
+
+            setLandlords(combinedLandlords);
+
+            const targetBank = combinedLandlords[0]?.bankInfo;
             if (targetBank) {
               const parsed = typeof targetBank === 'string' ? JSON.parse(targetBank || '{}') : targetBank;
               setLandlordBankInfo({
@@ -629,6 +663,7 @@ export default function App() {
               setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
             }
           } else {
+            setLandlords([]);
             setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
           }
 
@@ -7706,13 +7741,13 @@ export default function App() {
                           <span>房東聯絡資訊</span>
                         </div>
                         <p className="text-base font-bold text-slate-800">
-                          {landlords.find(l => l.id === currentTenantProperty?.landlordId)?.name || '房東'}
+                          {landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.name || '房東'}
                         </p>
                         <p className="text-xs text-slate-600 flex items-center gap-1 font-semibold">
                           <Phone size={12} className="text-slate-400" />
                           <span>電話：</span>
-                          <a href={`tel:${landlords.find(l => l.id === currentTenantProperty?.landlordId)?.phone}`} className="text-indigo-600 hover:underline">
-                            {landlords.find(l => l.id === currentTenantProperty?.landlordId)?.phone || '未提供'}
+                          <a href={`tel:${landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.phone || ''}`} className="text-indigo-600 hover:underline">
+                            {landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.phone || '未提供'}
                           </a>
                         </p>
                       </div>
