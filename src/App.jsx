@@ -325,7 +325,7 @@ export default function App() {
         ? (overrideTenantPhone !== undefined ? overrideTenantPhone : currentLandlordPhone)
         : null;
       const effectiveTenantPhone = (effectiveRole === 'tenant')
-        ? (overrideTenantPhone !== undefined ? overrideTenantPhone : (currentTenantPhone || activeUserPhone))
+        ? (overrideTenantPhone !== undefined ? overrideTenantPhone : (currentTenantPhone || currentUser?.phone || ''))
         : null;
 
       // 🚀 優化 A：針對「房東視角」進行精確查詢 (僅在角色為 admin 時執行)
@@ -553,7 +553,7 @@ export default function App() {
 
       // 🚀 優化 B：針對「租客視角」進行精確查詢 (僅在身分為 tenant 時執行)
       else if (effectiveRole === 'tenant') {
-        const cleanTenantPhone = String(effectiveTenantPhone || currentTenantPhone || activeUserPhone || '').replace(/[^0-9]/g, '');
+        const cleanTenantPhone = String(effectiveTenantPhone || currentTenantPhone || currentUser?.phone || '').replace(/[^0-9]/g, '');
         if (!cleanTenantPhone) return;
 
         if (cleanTenantPhone && cleanTenantPhone !== currentTenantPhone) {
@@ -949,7 +949,7 @@ export default function App() {
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
-  }, [activeUserPhone, currentLandlordId, currentLandlordPhone, currentTenantPhone, role]);
+  }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, currentUser?.phone, role]);
 
   fetchSupabaseDataRef.current = fetchSupabaseData;
 
