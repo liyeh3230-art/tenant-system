@@ -1152,6 +1152,8 @@ export default function App() {
   const [lineFirstLoginPhone, setLineFirstLoginPhone] = useState('');
   const [lineFirstLoginRole, setLineFirstLoginRole] = useState('tenant');
   const [lineFirstLoginLoading, setLineFirstLoginLoading] = useState(false);
+  const [lineBindingConflictUser, setLineBindingConflictUser] = useState(null);
+  const [lineFirstLoginPassword, setLineFirstLoginPassword] = useState('');
 
   useEffect(() => {
     const processLineOAuth = async () => {
@@ -1168,6 +1170,8 @@ export default function App() {
             setLineFirstLoginName(initialName);
             setLineFirstLoginPhone('');
             setLineFirstLoginRole('tenant');
+            setLineBindingConflictUser(null);
+            setLineFirstLoginPassword('');
             setActiveModal('lineFirstLogin');
             showToast('🎉 LINE 授權成功！請填寫姓名、電話並選擇您的會員身分。', 'info');
           } else {
@@ -1248,7 +1252,7 @@ export default function App() {
       return;
     }
 
-    if (chosenRole === 'landlord') {
+    if (chosenRole === 'landlord' && !lineBindingConflictUser) {
       const idNum = sanitizeText(landlordAppForm.idNumber).trim();
       const addr = sanitizeText(landlordAppForm.contactAddress).trim();
       if (!idNum || idNum.length < 6) {
@@ -1265,38 +1269,157 @@ export default function App() {
     try {
       const u = lineFirstLoginUser || {};
       const targetId = u.id || `line_usr_${Date.now()}`;
+      const lineUid = u.lineProfile?.userId || u.id;
 
-      // 1. 查詢是否已有該電話的會員 Profile
-      const { data: existingProfiles } = await supabase
+      // 1. 查詢是否已有該電話的會員 Profile (排除已被軟刪除的帳號)
+      const { data: existingProfiles, error: pErr } = await supabase
         .from('profiles')
         .select('*')
-        .eq('phone', cleanPhone);
+        .eq('phone', cleanPhone)
+        .is('deleted_at', null);
 
-      let finalId = targetId;
-      if (existingProfiles && existingProfiles.length > 0) {
-        const existingP = existingProfiles[0];
-        finalId = existingP.id;
-        await supabase.from('profiles').update({
-          name: cleanName,
-          role: chosenRole,
-          updated_at: new Date().toISOString(),
-        }).eq('id', finalId);
-      } else {
-        await supabase.from('profiles').upsert({
-          id: finalId,
-          role: chosenRole,
-          name: cleanName,
-          phone: cleanPhone,
-          updated_at: new Date().toISOString(),
-        });
+      if (pErr) {
+        console.error('Check existing phone error:', pErr);
       }
 
-      // 2. 寫入 LINE 綁定表
-      const lineUid = u.lineProfile?.userId || u.id;
+      // 尋找是否有屬於其他會員 ID 的衝突帳號
+      const conflictProfile = (existingProfiles || []).find(p => p.id !== targetId);
+
+      // ⚠️ 關鍵安全防禦機制：若該手機號碼已由其他會員註冊，絕不可無條件覆蓋！
+      if (conflictProfile) {
+        // 檢查該衝突帳號是否已綁定 LINE
+        const { data: conflictBindings } = await supabase
+          .from('line_bindings')
+          .select('*')
+          .eq('tenant_id', conflictProfile.id)
+          .eq('status', 'active');
+
+        // 情境 A：該手機號碼已綁定其他 LINE 帳號 -> 嚴格拒絕！絕不允許跨 LINE 覆蓋或冒領帳號！
+        if (conflictBindings && conflictBindings.length > 0) {
+          const isSameLineUser = conflictBindings.some(b => b.line_user_id === lineUid);
+          if (!isSameLineUser) {
+            showToast(`⚠️ 手機號碼「${cleanPhone}」已由會員「${conflictProfile.name || '用戶'}」註冊並綁定其他 LINE 帳號！為確保帳號安全，系統禁止重複綁定與覆蓋原資料。請填寫您本人的手機門號。`, 'error');
+            setLineFirstLoginLoading(false);
+            return;
+          }
+        }
+
+        // 情境 B：該手機號碼為帳號密碼註冊（未綁定 LINE），必須輸入密碼驗證為本人方能綁定
+        if (!lineFirstLoginPassword) {
+          setLineBindingConflictUser(conflictProfile);
+          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name}」註冊！若此為您本人的帳號，請輸入該帳號登入密碼以完成 LINE 綁定；若非您的帳號，請修改手機號碼。`, 'warning');
+          setLineFirstLoginLoading(false);
+          return;
+        }
+
+        // 進行密碼身分驗證
+        try {
+          await loginUser({ phone: cleanPhone, password: lineFirstLoginPassword });
+        } catch (authErr) {
+          showToast(`密碼驗證失敗：${authErr.message || '密碼錯誤'}！無法綁定此手機號碼，請確認密碼或改填其他手機號碼。`, 'error');
+          setLineFirstLoginLoading(false);
+          return;
+        }
+
+        // 密碼驗證成功！將此 LINE 帳號綁定至該既有會員帳號
+        const finalId = conflictProfile.id;
+        if (lineUid) {
+          await supabase.from('line_bindings').upsert({
+            tenant_id: finalId,
+            line_user_id: lineUid,
+            line_display_name: conflictProfile.name, // 嚴格保留原帳號名稱，絕不竄改覆蓋！
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'line_user_id' });
+        }
+
+        // 清理 OAuth 過程中臨時產生的 orphan profile（若非同一個 ID）
+        if (targetId && targetId !== finalId && String(targetId).startsWith('line_')) {
+          try {
+            await supabase.from('profiles').delete().eq('id', targetId);
+          } catch (delErr) {
+            console.warn('Cleanup orphan profile notice:', delErr);
+          }
+        }
+
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('line_linked_user_id', finalId);
+          localStorage.setItem('line_linked_phone', cleanPhone);
+          localStorage.setItem('line_linked_name', conflictProfile.name);
+          localStorage.setItem('line_linked_role', conflictProfile.role);
+        }
+
+        // 根據原帳號的身分登入（完整保留原身分、資料與審核狀態）
+        if (conflictProfile.role === 'landlord' || conflictProfile.role === 'admin') {
+          const { data: lndRec } = await supabase
+            .from('landlords')
+            .select('*')
+            .eq('id', finalId)
+            .maybeSingle();
+
+          if (lndRec && lndRec.status === 'approved') {
+            setCurrentUser({
+              id: finalId,
+              phone: cleanPhone,
+              user_metadata: { role: 'landlord', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+            });
+            setRole('admin');
+            setCurrentLandlordId(finalId);
+            setCurrentLandlordPhone(cleanPhone);
+            setActiveTab('dashboard');
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: finalId, phone: cleanPhone, name: conflictProfile.name, role: 'landlord' }));
+            } catch (e) {}
+          } else {
+            setCurrentUser({
+              id: finalId,
+              phone: cleanPhone,
+              user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+            });
+            setRole('tenant');
+            setCurrentTenantPhone(cleanPhone);
+            setCurrentTenantName(conflictProfile.name);
+            setActiveTab('portal');
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: finalId, phone: cleanPhone, name: conflictProfile.name, role: 'tenant' }));
+            } catch (e) {}
+          }
+        } else {
+          setCurrentUser({
+            id: finalId,
+            phone: cleanPhone,
+            user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+          });
+          setRole('tenant');
+          setCurrentTenantPhone(cleanPhone);
+          setCurrentTenantName(conflictProfile.name);
+          setActiveTab('portal');
+          try {
+            localStorage.setItem('app_auth_session', JSON.stringify({ id: finalId, phone: cleanPhone, name: conflictProfile.name, role: 'tenant' }));
+          } catch (e) {}
+        }
+
+        setActiveModal(null);
+        setLineBindingConflictUser(null);
+        setLineFirstLoginPassword('');
+        showToast(`🎉 LINE 帳號已成功綁定至既有會員「${conflictProfile.name}」！`, 'success');
+        fetchSupabaseData();
+        return;
+      }
+
+      // 2. 若為全新手機號碼（無衝突）：更新當前 LINE 使用者 Profile
+      await supabase.from('profiles').update({
+        name: cleanName,
+        phone: cleanPhone,
+        role: chosenRole,
+        updated_at: new Date().toISOString(),
+      }).eq('id', targetId);
+
+      // 寫入 LINE 綁定表
       if (lineUid) {
         try {
           await supabase.from('line_bindings').upsert({
-            tenant_id: finalId,
+            tenant_id: targetId,
             line_user_id: lineUid,
             line_display_name: cleanName,
             status: 'active',
@@ -1307,29 +1430,35 @@ export default function App() {
         }
       }
 
-      // 3. 永久儲存至本機快取以供未來一鍵免輸入登入
+      // 永久儲存至本機快取以供未來一鍵免輸入登入
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('line_linked_user_id', finalId);
+        localStorage.setItem('line_linked_user_id', targetId);
         localStorage.setItem('line_linked_phone', cleanPhone);
         localStorage.setItem('line_linked_name', cleanName);
         localStorage.setItem('line_linked_role', chosenRole);
       }
 
-      // 4. 根據身分分流引導
+      // 根據身分分流引導
       if (chosenRole === 'tenant') {
-        // 房客身分 → 直接開通登入並進入房客專區
+        await completeTenantOnboarding({
+          userId: targetId,
+          phone: cleanPhone,
+          name: cleanName,
+        });
+
         setCurrentUser({
-          id: finalId,
+          id: targetId,
           phone: cleanPhone,
           user_metadata: { role: 'tenant', name: cleanName, avatar_url: u.lineProfile?.pictureUrl }
         });
         setRole('tenant');
         setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(cleanName);
         setActiveTab('portal');
 
         try {
           localStorage.setItem('app_auth_session', JSON.stringify({
-            id: finalId,
+            id: targetId,
             phone: cleanPhone,
             name: cleanName,
             role: 'tenant'
@@ -1339,12 +1468,11 @@ export default function App() {
         setActiveModal(null);
         showToast(`🎉 歡迎 ${cleanName}！已成功為您開通房客會員專區！`, 'success');
       } else {
-        // 房東身分 → 直接寫入審核資料並開啟審核狀態告示
         const idNum = sanitizeText(landlordAppForm.idNumber).trim();
         const addr = sanitizeText(landlordAppForm.contactAddress).trim();
 
         await submitLandlordApplication({
-          userId: finalId,
+          userId: targetId,
           phone: cleanPhone,
           name: cleanName,
           idNumber: idNum,
@@ -1363,7 +1491,7 @@ export default function App() {
 
         try {
           localStorage.setItem('app_auth_session', JSON.stringify({
-            id: finalId,
+            id: targetId,
             phone: cleanPhone,
             name: cleanName,
             role: 'tenant'
@@ -1372,6 +1500,7 @@ export default function App() {
 
         showToast('🎉 基本資料已完成，房東審核申請已送出！管理員審核中（期間您可以先使用租客中心），核准後將自動開通房東功能。', 'success');
       }
+
       fetchSupabaseData();
     } catch (err) {
       console.error('Save LINE first login error:', err);
@@ -10083,8 +10212,11 @@ export default function App() {
                           placeholder="請輸入姓名（例如：林小美）"
                           value={lineFirstLoginName}
                           onChange={(e) => setLineFirstLoginName(e.target.value)}
-                          autoFocus
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold transition-colors"
+                          disabled={Boolean(lineBindingConflictUser)}
+                          autoFocus={!lineBindingConflictUser}
+                          className={`w-full border rounded-xl px-4 py-2.5 text-sm outline-none font-semibold transition-colors ${
+                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-emerald-500 focus:bg-white'
+                          }`}
                           required
                         />
                       </div>
@@ -10097,154 +10229,204 @@ export default function App() {
                           type="tel"
                           placeholder="請輸入手機號碼（例如：0912345678）"
                           value={lineFirstLoginPhone}
-                          onChange={(e) => setLineFirstLoginPhone(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white font-semibold transition-colors"
+                          onChange={(e) => {
+                            setLineFirstLoginPhone(e.target.value);
+                            if (lineBindingConflictUser) {
+                              setLineBindingConflictUser(null);
+                              setLineFirstLoginPassword('');
+                            }
+                          }}
+                          disabled={Boolean(lineBindingConflictUser)}
+                          className={`w-full border rounded-xl px-4 py-2.5 text-sm outline-none font-semibold transition-colors ${
+                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-emerald-500 focus:bg-white'
+                          }`}
                           required
                         />
                       </div>
                     </div>
 
-                    {/* Role Selection Option Cards */}
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-2">
-                        請選擇您的會員身分 <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {/* Tenant Card */}
-                        <div
-                          onClick={() => setLineFirstLoginRole('tenant')}
-                          className={`border-2 rounded-2xl p-3.5 sm:p-4 cursor-pointer transition-all flex flex-col justify-between ${
-                            lineFirstLoginRole === 'tenant'
-                              ? 'border-emerald-500 bg-emerald-50/70 shadow-xs ring-2 ring-emerald-400/20'
-                              : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className={`p-2 rounded-xl ${lineFirstLoginRole === 'tenant' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                              <Home size={18} />
-                            </div>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                              ⚡ 免審核・即開即用
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                              <span>我是房客 (Tenant)</span>
-                              {lineFirstLoginRole === 'tenant' && <CheckCircle size={14} className="text-emerald-600" />}
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-1 leading-normal">
-                              查閱租金帳單、線上合約明細與回報繳費。
-                            </p>
-                          </div>
+                    {/* 當偵測到既有會員手機號碼衝突時，展示密碼身分驗證卡片 */}
+                    {lineBindingConflictUser ? (
+                      <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 space-y-3 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
+                          <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
+                          <span>此號碼已註冊：既有會員【{lineBindingConflictUser.name}】</span>
                         </div>
-
-                        {/* Landlord Card */}
-                        <div
-                          onClick={() => setLineFirstLoginRole('landlord')}
-                          className={`border-2 rounded-2xl p-3.5 sm:p-4 cursor-pointer transition-all flex flex-col justify-between ${
-                            lineFirstLoginRole === 'landlord'
-                              ? 'border-indigo-500 bg-indigo-50/70 shadow-xs ring-2 ring-indigo-400/20'
-                              : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className={`p-2 rounded-xl ${lineFirstLoginRole === 'landlord' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                              <Building size={18} />
-                            </div>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
-                              🛡️ 管理員審核
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                              <span>我是房東 (Landlord)</span>
-                              {lineFirstLoginRole === 'landlord' && <CheckCircle size={14} className="text-indigo-600" />}
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-1 leading-normal">
-                              管理房間房號、自動出帳、收款入帳審核。
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* When Landlord is selected, expand landlord verification fields directly */}
-                    {lineFirstLoginRole === 'landlord' && (
-                      <div className="space-y-3 p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 animate-in fade-in duration-200">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950 pb-1 border-b border-indigo-100">
-                          <ShieldCheck size={16} className="text-indigo-600" />
-                          <span>請填寫房東身分查核資料</span>
-                        </div>
-
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          手機號碼 <strong>{lineFirstLoginPhone}</strong> 已存在會員帳號。若此為您本人原先註冊之帳號，請輸入該帳號的<strong>登入密碼</strong>完成身分驗證，系統將自動為您綁定 LINE，並<strong>完整保留您原有的身分、合約與所有資料</strong>：
+                        </p>
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            身分證字號 / 居留證號 / 統一編號 <span className="text-rose-500">*</span>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                            原帳號登入密碼 <span className="text-rose-500">*</span>
                           </label>
                           <input
-                            type="text"
-                            placeholder="例如：A123456789 或 公司統編 8 碼"
-                            value={landlordAppForm.idNumber}
-                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value }))}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold uppercase"
+                            type="password"
+                            placeholder="請輸入原帳號密碼"
+                            value={lineFirstLoginPassword}
+                            onChange={(e) => setLineFirstLoginPassword(e.target.value)}
+                            className="w-full bg-white border border-amber-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold transition-colors"
                             required
+                            autoFocus
                           />
                         </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="例如：台北市中正區忠孝東路一段 100 號 5 樓"
-                            value={landlordAppForm.contactAddress}
-                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
-                            required
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 mb-1">
-                              公司抬頭 / 物業名稱 (選填)
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="例如：安居物業管理 或 個人"
-                              value={landlordAppForm.companyName}
-                              onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 mb-1">
-                              預設收款機構與帳號 (選填)
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="例如：玉山銀行 1234567890"
-                              value={landlordAppForm.bankAccount}
-                              onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            補充說明 / 備註 (選填)
-                          </label>
-                          <textarea
-                            rows="2"
-                            placeholder="可填寫管理物業座落區域或額外說明..."
-                            value={landlordAppForm.notes}
-                            onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
-                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-medium"
-                          />
+                        <div className="pt-1 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLineBindingConflictUser(null);
+                              setLineFirstLoginPassword('');
+                            }}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-bold underline cursor-pointer"
+                          >
+                            ← 非本人帳號？改填其他手機門號
+                          </button>
                         </div>
                       </div>
+                    ) : (
+                      <>
+                        {/* Role Selection Option Cards */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-2">
+                            請選擇您的會員身分 <span className="text-rose-500">*</span>
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {/* Tenant Card */}
+                            <div
+                              onClick={() => setLineFirstLoginRole('tenant')}
+                              className={`border-2 rounded-2xl p-3.5 sm:p-4 cursor-pointer transition-all flex flex-col justify-between ${
+                                lineFirstLoginRole === 'tenant'
+                                  ? 'border-emerald-500 bg-emerald-50/70 shadow-xs ring-2 ring-emerald-400/20'
+                                  : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className={`p-2 rounded-xl ${lineFirstLoginRole === 'tenant' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                  <Home size={18} />
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                  ⚡ 免審核・即開即用
+                                </span>
+                              </div>
+                              <div>
+                                <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                                  <span>我是房客 (Tenant)</span>
+                                  {lineFirstLoginRole === 'tenant' && <CheckCircle size={14} className="text-emerald-600" />}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                                  查閱租金帳單、線上合約明細與回報繳費。
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Landlord Card */}
+                            <div
+                              onClick={() => setLineFirstLoginRole('landlord')}
+                              className={`border-2 rounded-2xl p-3.5 sm:p-4 cursor-pointer transition-all flex flex-col justify-between ${
+                                lineFirstLoginRole === 'landlord'
+                                  ? 'border-indigo-500 bg-indigo-50/70 shadow-xs ring-2 ring-indigo-400/20'
+                                  : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className={`p-2 rounded-xl ${lineFirstLoginRole === 'landlord' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                  <Building size={18} />
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                                  🛡️ 管理員審核
+                                </span>
+                              </div>
+                              <div>
+                                <div className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                                  <span>我是房東 (Landlord)</span>
+                                  {lineFirstLoginRole === 'landlord' && <CheckCircle size={14} className="text-indigo-600" />}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                                  管理房間房號、自動出帳、收款入帳審核。
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* When Landlord is selected, expand landlord verification fields directly */}
+                        {lineFirstLoginRole === 'landlord' && (
+                          <div className="space-y-3 p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 animate-in fade-in duration-200">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950 pb-1 border-b border-indigo-100">
+                              <ShieldCheck size={16} className="text-indigo-600" />
+                              <span>請填寫房東身分查核資料</span>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                身分證字號 / 居留證號 / 統一編號 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="例如：A123456789 或 公司統編 8 碼"
+                                value={landlordAppForm.idNumber}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value }))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold uppercase"
+                                required
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="例如：台北市中正區忠孝東路一段 100 號 5 樓"
+                                value={landlordAppForm.contactAddress}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                                required
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-700 mb-1">
+                                  公司抬頭 / 物業名稱 (選填)
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="例如：安居物業管理 或 個人"
+                                  value={landlordAppForm.companyName}
+                                  onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-700 mb-1">
+                                  預設收款機構與帳號 (選填)
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="例如：玉山銀行 1234567890"
+                                  value={landlordAppForm.bankAccount}
+                                  onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                補充說明 / 備註 (選填)
+                              </label>
+                              <textarea
+                                rows="2"
+                                placeholder="可填寫管理物業座落區域或額外說明..."
+                                value={landlordAppForm.notes}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-medium"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <div className="pt-2">
@@ -10252,12 +10434,19 @@ export default function App() {
                         type="submit"
                         disabled={lineFirstLoginLoading}
                         className={`w-full py-3 text-white font-bold rounded-xl shadow-md transition-all text-sm focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
-                          lineFirstLoginRole === 'tenant'
-                            ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
-                            : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                          lineBindingConflictUser
+                            ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-200'
+                            : lineFirstLoginRole === 'tenant'
+                              ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'
+                              : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
                         }`}
                       >
-                        {lineFirstLoginRole === 'tenant' ? (
+                        {lineBindingConflictUser ? (
+                          <>
+                            <ShieldCheck size={16} />
+                            <span>{lineFirstLoginLoading ? '密碼驗證綁定中...' : '🔐 驗證原帳號密碼並完成 LINE 綁定'}</span>
+                          </>
+                        ) : lineFirstLoginRole === 'tenant' ? (
                           <>
                             <CheckCircle size={16} />
                             <span>{lineFirstLoginLoading ? '帳號開通中...' : '🎉 確認送出・開通房客會員專區'}</span>
