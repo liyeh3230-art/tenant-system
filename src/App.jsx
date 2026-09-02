@@ -314,13 +314,26 @@ export default function App() {
   // --- 1. 獨立的資料抓取函式 (使用 useCallback 並在 SQL 層面以 .eq()/.in() 進行身分精確過濾) ---
   const fetchSupabaseDataRef = useRef(null);
 
-  const fetchSupabaseData = useCallback(async () => {
+  const fetchSupabaseData = useCallback(async (overrideRole, overrideLandlordId, overrideTenantPhone) => {
     if (!isSupabaseConfigured) return;
     try {
-      // 🚀 優化 A：針對「房東視角」進行精確查詢
-      if (role === 'admin' || currentLandlordId || currentLandlordPhone) {
-        const cleanLndPhone = currentLandlordPhone ? String(currentLandlordPhone).replace(/[^0-9]/g, '') : '';
-        let targetLandlordId = currentLandlordId;
+      const effectiveRole = overrideRole || role;
+      const effectiveLandlordId = (effectiveRole === 'admin')
+        ? (overrideLandlordId !== undefined ? overrideLandlordId : currentLandlordId)
+        : null;
+      const effectiveLandlordPhone = (effectiveRole === 'admin')
+        ? (overrideTenantPhone !== undefined ? overrideTenantPhone : currentLandlordPhone)
+        : null;
+      const effectiveTenantPhone = (effectiveRole === 'tenant')
+        ? (overrideTenantPhone !== undefined ? overrideTenantPhone : (currentTenantPhone || activeUserPhone))
+        : null;
+
+      // 🚀 優化 A：針對「房東視角」進行精確查詢 (僅在角色為 admin 時執行)
+      if (effectiveRole === 'admin') {
+        const cleanLndPhone = effectiveLandlordPhone
+          ? String(effectiveLandlordPhone).replace(/[^0-9]/g, '')
+          : (currentLandlordPhone ? String(currentLandlordPhone).replace(/[^0-9]/g, '') : '');
+        let targetLandlordId = effectiveLandlordId;
 
         // 查詢當前房東 Profile / Landlord 資訊
         const { data: myProfileData } = await supabase.from('profiles').select('*').eq('role', 'landlord');
@@ -332,6 +345,13 @@ export default function App() {
         const resolvedId = targetLandlordId || matchedProfile?.id || matchedLandlord?.id || (myLandlordsData?.[0]?.id) || (myProfileData?.[0]?.id);
         const resolvedPhone = cleanLndPhone || matchedProfile?.phone || matchedLandlord?.phone || '';
         const resolvedName = matchedProfile?.name || matchedLandlord?.name || '房東';
+
+        if (resolvedId && resolvedId !== currentLandlordId) {
+          setCurrentLandlordId(resolvedId);
+        }
+        if (resolvedPhone && resolvedPhone !== currentLandlordPhone) {
+          setCurrentLandlordPhone(resolvedPhone);
+        }
 
         const landlordIdList = Array.from(new Set([
           targetLandlordId,
@@ -531,9 +551,15 @@ export default function App() {
         }
       }
 
-      // 🚀 優化 B：針對「租客視角」進行精確查詢
-      else if (role === 'tenant' && currentTenantPhone) {
-        const cleanTenantPhone = String(currentTenantPhone).replace(/[^0-9]/g, '');
+      // 🚀 優化 B：針對「租客視角」進行精確查詢 (僅在身分為 tenant 時執行)
+      else if (effectiveRole === 'tenant') {
+        const cleanTenantPhone = String(effectiveTenantPhone || currentTenantPhone || activeUserPhone || '').replace(/[^0-9]/g, '');
+        if (!cleanTenantPhone) return;
+
+        if (cleanTenantPhone && cleanTenantPhone !== currentTenantPhone) {
+          setCurrentTenantPhone(cleanTenantPhone);
+        }
+
         // 抓取該租客在 profiles 中的真實姓名
         try {
           const { data: profData } = await supabase
@@ -571,6 +597,13 @@ export default function App() {
             note: l.note
           }));
           setLeases(activeLeases);
+
+          // 關鍵修復：自動選取租客的第一張有效合約，確保切換後合約與帳單即時顯現！
+          if (activeLeases.length > 0) {
+            setCurrentTenantLeaseId(prev => (prev && activeLeases.some(l => l.id === prev)) ? prev : activeLeases[0].id);
+          } else {
+            setCurrentTenantLeaseId(null);
+          }
 
           const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
@@ -783,7 +816,7 @@ export default function App() {
       }
 
       // 🚀 優化 C：若為「總管理員」，才抓取全平台資料以進行統計
-      else if (role === 'superadmin') {
+      else if (effectiveRole === 'superadmin') {
         const { data: propData } = await supabase.from('properties').select('*');
         if (propData) {
           setProperties(propData.map(p => ({
@@ -916,7 +949,7 @@ export default function App() {
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
-  }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, role]);
+  }, [activeUserPhone, currentLandlordId, currentLandlordPhone, currentTenantPhone, role]);
 
   fetchSupabaseDataRef.current = fetchSupabaseData;
 
@@ -1757,13 +1790,31 @@ export default function App() {
 
     if (targetRole === 'admin') {
       // 1. 若想切換為房東模式
-      if (!isApprovedLandlord) {
-        if (isPendingLandlord) {
+      let targetLandlord = myLandlordAccount;
+      if (!targetLandlord) {
+        // 直接向 Supabase 查詢是否有此使用者的已審核房東紀錄
+        const cleanP = String(currentPhone || '').replace(/[^0-9]/g, '');
+        const { data: lndData } = await supabase
+          .from('landlords')
+          .select('*')
+          .or(`id.eq.${currentUser?.id},phone.eq.${cleanP}`)
+          .maybeSingle();
+        if (lndData) {
+          targetLandlord = lndData;
+        }
+      }
+
+      const targetIsApproved = Boolean(targetLandlord && targetLandlord.status === 'approved');
+      const targetIsPending = Boolean(targetLandlord && targetLandlord.status === 'pending');
+      const targetIsRejected = Boolean(targetLandlord && targetLandlord.status === 'rejected');
+
+      if (!targetIsApproved) {
+        if (targetIsPending) {
           setActiveModal('pendingLandlordAlert');
           showToast('⏳ 您的房東帳號正在審核中，待管理員核准後即可開啟房東管理功能！', 'warning');
           return;
         }
-        if (isRejectedLandlord) {
+        if (targetIsRejected) {
           handleOpenLandlordApplication(true);
           showToast('您的房東申請先前未通過，已為您載入先前資料，請修正後重新送審！', 'info');
           return;
@@ -1774,37 +1825,37 @@ export default function App() {
         return;
       }
 
+      const targetLndId = targetLandlord.id;
+      const targetLndPhone = targetLandlord.phone || currentPhone;
+      const targetLndName = targetLandlord.name || currentName;
+
       setRole('admin');
       setActiveTab('dashboard');
-      setCurrentLandlordId(myLandlordAccount.id);
-      setCurrentLandlordPhone(myLandlordAccount.phone || currentPhone);
+      setCurrentLandlordId(targetLndId);
+      setCurrentLandlordPhone(targetLndPhone);
       setCurrentTenantLeaseId(null);
 
       try {
         localStorage.setItem('app_auth_session', JSON.stringify({
-          id: myLandlordAccount.id,
-          phone: myLandlordAccount.phone || currentPhone,
-          name: myLandlordAccount.name || currentName,
+          id: targetLndId,
+          phone: targetLndPhone,
+          name: targetLndName,
           role: 'landlord'
         }));
       } catch (e) {}
 
-      showToast(`🔄 已切換至「房東管理後台」(${myLandlordAccount.name || currentName} 房東)`, 'success');
+      showToast(`🔄 已切換至「房東管理後台」(${targetLndName} 房東)`, 'success');
       setIsMobileMenuOpen(false);
-      fetchSupabaseData();
+      // 🚀 即時拉取房東資料，不需重新整理
+      await fetchSupabaseData('admin', targetLndId, targetLndPhone);
     } else if (targetRole === 'tenant') {
       // 2. 若想切換為租客中心模式
       setRole('tenant');
       setActiveTab('portal');
       setCurrentTenantPhone(currentPhone);
       setCurrentTenantName(currentName);
-
-      // 自動選取該租客關聯的第一張有效合約
-      const userLeases = leases.filter(l =>
-        l.phone.replace(/[^0-9]/g, '') === currentPhone ||
-        (l.coPhone && l.coPhone.replace(/[^0-9]/g, '') === currentPhone)
-      );
-      setCurrentTenantLeaseId(userLeases.length > 0 ? userLeases[0].id : null);
+      setCurrentLandlordId(null);
+      setCurrentLandlordPhone(null);
 
       try {
         localStorage.setItem('app_auth_session', JSON.stringify({
@@ -1817,7 +1868,8 @@ export default function App() {
 
       showToast(`🔄 已切換至「租客個人中心」(${currentName})`, 'info');
       setIsMobileMenuOpen(false);
-      fetchSupabaseData();
+      // 🚀 即時拉取租客資料與合約帳單，不需重新整理
+      await fetchSupabaseData('tenant', null, currentPhone);
     }
   };
 
