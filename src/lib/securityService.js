@@ -751,24 +751,30 @@ export const redirectToFacebookLogin = (targetRole = 'tenant') => {
       }
     }
 
+    // 使用 response_type=token,code 同時支援 Client Token 即時授權與 Server-Side Code 交換
     const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}&scope=public_profile&response_type=code`;
+    )}&state=${encodeURIComponent(state)}&scope=public_profile&response_type=token,code`;
 
     window.location.href = fbAuthUrl;
   }
 };
 
 /**
- * 處理 Facebook Login 授權回傳 (Code 交換與身分歸戶檢驗)
+ * 處理 Facebook Login 授權回傳 (Code/AccessToken 交換與身分歸戶檢驗)
  */
 export const handleFacebookOAuthCallback = async () => {
   if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  const state = params.get('state');
-  const error = params.get('error');
-  const errorDescription = params.get('error_description');
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+  const hashParams = new URLSearchParams(rawHash);
+
+  const code = searchParams.get('code') || hashParams.get('code');
+  const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+  const state = searchParams.get('state') || hashParams.get('state');
+  const error = searchParams.get('error') || hashParams.get('error');
+  const errorDescription = searchParams.get('error_description') || hashParams.get('error_description');
 
   if (!state || !state.startsWith('fb_state_')) {
     return null;
@@ -779,7 +785,7 @@ export const handleFacebookOAuthCallback = async () => {
     throw new Error(errorDescription || `Facebook 登入授權被取消或失敗 (${error})`);
   }
 
-  if (!code) {
+  if (!code && !accessToken) {
     return null;
   }
 
@@ -791,7 +797,30 @@ export const handleFacebookOAuthCallback = async () => {
 
   const redirectUri = window.location.origin + window.location.pathname;
 
-  // 1. 優先呼叫 Supabase Edge Function: facebook-auth
+  let fbUserId = '';
+  let fbDisplayName = 'Facebook 用戶';
+  let fbPictureUrl = '';
+
+  // 1. 若前端直接取得 accessToken，直接向 Facebook Graph API /me 驗證並拉取真實個資
+  if (accessToken) {
+    try {
+      const graphRes = await fetch(
+        `https://graph.facebook.com/v19.0/me?fields=id,name,picture.width(300)&access_token=${encodeURIComponent(accessToken)}`
+      );
+      if (graphRes.ok) {
+        const graphData = await graphRes.json();
+        if (graphData && graphData.id) {
+          fbUserId = `fb_${graphData.id}`;
+          fbDisplayName = graphData.name || 'Facebook 用戶';
+          fbPictureUrl = graphData.picture?.data?.url || '';
+        }
+      }
+    } catch (graphErr) {
+      console.warn('Direct Facebook Graph API lookup notice:', graphErr);
+    }
+  }
+
+  // 2. 優先嘗試呼叫 Supabase Edge Function: facebook-auth (若後端已佈署)
   try {
     const res = await fetch('https://hpphlfmtyxrulirpyejp.supabase.co/functions/v1/facebook-auth', {
       method: 'POST',
@@ -799,6 +828,7 @@ export const handleFacebookOAuthCallback = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        accessToken,
         code,
         redirectUri,
         targetRole,
@@ -818,12 +848,13 @@ export const handleFacebookOAuthCallback = async () => {
       }
     }
   } catch (err) {
-    console.warn('Edge Function facebook-auth unreachable, using resilient database resolution fallback:', err);
+    console.warn('Edge Function facebook-auth unreachable, using direct Graph API & DB resolution fallback:', err);
   }
 
-  // 2. 本地開發與資料庫備援機制 (Resilient Fallback)
-  const fbUserId = `fb_${code.slice(-10) || Date.now().toString().slice(-8)}`;
-  const fbDisplayName = 'Facebook 用戶';
+  // 3. 資料庫歸戶檢驗 (查詢 line_bindings)
+  if (!fbUserId) {
+    fbUserId = `fb_${code?.slice(-10) || Date.now().toString().slice(-8)}`;
+  }
 
   try {
     const { data: binding } = await supabase
@@ -845,7 +876,7 @@ export const handleFacebookOAuthCallback = async () => {
           isNewUser: false,
           provider: 'facebook',
           targetRole: profs[0].role || targetRole,
-          socialProfile: { userId: fbUserId, displayName: profs[0].name || fbDisplayName }
+          socialProfile: { userId: fbUserId, displayName: profs[0].name || fbDisplayName, pictureUrl: fbPictureUrl }
         };
       }
     }
@@ -858,7 +889,8 @@ export const handleFacebookOAuthCallback = async () => {
     id: `fb_usr_${Date.now()}`,
     name: fbDisplayName,
     phone: `fb_${Date.now().toString().slice(-6)}`,
-    role: targetRole
+    role: targetRole,
+    avatar_url: fbPictureUrl
   };
 
   return {
@@ -866,7 +898,7 @@ export const handleFacebookOAuthCallback = async () => {
     isNewUser: true,
     provider: 'facebook',
     targetRole,
-    socialProfile: { userId: fbUserId, displayName: fbDisplayName }
+    socialProfile: { userId: fbUserId, displayName: fbDisplayName, pictureUrl: fbPictureUrl }
   };
 };
 

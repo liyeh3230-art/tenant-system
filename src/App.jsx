@@ -1199,8 +1199,10 @@ export default function App() {
         let oauthResult = null;
         let provider = 'line';
 
-        const params = new URLSearchParams(window.location.search);
-        const state = params.get('state');
+        const searchParams = new URLSearchParams(window.location.search);
+        const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+        const hashParams = new URLSearchParams(rawHash);
+        const state = searchParams.get('state') || hashParams.get('state');
 
         if (state && state.startsWith('fb_state_')) {
           provider = 'facebook';
