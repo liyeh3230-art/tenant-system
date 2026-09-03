@@ -753,7 +753,7 @@ export const redirectToFacebookLogin = (targetRole = 'tenant') => {
 
     const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}&scope=public_profile,email&response_type=code`;
+    )}&state=${encodeURIComponent(state)}&scope=public_profile&response_type=code`;
 
     window.location.href = fbAuthUrl;
   }
