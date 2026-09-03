@@ -4891,27 +4891,16 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
                           <button
                             type="button"
                             onClick={() => redirectToLineLogin()}
-                            className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 px-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-xs focus:outline-none cursor-pointer"
+                            className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 px-4 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
                           >
-                            <svg className="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24">
+                            <svg className="w-5 h-5 fill-current flex-shrink-0" viewBox="0 0 24 24">
                               <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
                             </svg>
-                            <span>LINE 一鍵授權登入</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => redirectToFacebookLogin()}
-                            className="w-full bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold py-2.5 px-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-xs focus:outline-none cursor-pointer"
-                          >
-                            <svg className="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24">
-                              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                            </svg>
-                            <span>Facebook 一鍵授權登入</span>
+                            <span>LINE 帳號一鍵授權快速登入</span>
                           </button>
                         </div>
 
