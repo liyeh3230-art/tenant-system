@@ -751,10 +751,10 @@ export const redirectToFacebookLogin = (targetRole = 'tenant') => {
       }
     }
 
-    // 使用 response_type=token,code 同時支援 Client Token 即時授權與 Server-Side Code 交換
+    // 使用標準 response_type=code
     const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}&scope=public_profile&response_type=token,code`;
+    )}&state=${encodeURIComponent(state)}&scope=public_profile&response_type=code`;
 
     window.location.href = fbAuthUrl;
   }
