@@ -27,7 +27,7 @@ export const sanitizeNumber = (input, min = 0, fallback = 0) => {
   return val;
 };
 
-const getAuthEmail = (phone) => `${phone.replace(/[^0-9]/g, '')}@rental-auth.internal`;
+export const getAuthEmail = (phone) => `${phone.replace(/[^0-9]/g, '')}@rental-auth.internal`;
 
 // --- 2. 身份驗證與授權 (Supabase Auth & RBAC) ---
 
@@ -407,18 +407,29 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
     throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
   }
 
-  // 3. 查詢 Profile 資料（必須精確比對 Auth User ID，嚴格杜絕跨帳號密碼冒領）
+  // 3. 查詢 Profile 資料（支援以 Auth User ID 或經比對之手機號碼精確匹配）
   const { data: profiles, error: profileError } = await supabase
     .from('profiles')
     .select('id, role, name, phone, avatar_url, password_hash, deleted_at')
-    .eq('id', authUser.id);
+    .or(`id.eq.${authUser.id},phone.eq.${safePhone}`)
+    .is('deleted_at', null);
 
   let matchedProfile = profiles?.[0];
 
-  // ⚠️ 關鍵安全檢驗：
-  // 1. 若該 profiles 查無此 Auth ID（例如透過 LINE 建立之純 OAuth 帳號，未曾建立此密碼關聯）：
-  // 2. 或帳號已被管理員標記刪除/註銷：
-  // 嚴格拒絕登入！
+  // 若資料庫之 Profile ID 與 Auth User ID 尚未同步，即時執行雙向對齊保證一致性
+  if (matchedProfile && matchedProfile.id !== authUser.id) {
+    try {
+      const oldId = matchedProfile.id;
+      await supabase.from('profiles').update({ id: authUser.id }).eq('phone', safePhone);
+      await supabase.from('line_bindings').update({ tenant_id: authUser.id }).eq('tenant_id', oldId);
+      await supabase.from('landlords').update({ id: authUser.id }).eq('id', oldId);
+      matchedProfile.id = authUser.id;
+    } catch (alignErr) {
+      console.warn('Profile ID alignment notice:', alignErr);
+    }
+  }
+
+  // ⚠️ 關鍵安全檢驗：若查無 Profile 或帳號已被註銷，嚴格拒絕登入
   if (!matchedProfile || matchedProfile.deleted_at) {
     try {
       await supabase.auth.signOut();
@@ -426,19 +437,6 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('app_auth_session');
     }
-
-    // 檢查該手機是否為 LINE 註冊之帳號
-    const { data: lineProfile } = await supabase
-      .from('profiles')
-      .select('id, name')
-      .eq('phone', safePhone)
-      .is('deleted_at', null)
-      .maybeSingle();
-
-    if (lineProfile) {
-      throw new Error('此手機門號為 LINE 註冊帳號，未設定密碼，請點擊「LINE 帳號一鍵授權登入」！');
-    }
-
     throw new Error('帳號或密碼錯誤，請確認後重新輸入。');
   }
 

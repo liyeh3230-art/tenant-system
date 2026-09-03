@@ -21,7 +21,8 @@ import {
   redirectToFacebookLogin,
   handleFacebookOAuthCallback,
   logAuditEvent,
-  PaymentStatus
+  PaymentStatus,
+  getAuthEmail
 } from './lib/securityService';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
@@ -1473,33 +1474,56 @@ export default function App() {
       }
 
       // 建立 Supabase Auth 帳號密碼，確保新用戶在未來能以手機號碼與此密碼原生登入
+      let finalAuthUserId = targetId;
       try {
-        const cleanEmail = `${cleanPhone}@system.local`;
-        await supabase.auth.signUp({
+        const cleanEmail = getAuthEmail(cleanPhone);
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
           email: cleanEmail,
           password: lineFirstLoginNewPassword.trim(),
           options: {
             data: { name: cleanName, role: chosenRole, phone: cleanPhone }
           }
         });
+
+        if (signUpData?.user?.id) {
+          finalAuthUserId = signUpData.user.id;
+        } else if (signUpErr) {
+          console.warn('SignUp notice:', signUpErr.message);
+          const { data: signInData } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: lineFirstLoginNewPassword.trim()
+          });
+          if (signInData?.user?.id) {
+            finalAuthUserId = signInData.user.id;
+          }
+        }
       } catch (authCreateErr) {
         console.warn('Sync auth user credentials notice:', authCreateErr);
       }
 
-      // 更新當前社群使用者 Profile
+      // 更新當前社群使用者 Profile (以 Auth User ID 優先對齊)
       await supabase.from('profiles').upsert({
-        id: targetId,
+        id: finalAuthUserId,
         name: cleanName,
         phone: cleanPhone,
         role: chosenRole,
         updated_at: new Date().toISOString(),
       });
 
+      // 清理臨時 orphan profile
+      if (targetId && targetId !== finalAuthUserId && (String(targetId).startsWith('line_') || String(targetId).startsWith('fb_') || String(targetId).startsWith('soc_'))) {
+        try {
+          await supabase.from('profiles').delete().eq('id', targetId);
+        } catch (delOldErr) {
+          console.warn('Cleanup provisional profile notice:', delOldErr);
+        }
+      }
+
       // 寫入社群綁定表
       if (providerUid) {
         try {
           await supabase.from('line_bindings').upsert({
-            tenant_id: targetId,
+            tenant_id: finalAuthUserId,
             line_user_id: providerUid,
             line_display_name: cleanName,
             status: 'active',
@@ -1512,7 +1536,7 @@ export default function App() {
 
       // 永久儲存至本機快取以供未來一鍵免輸入登入
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('line_linked_user_id', targetId);
+        localStorage.setItem('line_linked_user_id', finalAuthUserId);
         localStorage.setItem('line_linked_phone', cleanPhone);
         localStorage.setItem('line_linked_name', cleanName);
         localStorage.setItem('line_linked_role', chosenRole);
@@ -1521,13 +1545,13 @@ export default function App() {
       // 根據身分分流引導
       if (chosenRole === 'tenant') {
         await completeTenantOnboarding({
-          userId: targetId,
+          userId: finalAuthUserId,
           phone: cleanPhone,
           name: cleanName,
         });
 
         setCurrentUser({
-          id: targetId,
+          id: finalAuthUserId,
           phone: cleanPhone,
           user_metadata: { role: 'tenant', name: cleanName, avatar_url: u.socialProfile?.avatarUrl }
         });
@@ -1538,7 +1562,7 @@ export default function App() {
 
         try {
           localStorage.setItem('app_auth_session', JSON.stringify({
-            id: targetId,
+            id: finalAuthUserId,
             phone: cleanPhone,
             name: cleanName,
             role: 'tenant'
@@ -1552,7 +1576,7 @@ export default function App() {
         const addr = sanitizeText(landlordAppForm.contactAddress).trim();
 
         await submitLandlordApplication({
-          userId: targetId,
+          userId: finalAuthUserId,
           phone: cleanPhone,
           name: cleanName,
           idNumber: idNum,
@@ -1571,7 +1595,7 @@ export default function App() {
 
         try {
           localStorage.setItem('app_auth_session', JSON.stringify({
-            id: targetId,
+            id: finalAuthUserId,
             phone: cleanPhone,
             name: cleanName,
             role: 'tenant'
