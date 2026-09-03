@@ -718,6 +718,19 @@ export const handleLineOAuthCallback = async () => {
 export const FB_APP_ID = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FB_APP_ID) || '1088482089283742';
 
 /**
+ * 檢查是否已配置真實之 Facebook App ID
+ */
+export const isRealFbConfigured = () => {
+  return Boolean(
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_FB_APP_ID &&
+    import.meta.env.VITE_FB_APP_ID !== '1088482089283742' &&
+    import.meta.env.VITE_FB_APP_ID.length > 5
+  );
+};
+
+/**
  * 導向 Facebook Login 授權頁面
  */
 export const redirectToFacebookLogin = (targetRole = 'tenant') => {
@@ -728,6 +741,21 @@ export const redirectToFacebookLogin = (targetRole = 'tenant') => {
     sessionStorage.setItem('fb_oauth_role', targetRole);
 
     const redirectUri = window.location.origin + window.location.pathname;
+
+    // 若尚未在 .env 中填入真實 Meta App ID，提供本地沙盒快速演練選項，避免使用者遇到 Facebook「應用程式未設定」錯誤畫面
+    if (!isRealFbConfigured()) {
+      const confirmDemo = window.confirm(
+        '【Facebook 一鍵授權登入引導】\n\n' +
+        '系統檢測到目前尚未在 .env 設定真實的 Facebook 應用程式編號 (VITE_FB_APP_ID)。\n\n' +
+        '👉 點擊「確定」：立即啟用「本機沙盒測試模式」，無縫模擬 Facebook 授權、設定手機與密碼。\n' +
+        '👉 點擊「取消」：嘗試連線至 Facebook 官方授權頁面。'
+      );
+      if (confirmDemo) {
+        window.location.href = `${redirectUri}?code=fb_mock_code_${Date.now()}&state=${encodeURIComponent(state)}`;
+        return;
+      }
+    }
+
     const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
     )}&state=${encodeURIComponent(state)}&scope=public_profile,email&response_type=code`;
@@ -766,10 +794,42 @@ export const handleFacebookOAuthCallback = async () => {
   sessionStorage.removeItem('fb_oauth_state');
   sessionStorage.removeItem('fb_oauth_role');
 
+  const redirectUri = window.location.origin + window.location.pathname;
+
+  // 1. 優先呼叫 Supabase Edge Function: facebook-auth
+  try {
+    const res = await fetch('https://hpphlfmtyxrulirpyejp.supabase.co/functions/v1/facebook-auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code,
+        redirectUri,
+        targetRole,
+      }),
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      if (result && result.success && result.user) {
+        return {
+          user: result.user,
+          isNewUser: result.isNewUser,
+          provider: 'facebook',
+          targetRole: result.user?.role || targetRole,
+          socialProfile: result.facebookProfile,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Edge Function facebook-auth unreachable, using resilient database resolution fallback:', err);
+  }
+
+  // 2. 本地開發與資料庫備援機制 (Resilient Fallback)
   const fbUserId = `fb_${code.slice(-10) || Date.now().toString().slice(-8)}`;
   const fbDisplayName = 'Facebook 用戶';
 
-  // 1. 查詢是否已有該 Facebook ID 之現存綁定紀錄
   try {
     const { data: binding } = await supabase
       .from('line_bindings')
@@ -798,7 +858,7 @@ export const handleFacebookOAuthCallback = async () => {
     console.warn('Facebook existing binding lookup notice:', lookupErr);
   }
 
-  // 2. 若為新社群帳號，導引至補綁手機並設定密碼之流程
+  // 若為新社群帳號，導引至補綁手機並設定密碼之流程
   const provisionalUser = {
     id: `fb_usr_${Date.now()}`,
     name: fbDisplayName,
