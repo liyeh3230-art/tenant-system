@@ -715,19 +715,14 @@ export const handleLineOAuthCallback = async () => {
 };
 
 // --- 7. Facebook Login OAuth 2.0 授權登入流程 ---
-export const FB_APP_ID = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FB_APP_ID) || '1088482089283742';
+export const FB_APP_ID = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FB_APP_ID) || '1633585894994695';
 
 /**
  * 檢查是否已配置真實之 Facebook App ID
  */
 export const isRealFbConfigured = () => {
-  return Boolean(
-    typeof import.meta !== 'undefined' &&
-    import.meta.env &&
-    import.meta.env.VITE_FB_APP_ID &&
-    import.meta.env.VITE_FB_APP_ID !== '1088482089283742' &&
-    import.meta.env.VITE_FB_APP_ID.length > 5
-  );
+  const currentId = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FB_APP_ID) || FB_APP_ID;
+  return Boolean(currentId && currentId.length > 5);
 };
 
 /**
