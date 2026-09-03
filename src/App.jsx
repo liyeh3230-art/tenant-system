@@ -915,7 +915,7 @@ export default function App() {
             contact_address: lndInfo.contact_address || '',
             bank_name: lndInfo.bank_name || '',
             bank_account: lndInfo.bank_account || '',
-            status: lndInfo.status || 'approved',
+            status: lndInfo.status || 'pending',
             adListingEnabled: lndInfo.ad_listing_enabled ?? false
           });
         });
@@ -932,7 +932,7 @@ export default function App() {
               contact_address: l.contact_address || '',
               bank_name: l.bank_name || '',
               bank_account: l.bank_account || '',
-              status: l.status || 'approved',
+              status: l.status || 'pending',
               adListingEnabled: l.ad_listing_enabled ?? false
             });
           }
@@ -1990,6 +1990,19 @@ export default function App() {
       return;
     }
 
+    if (chosenRole === 'landlord') {
+      const idNum = sanitizeText(landlordAppForm.idNumber).trim();
+      const addr = sanitizeText(landlordAppForm.contactAddress).trim();
+      if (!idNum || idNum.length < 6) {
+        showToast('請填寫有效的身分證字號、居留證號或統一編號以供身分查核！', 'warning');
+        return;
+      }
+      if (!addr || addr.length < 5) {
+        showToast('請填寫完整通訊聯絡地址！', 'warning');
+        return;
+      }
+    }
+
     setAuthLoading(true);
     try {
       const regResult = await registerUser({
@@ -1997,6 +2010,12 @@ export default function App() {
         phone: cleanPhone,
         password: cleanPassword,
         requestedRole: chosenRole,
+        idNumber: landlordAppForm.idNumber,
+        contactAddress: landlordAppForm.contactAddress,
+        companyName: landlordAppForm.companyName,
+        bankName: landlordAppForm.bankName,
+        bankAccount: landlordAppForm.bankAccount,
+        notes: landlordAppForm.notes,
       });
 
       setAuthName('');
@@ -2026,23 +2045,41 @@ export default function App() {
         showToast(`🎉 歡迎加入！已成功為您建立帳號並開通房客專區！`, 'success');
         fetchSupabaseData();
       } else {
-        // 房東身分 → 進入房東身分審核資料填寫
-        setOnboardingUser({
-          id: regResult.id,
+        // 房東身分 → 提交詳細審核資料並進入待審核狀態
+        await submitLandlordApplication({
+          userId: regResult.id,
           phone: cleanPhone,
           name: cleanName,
+          idNumber: landlordAppForm.idNumber,
+          contactAddress: landlordAppForm.contactAddress,
+          companyName: landlordAppForm.companyName,
+          bankName: landlordAppForm.bankName,
+          bankAccount: landlordAppForm.bankAccount,
+          notes: landlordAppForm.notes,
         });
-        setLandlordAppForm(prev => ({
-          ...prev,
-          companyName: '',
-          idNumber: '',
-          contactAddress: '',
-          bankName: '',
-          bankAccount: '',
-          notes: '',
-        }));
-        setActiveModal('landlordApplication');
-        showToast('🎉 帳號建立成功！請填寫房東身分審核資料。', 'info');
+
+        // 保持租客身分登入，系統提示正在審核中
+        setCurrentUser({
+          id: regResult.id,
+          phone: cleanPhone,
+          user_metadata: { role: 'tenant', name: cleanName }
+        });
+        setRole('tenant');
+        setCurrentTenantPhone(cleanPhone);
+        setCurrentTenantName(cleanName);
+        setActiveTab('portal');
+
+        try {
+          localStorage.setItem('app_auth_session', JSON.stringify({
+            id: regResult.id,
+            phone: cleanPhone,
+            name: cleanName,
+            role: 'tenant'
+          }));
+        } catch (e) {}
+
+        showToast('🎉 房東帳號與審核資料已成功送出！管理員審核中（期間您可正常使用租客中心），核准後將自動開通房東功能。', 'success');
+        fetchSupabaseData();
       }
     } catch (err) {
       showToast(err.message || '註冊失敗，請重試', err.message?.includes('已被註冊') ? 'warning' : 'error');
@@ -5044,6 +5081,45 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* Landlord Identity Verification Fields */}
+                        {authRole === 'landlord' && (
+                          <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-200/80 rounded-2xl animate-in fade-in duration-200">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
+                              <ShieldCheck size={16} className="text-indigo-600 flex-shrink-0" />
+                              <span>房東身分真實性查核資料（管理員審核必填）</span>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                身分證字號 / 居留證號 / 統一編號 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="例如：A123456789 或 統一編號 8 碼"
+                                value={landlordAppForm.idNumber}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value.toUpperCase() }))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold uppercase"
+                                required={authRole === 'landlord'}
+                              />
+                              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                                供平台總管理員查核身分真實性與租屋合規，資料採高規格加密保護。
+                              </span>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 mb-1">
+                                通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="例如：台北市信義區信義路五段7號"
+                                value={landlordAppForm.contactAddress}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
+                                className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                                required={authRole === 'landlord'}
+                              />
+                            </div>
+                          </div>
+                        )}
+
                         <button
                           type="submit"
                           disabled={authLoading}
@@ -5060,8 +5136,8 @@ export default function App() {
                             </>
                           ) : (
                             <>
-                              <span>{authLoading ? '帳號建立中...' : '下一步：填寫房東審核資料'}</span>
-                              <ArrowRight size={16} />
+                              <ShieldCheck size={16} />
+                              <span>{authLoading ? '帳號建立與送審中...' : '🛡️ 送出房東註冊與審核申請'}</span>
                             </>
                           )}
                         </button>

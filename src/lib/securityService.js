@@ -46,7 +46,19 @@ export const getGenericAuthErrorMessage = (error) => {
 /**
  * 租客 / 房東註冊
  */
-export const registerUser = async ({ email, phone, password, name, requestedRole = 'tenant' }) => {
+export const registerUser = async ({
+  email,
+  phone,
+  password,
+  name,
+  requestedRole = 'tenant',
+  idNumber = '',
+  contactAddress = '',
+  companyName = '',
+  bankName = '',
+  bankAccount = '',
+  notes = '',
+}) => {
   const safePhone = phone.replace(/[^0-9]/g, '');
   const cleanEmail = email || getAuthEmail(safePhone);
 
@@ -182,15 +194,54 @@ export const registerUser = async ({ email, phone, password, name, requestedRole
     });
 
     if (safeRequestedRole === 'landlord') {
-      await supabase.from('landlords').upsert({
+      const cleanIdNumber = sanitizeText(idNumber).trim();
+      const cleanAddress = sanitizeText(contactAddress).trim();
+      const cleanCompany = sanitizeText(companyName).trim();
+      const verificationPayload = JSON.stringify({
+        companyName: cleanCompany,
+        idNumber: cleanIdNumber,
+        contactAddress: cleanAddress,
+        bankName: sanitizeText(bankName).trim(),
+        bankAccount: sanitizeText(bankAccount).trim(),
+        notes: sanitizeText(notes).trim(),
+        submittedAt: new Date().toISOString(),
+      });
+
+      const landlordPayload = {
         id: userId,
         name: sanitizeText(name),
         phone: safePhone,
+        company_name: verificationPayload,
         status: 'pending',
         ad_listing_enabled: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      });
+      };
+      if (cleanIdNumber) landlordPayload.id_number = cleanIdNumber;
+      if (cleanAddress) landlordPayload.contact_address = cleanAddress;
+
+      const { error: lndErr } = await supabase.from('landlords').upsert(landlordPayload);
+      if (lndErr) {
+        await supabase.from('landlords').upsert({
+          id: userId,
+          name: sanitizeText(name),
+          phone: safePhone,
+          company_name: verificationPayload,
+          status: 'pending',
+          ad_listing_enabled: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      if (cleanAddress) {
+        try {
+          await supabase.from('landlord_addresses').upsert({
+            landlord_id: userId,
+            address: cleanAddress,
+          });
+        } catch (addrErr) {}
+      }
     } else if (safeRequestedRole === 'tenant') {
       await supabase.from('tenants').upsert({
         id: userId,
@@ -278,20 +329,20 @@ export const submitLandlordApplication = async ({
   });
 
   try {
-    // 防禦機制：若目前已有待審核之申請，避免重複提交覆蓋資料
+    // 檢查若帳號已經審核通過，則不重複變更其已開通之狀態
     const { data: existingLandlord } = await supabase
       .from('landlords')
       .select('status')
       .or(`id.eq.${userId},phone.eq.${safePhone}`)
       .maybeSingle();
 
-    if (existingLandlord && existingLandlord.status === 'pending') {
+    if (existingLandlord && existingLandlord.status === 'approved') {
       return {
         success: true,
-        alreadyPending: true,
-        role: 'tenant',
-        status: 'pending',
-        message: '您的房東身分申請已送出，目前正由管理員審核中，請待審核結果！',
+        alreadyApproved: true,
+        role: 'landlord',
+        status: 'approved',
+        message: '您的房東身分已核准開通！',
       };
     }
 
