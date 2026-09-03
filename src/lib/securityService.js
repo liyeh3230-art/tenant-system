@@ -461,7 +461,7 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
   // 3. 查詢 Profile 資料（支援以 Auth User ID 或經比對之手機號碼精確匹配）
   const { data: profiles, error: profileError } = await supabase
     .from('profiles')
-    .select('id, role, name, phone, avatar_url, password_hash, deleted_at')
+    .select('id, role, name, phone, avatar_url, deleted_at')
     .or(`id.eq.${authUser.id},phone.eq.${safePhone}`)
     .is('deleted_at', null);
 

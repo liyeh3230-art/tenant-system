@@ -14,6 +14,11 @@ DECLARE
 BEGIN
   v_phone_clean := regexp_replace(COALESCE(target_phone, ''), '[^0-9]', '', 'g');
 
+  -- 0. 關鍵防禦機制：絕對禁止刪除平台最高管理員 (Superadmin)
+  IF v_phone_clean = '0900000000' OR target_user_id = 'usr_superadmin' THEN
+    RAISE EXCEPTION '安全保護攔截：系統總管理員帳號禁止刪除！';
+  END IF;
+
   -- 1. 刪除 line_bindings 與 line_binding_tokens
   DELETE FROM public.line_bindings 
   WHERE tenant_id = target_user_id 
