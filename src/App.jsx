@@ -1327,7 +1327,8 @@ export default function App() {
       const u = lineFirstLoginUser || {};
       const targetId = u.id || `soc_usr_${Date.now()}`;
       const providerUid = u.socialProfile?.userId || u.lineProfile?.userId || u.id;
-      const providerTitle = socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE';
+      const provider = socialLoginProvider || 'line';
+      const providerTitle = provider === 'facebook' ? 'Facebook' : 'LINE';
 
       // 1. 查詢是否已有該電話的會員 Profile (排除已被軟刪除的帳號)
       const { data: existingProfiles, error: pErr } = await supabase
