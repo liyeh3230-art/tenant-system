@@ -1352,11 +1352,33 @@ export default function App() {
           .eq('tenant_id', conflictProfile.id)
           .eq('status', 'active');
 
-        // 情境 A：該手機號碼已綁定其他社群帳號 -> 嚴格拒絕！絕不允許跨帳號覆蓋或冒領！
-        if (conflictBindings && conflictBindings.length > 0) {
-          const isSameSocialUser = conflictBindings.some(b => b.line_user_id === providerUid);
-          if (!isSameSocialUser) {
-            showToast(`⚠️ 手機號碼「${cleanPhone}」已由會員「${conflictProfile.name || '用戶'}」註冊並綁定其他 ${providerTitle} 帳號！為確保帳號安全，系統禁止重複綁定與覆蓋原資料。請填寫您本人的手機門號。`, 'error');
+        // 檢查該帳號是否已綁定同平台的「另一個」社群帳號（例如已有 FB-A，企圖用 FB-B 覆蓋）
+        const isCurrentProvider = (uid) => {
+          if (provider === 'facebook') return String(uid).startsWith('fb_');
+          return !String(uid).startsWith('fb_'); // LINE
+        };
+
+        const hasSameProviderConflict = conflictBindings && conflictBindings.some(
+          b => isCurrentProvider(b.line_user_id) && b.line_user_id !== providerUid
+        );
+
+        if (hasSameProviderConflict) {
+          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name || '用戶'}」綁定其他 ${providerTitle} 帳號！一個手機門號僅能綁定一組 ${providerTitle} 帳號。`, 'error');
+          setLineFirstLoginLoading(false);
+          return;
+        }
+
+        // 檢查此社群 UID 是否已被其他人綁定
+        if (providerUid) {
+          const { data: socialBoundOther } = await supabase
+            .from('line_bindings')
+            .select('tenant_id')
+            .eq('line_user_id', providerUid)
+            .neq('tenant_id', conflictProfile.id)
+            .maybeSingle();
+
+          if (socialBoundOther) {
+            showToast(`⚠️ 此 ${providerTitle} 帳號已被其他會員門號綁定，無法重複綁定至此手機號碼！`, 'error');
             setLineFirstLoginLoading(false);
             return;
           }
