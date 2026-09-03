@@ -18,6 +18,8 @@ import {
   generateLineBindingToken,
   redirectToLineLogin,
   handleLineOAuthCallback,
+  redirectToFacebookLogin,
+  handleFacebookOAuthCallback,
   logAuditEvent,
   PaymentStatus
 } from './lib/securityService';
@@ -1179,35 +1181,54 @@ export default function App() {
     setIsMobileMenuOpen(false);
   }, [role]);
 
-  // --- LINE OAuth 2.0 Authorization Callback Hook ---
+  // --- LINE & Facebook OAuth 2.0 Authorization Callback Hook ---
   const [lineFirstLoginUser, setLineFirstLoginUser] = useState(null);
+  const [socialLoginProvider, setSocialLoginProvider] = useState('line'); // 'line' | 'facebook'
   const [lineFirstLoginName, setLineFirstLoginName] = useState('');
   const [lineFirstLoginPhone, setLineFirstLoginPhone] = useState('');
   const [lineFirstLoginRole, setLineFirstLoginRole] = useState('tenant');
   const [lineFirstLoginLoading, setLineFirstLoginLoading] = useState(false);
   const [lineBindingConflictUser, setLineBindingConflictUser] = useState(null);
   const [lineFirstLoginPassword, setLineFirstLoginPassword] = useState('');
+  const [lineFirstLoginNewPassword, setLineFirstLoginNewPassword] = useState('');
 
   useEffect(() => {
-    const processLineOAuth = async () => {
+    const processSocialOAuth = async () => {
       try {
-        const oauthResult = await handleLineOAuthCallback();
+        let oauthResult = null;
+        let provider = 'line';
+
+        const params = new URLSearchParams(window.location.search);
+        const state = params.get('state');
+
+        if (state && state.startsWith('fb_state_')) {
+          provider = 'facebook';
+          oauthResult = await handleFacebookOAuthCallback();
+        } else {
+          oauthResult = await handleLineOAuthCallback();
+        }
+
         if (oauthResult && oauthResult.user) {
           const u = oauthResult.user;
           const cleanP = String(u.phone || '').replace(/[^0-9]/g, '');
-          const isFirstTime = oauthResult.isNewUser || !cleanP || cleanP.length < 8 || String(u.phone).startsWith('line_');
+          const isFirstTime = oauthResult.isNewUser || !cleanP || cleanP.length < 8 || String(u.phone).startsWith('line_') || String(u.phone).startsWith('fb_');
 
           if (isFirstTime) {
-            setLineFirstLoginUser({ ...u, lineProfile: oauthResult.lineProfile });
-            const initialName = u.name && !u.name.includes('LINE') ? u.name : (oauthResult.lineProfile?.displayName || '');
+            setSocialLoginProvider(provider);
+            setLineFirstLoginUser({ ...u, socialProfile: oauthResult.socialProfile || oauthResult.lineProfile });
+            const initialName = u.name && !u.name.includes('LINE') && !u.name.includes('Facebook')
+              ? u.name
+              : (oauthResult.socialProfile?.displayName || oauthResult.lineProfile?.displayName || '');
             setLineFirstLoginName(initialName);
             setLineFirstLoginPhone('');
             setLineFirstLoginRole('tenant');
             setLineBindingConflictUser(null);
             setLineFirstLoginPassword('');
+            setLineFirstLoginNewPassword('');
             setActiveModal('lineFirstLogin');
-            showToast('🎉 LINE 授權成功！請填寫姓名、電話並選擇您的會員身分。', 'info');
+            showToast(`🎉 ${provider === 'facebook' ? 'Facebook' : 'LINE'} 授權成功！請填寫真實姓名、手機並設定密碼。`, 'info');
           } else {
+            const providerTitle = provider === 'facebook' ? 'Facebook' : 'LINE';
             if (u.role === 'landlord') {
               const { data: lndRec } = await supabase
                 .from('landlords')
@@ -1228,7 +1249,7 @@ export default function App() {
                 try {
                   localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
                 } catch (e) {}
-                showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
+                showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
               } else {
                 // 待審核或退回：維持租客身分進入租客專區
                 setRole('tenant');
@@ -1258,16 +1279,16 @@ export default function App() {
               try {
                 localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
               } catch (e) {}
-              showToast(`🎉 LINE 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
+              showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
             }
           }
         }
       } catch (oauthErr) {
-        console.warn('LINE OAuth callback processing notice:', oauthErr);
-        showToast(oauthErr.message || 'LINE 登入授權失敗', 'error');
+        console.warn('OAuth callback processing notice:', oauthErr);
+        showToast(oauthErr.message || '社群登入授權失敗', 'error');
       }
     };
-    processLineOAuth();
+    processSocialOAuth();
   }, []);
 
   const handleSaveLineFirstLogin = async (e) => {
@@ -1301,8 +1322,9 @@ export default function App() {
     setLineFirstLoginLoading(true);
     try {
       const u = lineFirstLoginUser || {};
-      const targetId = u.id || `line_usr_${Date.now()}`;
-      const lineUid = u.lineProfile?.userId || u.id;
+      const targetId = u.id || `soc_usr_${Date.now()}`;
+      const providerUid = u.socialProfile?.userId || u.lineProfile?.userId || u.id;
+      const providerTitle = socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE';
 
       // 1. 查詢是否已有該電話的會員 Profile (排除已被軟刪除的帳號)
       const { data: existingProfiles, error: pErr } = await supabase
@@ -1320,54 +1342,54 @@ export default function App() {
 
       // ⚠️ 關鍵安全防禦機制：若該手機號碼已由其他會員註冊，絕不可無條件覆蓋！
       if (conflictProfile) {
-        // 檢查該衝突帳號是否已綁定 LINE
+        // 檢查該衝突帳號是否已綁定此平台
         const { data: conflictBindings } = await supabase
           .from('line_bindings')
           .select('*')
           .eq('tenant_id', conflictProfile.id)
           .eq('status', 'active');
 
-        // 情境 A：該手機號碼已綁定其他 LINE 帳號 -> 嚴格拒絕！絕不允許跨 LINE 覆蓋或冒領帳號！
+        // 情境 A：該手機號碼已綁定其他社群帳號 -> 嚴格拒絕！絕不允許跨帳號覆蓋或冒領！
         if (conflictBindings && conflictBindings.length > 0) {
-          const isSameLineUser = conflictBindings.some(b => b.line_user_id === lineUid);
-          if (!isSameLineUser) {
-            showToast(`⚠️ 手機號碼「${cleanPhone}」已由會員「${conflictProfile.name || '用戶'}」註冊並綁定其他 LINE 帳號！為確保帳號安全，系統禁止重複綁定與覆蓋原資料。請填寫您本人的手機門號。`, 'error');
+          const isSameSocialUser = conflictBindings.some(b => b.line_user_id === providerUid);
+          if (!isSameSocialUser) {
+            showToast(`⚠️ 手機號碼「${cleanPhone}」已由會員「${conflictProfile.name || '用戶'}」註冊並綁定其他 ${providerTitle} 帳號！為確保帳號安全，系統禁止重複綁定與覆蓋原資料。請填寫您本人的手機門號。`, 'error');
             setLineFirstLoginLoading(false);
             return;
           }
         }
 
-        // 情境 B：該手機號碼為帳號密碼註冊（未綁定 LINE），必須輸入密碼驗證為本人方能綁定
+        // 情境 B：該手機號碼為帳密註冊，必須輸入既有密碼進行鑑權方能綁定
         if (!lineFirstLoginPassword) {
           setLineBindingConflictUser(conflictProfile);
-          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name}」註冊！若此為您本人的帳號，請輸入該帳號登入密碼以完成 LINE 綁定；若非您的帳號，請修改手機號碼。`, 'warning');
+          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name}」註冊！若此為您本人的帳號，請輸入該帳號原登入密碼以完成 ${providerTitle} 歸戶；若非您的帳號，請修改手機號碼。`, 'warning');
           setLineFirstLoginLoading(false);
           return;
         }
 
-        // 進行密碼身分驗證
+        // 進行密碼身分鑑權驗證
         try {
           await loginUser({ phone: cleanPhone, password: lineFirstLoginPassword });
         } catch (authErr) {
-          showToast(`密碼驗證失敗：${authErr.message || '密碼錯誤'}！無法綁定此手機號碼，請確認密碼或改填其他手機號碼。`, 'error');
+          showToast(`密碼驗證失敗：${authErr.message || '密碼錯誤'}！無法驗證此手機所有權，請確認密碼或改填其他手機號碼。`, 'error');
           setLineFirstLoginLoading(false);
           return;
         }
 
-        // 密碼驗證成功！將此 LINE 帳號綁定至該既有會員帳號
+        // 密碼驗證成功！將此社群帳號歸戶綁定至該既有會員帳號
         const finalId = conflictProfile.id;
-        if (lineUid) {
+        if (providerUid) {
           await supabase.from('line_bindings').upsert({
             tenant_id: finalId,
-            line_user_id: lineUid,
+            line_user_id: providerUid,
             line_display_name: conflictProfile.name, // 嚴格保留原帳號名稱，絕不竄改覆蓋！
             status: 'active',
             updated_at: new Date().toISOString(),
           }, { onConflict: 'line_user_id' });
         }
 
-        // 清理 OAuth 過程中臨時產生的 orphan profile（若非同一個 ID）
-        if (targetId && targetId !== finalId && String(targetId).startsWith('line_')) {
+        // 清理臨時產生的 orphan profile
+        if (targetId && targetId !== finalId && (String(targetId).startsWith('line_') || String(targetId).startsWith('fb_') || String(targetId).startsWith('soc_'))) {
           try {
             await supabase.from('profiles').delete().eq('id', targetId);
           } catch (delErr) {
@@ -1394,7 +1416,7 @@ export default function App() {
             setCurrentUser({
               id: finalId,
               phone: cleanPhone,
-              user_metadata: { role: 'landlord', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+              user_metadata: { role: 'landlord', name: conflictProfile.name, avatar_url: u.socialProfile?.avatarUrl }
             });
             setRole('admin');
             setCurrentLandlordId(finalId);
@@ -1407,7 +1429,7 @@ export default function App() {
             setCurrentUser({
               id: finalId,
               phone: cleanPhone,
-              user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+              user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.socialProfile?.avatarUrl }
             });
             setRole('tenant');
             setCurrentTenantPhone(cleanPhone);
@@ -1421,7 +1443,7 @@ export default function App() {
           setCurrentUser({
             id: finalId,
             phone: cleanPhone,
-            user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.lineProfile?.pictureUrl }
+            user_metadata: { role: 'tenant', name: conflictProfile.name, avatar_url: u.socialProfile?.avatarUrl }
           });
           setRole('tenant');
           setCurrentTenantPhone(cleanPhone);
@@ -1435,31 +1457,56 @@ export default function App() {
         setActiveModal(null);
         setLineBindingConflictUser(null);
         setLineFirstLoginPassword('');
-        showToast(`🎉 LINE 帳號已成功綁定至既有會員「${conflictProfile.name}」！`, 'success');
+        setLineFirstLoginNewPassword('');
+        showToast(`🎉 ${providerTitle} 帳號已成功歸戶綁定至既有會員「${conflictProfile.name}」！`, 'success');
         fetchSupabaseData();
         return;
       }
 
-      // 2. 若為全新手機號碼（無衝突）：更新當前 LINE 使用者 Profile
-      await supabase.from('profiles').update({
+      // =========================================================================
+      // 2. 若為全新手機號碼（無衝突）：強制要求設定密碼，並註冊帳號
+      // =========================================================================
+      if (!lineFirstLoginNewPassword || lineFirstLoginNewPassword.trim().length < 6) {
+        showToast('為保障帳號安全，新帳號必須設定至少 6 位數之登入密碼！', 'warning');
+        setLineFirstLoginLoading(false);
+        return;
+      }
+
+      // 建立 Supabase Auth 帳號密碼，確保新用戶在未來能以手機號碼與此密碼原生登入
+      try {
+        const cleanEmail = `${cleanPhone}@system.local`;
+        await supabase.auth.signUp({
+          email: cleanEmail,
+          password: lineFirstLoginNewPassword.trim(),
+          options: {
+            data: { name: cleanName, role: chosenRole, phone: cleanPhone }
+          }
+        });
+      } catch (authCreateErr) {
+        console.warn('Sync auth user credentials notice:', authCreateErr);
+      }
+
+      // 更新當前社群使用者 Profile
+      await supabase.from('profiles').upsert({
+        id: targetId,
         name: cleanName,
         phone: cleanPhone,
         role: chosenRole,
         updated_at: new Date().toISOString(),
-      }).eq('id', targetId);
+      });
 
-      // 寫入 LINE 綁定表
-      if (lineUid) {
+      // 寫入社群綁定表
+      if (providerUid) {
         try {
           await supabase.from('line_bindings').upsert({
             tenant_id: targetId,
-            line_user_id: lineUid,
+            line_user_id: providerUid,
             line_display_name: cleanName,
             status: 'active',
             updated_at: new Date().toISOString(),
           }, { onConflict: 'line_user_id' });
         } catch (bErr) {
-          console.warn('Line binding upsert notice:', bErr);
+          console.warn('Social binding upsert notice:', bErr);
         }
       }
 
@@ -1482,7 +1529,7 @@ export default function App() {
         setCurrentUser({
           id: targetId,
           phone: cleanPhone,
-          user_metadata: { role: 'tenant', name: cleanName, avatar_url: u.lineProfile?.pictureUrl }
+          user_metadata: { role: 'tenant', name: cleanName, avatar_url: u.socialProfile?.avatarUrl }
         });
         setRole('tenant');
         setCurrentTenantPhone(cleanPhone);
@@ -1499,7 +1546,7 @@ export default function App() {
         } catch (e) {}
 
         setActiveModal(null);
-        showToast(`🎉 歡迎 ${cleanName}！已成功為您開通房客會員專區！`, 'success');
+        showToast(`🎉 歡迎 ${cleanName}！已設定密碼並成功為您開通房客會員專區！`, 'success');
       } else {
         const idNum = sanitizeText(landlordAppForm.idNumber).trim();
         const addr = sanitizeText(landlordAppForm.contactAddress).trim();
@@ -1531,12 +1578,12 @@ export default function App() {
           }));
         } catch (e) {}
 
-        showToast('🎉 基本資料已完成，房東審核申請已送出！管理員審核中（期間您可以先使用租客中心），核准後將自動開通房東功能。', 'success');
+        showToast('🎉 基本資料與密碼設定已完成，房東審核申請已送出！管理員審核中，核准後將自動開通房東功能。', 'success');
       }
 
       fetchSupabaseData();
     } catch (err) {
-      console.error('Save LINE first login error:', err);
+      console.error('Save social first login error:', err);
       showToast('資料儲存異常：' + (err.message || '請重試'), 'error');
     } finally {
       setLineFirstLoginLoading(false);
@@ -4791,20 +4838,33 @@ export default function App() {
                             <div className="w-full border-t border-slate-200/80" />
                           </div>
                           <div className="relative flex justify-center text-xs">
-                            <span className="bg-white px-3 text-slate-400 font-semibold">或使用 LINE 帳號授權</span>
+                            <span className="bg-white px-3 text-slate-400 font-semibold">或使用第三方社群帳號授權</span>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => redirectToLineLogin()}
-                          className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-sm focus:outline-none cursor-pointer"
-                        >
-                          <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                            <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
-                          </svg>
-                          <span>LINE 帳號一鍵授權登入</span>
-                        </button>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => redirectToLineLogin()}
+                            className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2.5 px-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-xs focus:outline-none cursor-pointer"
+                          >
+                            <svg className="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24">
+                              <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                            </svg>
+                            <span>LINE 一鍵授權登入</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => redirectToFacebookLogin()}
+                            className="w-full bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold py-2.5 px-3 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 text-xs focus:outline-none cursor-pointer"
+                          >
+                            <svg className="w-4 h-4 fill-current flex-shrink-0" viewBox="0 0 24 24">
+                              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                            </svg>
+                            <span>Facebook 一鍵授權登入</span>
+                          </button>
+                        </div>
 
                         <div className="pt-2 text-center">
                           <button
@@ -10238,18 +10298,34 @@ export default function App() {
                 </div>
               )}
 
-              {/* First-Time LINE Login Profile Completion Modal */}
+              {/* First-Time Social (LINE / Facebook) Login Profile Completion Modal */}
               {activeModal === 'lineFirstLogin' && (
                 <div className="space-y-4">
-                  <div className="bg-emerald-50 p-4 sm:p-5 rounded-2xl border border-emerald-200 text-center space-y-2">
-                    <div className="w-12 h-12 bg-[#06C755] text-white rounded-2xl flex items-center justify-center mx-auto shadow-xs">
-                      <svg className="w-7 h-7 fill-current" viewBox="0 0 24 24">
-                        <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
-                      </svg>
+                  <div className={`p-4 sm:p-5 rounded-2xl border text-center space-y-2 ${
+                    socialLoginProvider === 'facebook' ? 'bg-blue-50/80 border-blue-200' : 'bg-emerald-50 border-emerald-200'
+                  }`}>
+                    <div className={`w-12 h-12 text-white rounded-2xl flex items-center justify-center mx-auto shadow-xs ${
+                      socialLoginProvider === 'facebook' ? 'bg-[#1877F2]' : 'bg-[#06C755]'
+                    }`}>
+                      {socialLoginProvider === 'facebook' ? (
+                        <svg className="w-7 h-7 fill-current" viewBox="0 0 24 24">
+                          <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-7 h-7 fill-current" viewBox="0 0 24 24">
+                          <path d="M24 10.304c0-5.369-5.383-9.738-12-9.738-6.616 0-12 4.369-12 9.738 0 4.814 4.269 8.846 10.036 9.608.391.084.922.258 1.057.592.122.303.079.778.039 1.085l-.171 1.027c-.053.303-.242 1.186 1.039.646 1.281-.54 6.911-4.069 9.428-6.967 1.739-1.907 2.572-3.843 2.572-5.993z" />
+                        </svg>
+                      )}
                     </div>
-                    <h3 className="text-base sm:text-lg font-bold text-emerald-950">歡迎首次使用 LINE 登入！</h3>
-                    <p className="text-xs text-emerald-800 leading-relaxed max-w-sm mx-auto">
-                      請填寫您的姓名、聯絡電話並選擇您的系統身分，以開通專屬功能。
+                    <h3 className={`text-base sm:text-lg font-bold ${
+                      socialLoginProvider === 'facebook' ? 'text-blue-950' : 'text-emerald-950'
+                    }`}>
+                      歡迎首次使用 {socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE'} 登入！
+                    </h3>
+                    <p className={`text-xs leading-relaxed max-w-sm mx-auto ${
+                      socialLoginProvider === 'facebook' ? 'text-blue-800' : 'text-emerald-800'
+                    }`}>
+                      請填寫您的真實姓名、手機門號並設定密碼，以開通會員專屬管理功能。
                     </p>
                   </div>
 
@@ -10267,7 +10343,7 @@ export default function App() {
                           disabled={Boolean(lineBindingConflictUser)}
                           autoFocus={!lineBindingConflictUser}
                           className={`w-full border rounded-xl px-4 py-2.5 text-sm outline-none font-semibold transition-colors ${
-                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-emerald-500 focus:bg-white'
+                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-indigo-500 focus:bg-white'
                           }`}
                           required
                         />
@@ -10290,7 +10366,7 @@ export default function App() {
                           }}
                           disabled={Boolean(lineBindingConflictUser)}
                           className={`w-full border rounded-xl px-4 py-2.5 text-sm outline-none font-semibold transition-colors ${
-                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-emerald-500 focus:bg-white'
+                            lineBindingConflictUser ? 'bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200 focus:border-indigo-500 focus:bg-white'
                           }`}
                           required
                         />
@@ -10305,7 +10381,7 @@ export default function App() {
                           <span>此號碼已註冊：既有會員【{lineBindingConflictUser.name}】</span>
                         </div>
                         <p className="text-xs text-slate-600 leading-relaxed">
-                          手機號碼 <strong>{lineFirstLoginPhone}</strong> 已存在會員帳號。若此為您本人原先註冊之帳號，請輸入該帳號的<strong>登入密碼</strong>完成身分驗證，系統將自動為您綁定 LINE，並<strong>完整保留您原有的身分、合約與所有資料</strong>：
+                          手機號碼 <strong>{lineFirstLoginPhone}</strong> 已存在會員帳號。若此為您本人原先註冊之帳號，請輸入該帳號的<strong>登入密碼</strong>完成身分核實，系統將自動為您綁定 {socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE'}，並<strong>完整保留您原有的身分、合約與所有資料</strong>：
                         </p>
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -10313,7 +10389,7 @@ export default function App() {
                           </label>
                           <input
                             type="password"
-                            placeholder="請輸入原帳號密碼"
+                            placeholder="請輸入原帳號密碼以證明所有權"
                             value={lineFirstLoginPassword}
                             onChange={(e) => setLineFirstLoginPassword(e.target.value)}
                             className="w-full bg-white border border-amber-300 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold transition-colors"
@@ -10336,6 +10412,29 @@ export default function App() {
                       </div>
                     ) : (
                       <>
+                        {/* 密碼設定卡片（新手機門號強制必填） */}
+                        <div className="space-y-1.5 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                          <div className="flex items-center justify-between">
+                            <label className="block text-xs font-bold text-slate-800">
+                              設定登入密碼 (6 位數以上) <span className="text-rose-500">*</span>
+                            </label>
+                            <span className="text-[10px] text-slate-400 font-semibold">必填安全憑證</span>
+                          </div>
+                          <div className="relative">
+                            <input
+                              type="password"
+                              placeholder="請設定至少 6 位數之安全密碼"
+                              value={lineFirstLoginNewPassword}
+                              onChange={(e) => setLineFirstLoginNewPassword(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                              required
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-500 leading-tight">
+                            ⚠️ 因本系統不使用簡訊驗證碼，此密碼將作為您未來使用手機號碼獨立登入，以及綁定其他社群帳號時的最高身分憑證。
+                          </p>
+                        </div>
+
                         {/* Role Selection Option Cards */}
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-2">
@@ -10496,17 +10595,17 @@ export default function App() {
                         {lineBindingConflictUser ? (
                           <>
                             <ShieldCheck size={16} />
-                            <span>{lineFirstLoginLoading ? '密碼驗證綁定中...' : '🔐 驗證原帳號密碼並完成 LINE 綁定'}</span>
+                            <span>{lineFirstLoginLoading ? '密碼驗證歸戶中...' : `🔐 驗證原帳號密碼並完成 ${socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE'} 歸戶`}</span>
                           </>
                         ) : lineFirstLoginRole === 'tenant' ? (
                           <>
                             <CheckCircle size={16} />
-                            <span>{lineFirstLoginLoading ? '帳號開通中...' : '🎉 確認送出・開通房客會員專區'}</span>
+                            <span>{lineFirstLoginLoading ? '帳號開通中...' : '🎉 設定密碼並開通房客會員專區'}</span>
                           </>
                         ) : (
                           <>
                             <ShieldCheck size={16} />
-                            <span>{lineFirstLoginLoading ? '申請送出中...' : '🏢 確認送出房東身分申請 (等待管理員開通)'}</span>
+                            <span>{lineFirstLoginLoading ? '申請送出中...' : '🏢 設定密碼並送出房東審核申請'}</span>
                           </>
                         )}
                       </button>

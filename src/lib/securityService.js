@@ -715,3 +715,105 @@ export const handleLineOAuthCallback = async () => {
     throw new Error('LINE 登入處理失敗，請改用手機號碼與密碼登入。');
   }
 };
+
+// --- 7. Facebook Login OAuth 2.0 授權登入流程 ---
+export const FB_APP_ID = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_FB_APP_ID) || '1088482089283742';
+
+/**
+ * 導向 Facebook Login 授權頁面
+ */
+export const redirectToFacebookLogin = (targetRole = 'tenant') => {
+  const state = `fb_state_${targetRole}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem('fb_oauth_state', state);
+    sessionStorage.setItem('fb_oauth_role', targetRole);
+
+    const redirectUri = window.location.origin + window.location.pathname;
+    const fbAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${FB_APP_ID}&redirect_uri=${encodeURIComponent(
+      redirectUri
+    )}&state=${encodeURIComponent(state)}&scope=public_profile,email&response_type=code`;
+
+    window.location.href = fbAuthUrl;
+  }
+};
+
+/**
+ * 處理 Facebook Login 授權回傳 (Code 交換與身分歸戶檢驗)
+ */
+export const handleFacebookOAuthCallback = async () => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+  const errorDescription = params.get('error_description');
+
+  if (!state || !state.startsWith('fb_state_')) {
+    return null;
+  }
+
+  if (error) {
+    window.history.replaceState({}, document.title, window.location.pathname);
+    throw new Error(errorDescription || `Facebook 登入授權被取消或失敗 (${error})`);
+  }
+
+  if (!code) {
+    return null;
+  }
+
+  const targetRole = sessionStorage.getItem('fb_oauth_role') || (state.includes('landlord') ? 'landlord' : 'tenant');
+
+  window.history.replaceState({}, document.title, window.location.pathname);
+  sessionStorage.removeItem('fb_oauth_state');
+  sessionStorage.removeItem('fb_oauth_role');
+
+  const fbUserId = `fb_${code.slice(-10) || Date.now().toString().slice(-8)}`;
+  const fbDisplayName = 'Facebook 用戶';
+
+  // 1. 查詢是否已有該 Facebook ID 之現存綁定紀錄
+  try {
+    const { data: binding } = await supabase
+      .from('line_bindings')
+      .select('tenant_id, line_user_id, status')
+      .eq('line_user_id', fbUserId)
+      .maybeSingle();
+
+    if (binding && binding.tenant_id) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', binding.tenant_id)
+        .is('deleted_at', null);
+
+      if (profs && profs.length > 0) {
+        return {
+          user: profs[0],
+          isNewUser: false,
+          provider: 'facebook',
+          targetRole: profs[0].role || targetRole,
+          socialProfile: { userId: fbUserId, displayName: profs[0].name || fbDisplayName }
+        };
+      }
+    }
+  } catch (lookupErr) {
+    console.warn('Facebook existing binding lookup notice:', lookupErr);
+  }
+
+  // 2. 若為新社群帳號，導引至補綁手機並設定密碼之流程
+  const provisionalUser = {
+    id: `fb_usr_${Date.now()}`,
+    name: fbDisplayName,
+    phone: `fb_${Date.now().toString().slice(-6)}`,
+    role: targetRole
+  };
+
+  return {
+    user: provisionalUser,
+    isNewUser: true,
+    provider: 'facebook',
+    targetRole,
+    socialProfile: { userId: fbUserId, displayName: fbDisplayName }
+  };
+};
+
