@@ -1255,6 +1255,8 @@ export default function App() {
           oauthResult = await handleLineOAuthCallback();
         }
 
+        const providerTitle = provider === 'facebook' ? 'Facebook' : 'LINE';
+
         if (oauthResult && oauthResult.user) {
           const u = oauthResult.user;
           const cleanP = String(u.phone || '').replace(/[^0-9]/g, '');
@@ -1273,7 +1275,7 @@ export default function App() {
             setLineFirstLoginPassword('');
             setLineFirstLoginNewPassword('');
             setActiveModal('lineFirstLogin');
-            showToast(`🎉 ${provider === 'facebook' ? 'Facebook' : 'LINE'} 授權成功！請填寫真實姓名、手機並設定密碼。`, 'info');
+            showToast(`🎉 ${providerTitle} 授權成功！請填寫真實姓名、手機並設定密碼。`, 'info');
           } else {
             const requestedRole = oauthResult.targetRole || 'tenant';
             const shouldBeLandlord = (u.role === 'landlord' && requestedRole === 'landlord');
@@ -1300,6 +1302,7 @@ export default function App() {
                   localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: 'landlord' }));
                 } catch (e) {}
                 showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
+                fetchSupabaseData();
               } else {
                 // 待審核或退回：維持租客身分進入租客專區
                 roleRef.current = 'tenant';
@@ -1333,6 +1336,7 @@ export default function App() {
                 localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: 'tenant' }));
               } catch (e) {}
               showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
+              fetchSupabaseData();
             }
           }
         }
