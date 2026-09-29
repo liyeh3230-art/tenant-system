@@ -8886,16 +8886,13 @@ export default function App() {
                         {/* 左側 (前方)：出租人（甲方） */}
                         <div className="bg-slate-50/70 rounded-2xl p-5 border border-slate-200 flex flex-col justify-between space-y-4 hover:border-slate-300 transition-colors shadow-2xs">
                           <div className="space-y-3.5">
-                            <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                            <div className="flex items-center pb-2 border-b border-slate-200/80">
                               <div className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
                                   甲
                                 </span>
                                 <span className="text-sm font-black text-slate-800 whitespace-nowrap">出租人（甲方）</span>
                               </div>
-                              <span className="text-[11px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md whitespace-nowrap">
-                                前方 · 出租相對人
-                              </span>
                             </div>
 
                             <div className="space-y-2.5 text-xs sm:text-sm">
@@ -8966,16 +8963,13 @@ export default function App() {
                         {/* 右側 (後方)：承租人（乙方） */}
                         <div className="bg-slate-50/70 rounded-2xl p-5 border border-slate-200 flex flex-col justify-between space-y-4 hover:border-slate-300 transition-colors shadow-2xs">
                           <div className="space-y-3.5">
-                            <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                            <div className="flex items-center pb-2 border-b border-slate-200/80">
                               <div className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
                                   乙
                                 </span>
                                 <span className="text-sm font-black text-slate-800 whitespace-nowrap">承租人（乙方）</span>
                               </div>
-                              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md whitespace-nowrap">
-                                後方 · 承租主體
-                              </span>
                             </div>
 
                             <div className="space-y-2.5 text-xs sm:text-sm">
