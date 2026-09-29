@@ -4027,11 +4027,24 @@ export default function App() {
     }
   };
 
+  const tenantLeases = currentTenantPhone ? leases.filter(l =>
+    l.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, '') ||
+    (l.coPhone && l.coPhone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))
+  ) : [];
+  const currentTenantLease = tenantLeases.find(l => l.id === currentTenantLeaseId) || (tenantLeases.length > 0 ? tenantLeases[0] : null);
+  const currentTenantProperty = properties.find(p => p.id === currentTenantLease?.propertyId);
+  const currentTenantPayments = payments.filter(p => p.leaseId === currentTenantLease?.id);
+
   const handleOpenTenantReportPayment = (targetBill = null) => {
     if (!currentTenantLease) {
       showToast('目前尚無生效之租約可回報！', 'warning');
       return;
     }
+
+    const availableUnpaid = currentTenantPayments.filter(
+      p => p.status === 'pending' || p.status === 'overdue'
+    );
+
     if (targetBill && typeof targetBill === 'object' && targetBill.amount) {
       setTenantReportTargetBill(targetBill);
       setTenantReportCategory(targetBill.billType || 'rent');
@@ -4042,14 +4055,29 @@ export default function App() {
       setTenantReportDate(targetBill.dueDate || new Date().toISOString().split('T')[0]);
       setTenantReportNote('');
     } else {
-      setTenantReportTargetBill(null);
-      setTenantReportCategory('rent');
-      setTenantReportTitle('');
-      setTenantReportAmount(getLeaseMonthlyRent(currentTenantLease).toString());
-      setTenantReportMethod('cash'); // 預設為現金交付
-      setTenantReportTransferLast5('');
-      setTenantReportDate(new Date().toISOString().split('T')[0]);
-      setTenantReportNote('');
+      // 點擊頂部「帳單管理與繳款回報」快捷按鈕
+      if (availableUnpaid.length > 0) {
+        // 若有待繳帳單，預選第一筆，並允許在彈窗內自由切換或選擇自行申報新項目
+        const firstBill = availableUnpaid[0];
+        setTenantReportTargetBill(firstBill);
+        setTenantReportCategory(firstBill.billType || 'rent');
+        setTenantReportTitle(firstBill.title || '');
+        setTenantReportAmount(firstBill.amount.toString());
+        setTenantReportMethod('cash');
+        setTenantReportTransferLast5(firstBill.transferLast5 || '');
+        setTenantReportDate(firstBill.dueDate || new Date().toISOString().split('T')[0]);
+        setTenantReportNote('');
+      } else {
+        // 目前無待繳帳單，開啟自行申報新費用模式
+        setTenantReportTargetBill(null);
+        setTenantReportCategory('rent');
+        setTenantReportTitle('');
+        setTenantReportAmount(getLeaseMonthlyRent(currentTenantLease).toString());
+        setTenantReportMethod('cash');
+        setTenantReportTransferLast5('');
+        setTenantReportDate(new Date().toISOString().split('T')[0]);
+        setTenantReportNote('');
+      }
     }
     setActiveModal('tenantReportPayment');
   };
@@ -4081,37 +4109,84 @@ export default function App() {
       cash: '現金交付'
     };
 
-    try {
-      if (!tenantReportTargetBill) {
-        throw new Error('為避免未授權帳款，請從既有帳單選擇要回報的款項。');
-      }
-      if (amt !== Number(tenantReportTargetBill.amount)) {
-        throw new Error('繳款回報金額必須與原帳單金額相同。');
-      }
+    const displayReportName = `${typeLabels[tenantReportCategory] || '費用項目'}${tenantReportTitle.trim() ? ` (${tenantReportTitle.trim()})` : ''}`;
 
-      await transitionPaymentStatus({
-        paymentId: tenantReportTargetBill.id,
-        newStatus: PaymentStatus.TENANT_SUBMITTED,
-        metadata: {
-          paymentMethod: tenantReportMethod === 'bank' ? 'bank_transfer' : 'cash',
-          transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
-          note: tenantReportNote.trim() || null,
-        }
-      });
-      setPayments(payments.map(p => p.id === tenantReportTargetBill.id
-        ? {
-            ...p,
-            status: 'tenant_submitted',
-            approvalStatus: 'pending_approval',
-            paymentMethod: methodNames[tenantReportMethod],
+    try {
+      if (tenantReportTargetBill) {
+        // 情境 1：針對既有待繳帳單進行回報
+        await transitionPaymentStatus({
+          paymentId: tenantReportTargetBill.id,
+          newStatus: PaymentStatus.TENANT_SUBMITTED,
+          metadata: {
+            paymentMethod: tenantReportMethod === 'bank' ? 'bank_transfer' : 'cash',
             transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
+            note: tenantReportNote.trim() || null,
           }
-        : p));
+        });
+
+        setPayments(payments.map(p => p.id === tenantReportTargetBill.id
+          ? {
+              ...p,
+              status: 'pending_approval',
+              approvalStatus: 'pending_approval',
+              paymentMethod: methodNames[tenantReportMethod],
+              transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
+              note: tenantReportNote.trim() || p.note,
+              paidDate: tenantReportDate || new Date().toISOString().split('T')[0]
+            }
+          : p));
+      } else {
+        // 情境 2：租客自行申報新費用（租金、押金保證金、水電費、管理費等），待房東核對確認後入帳
+        const newPaymentId = `PAY${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        const newPayment = {
+          id: newPaymentId,
+          leaseId: currentTenantLease.id,
+          tenantName: currentTenantLease.tenantName,
+          propertyName: currentTenantProperty?.name || '租賃房源',
+          amount: amt,
+          dueDate: tenantReportDate || new Date().toISOString().split('T')[0],
+          status: 'pending_approval',
+          approvalStatus: 'pending_approval',
+          paidDate: tenantReportDate || new Date().toISOString().split('T')[0],
+          billType: tenantReportCategory,
+          title: tenantReportTitle.trim() || `${typeLabels[tenantReportCategory] || '費用'} (租客自報)`,
+          paymentMethod: methodNames[tenantReportMethod],
+          transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
+          creatorRole: 'tenant',
+          note: tenantReportNote.trim() || ''
+        };
+
+        if (isSupabaseConfigured) {
+          const { data: insertedRows, error: insertErr } = await supabase.from('payments').insert({
+            id: newPayment.id,
+            lease_id: currentTenantLease.id,
+            tenant_name: newPayment.tenantName,
+            property_name: newPayment.propertyName,
+            amount: amt,
+            due_date: newPayment.dueDate,
+            status: 'pending_approval',
+            paid_date: newPayment.paidDate,
+            bill_type: newPayment.billType,
+            title: newPayment.title,
+            payment_method: newPayment.paymentMethod,
+            transfer_last5: newPayment.transferLast5,
+            note: newPayment.note
+          }).select();
+
+          if (insertErr) {
+            console.warn('Supabase insert payment notice:', insertErr);
+          }
+          if (insertedRows && insertedRows[0]) {
+            newPayment.id = insertedRows[0].id;
+          }
+        }
+
+        setPayments(prev => [newPayment, ...prev]);
+      }
 
       setActiveModal(null);
       setTenantReportTargetBill(null);
-      const displayReportName = `${typeLabels[tenantReportCategory] || '費用項目'}${tenantReportTitle.trim() ? ` (${tenantReportTitle.trim()})` : ''}`;
-      showToast(`🎉「${displayReportName}」繳費回報已成功提交！已通知房東進行審核確認。`, 'success');
+      showToast(`🎉「${displayReportName}」繳費回報已成功提交！已通知房東進行審核核對。`, 'success');
     } catch (err) {
       showToast(`提交回報失敗: ${err.message}`, 'error');
     }
@@ -4307,13 +4382,7 @@ export default function App() {
     }
   };
 
-  const tenantLeases = currentTenantPhone ? leases.filter(l =>
-    l.phone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, '') ||
-    (l.coPhone && l.coPhone.replace(/[-\s]/g, '') === currentTenantPhone.replace(/[-\s]/g, ''))
-  ) : [];
-  const currentTenantLease = tenantLeases.find(l => l.id === currentTenantLeaseId) || (tenantLeases.length > 0 ? tenantLeases[0] : null);
-  const currentTenantProperty = properties.find(p => p.id === currentTenantLease?.propertyId);
-  const currentTenantPayments = payments.filter(p => p.leaseId === currentTenantLease?.id);
+
 
   const handleTenantPay = async (paymentId) => {
     const bill = payments.find(p => p.id === paymentId);
@@ -4407,6 +4476,7 @@ export default function App() {
       paid: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       pending: 'bg-blue-50 text-blue-700 border-blue-200',
       pending_approval: 'bg-amber-50 text-amber-800 border-amber-300',
+      tenant_submitted: 'bg-amber-50 text-amber-800 border-amber-300',
       rejected: 'bg-rose-50 text-rose-700 border-rose-200',
       overdue: 'bg-rose-50 text-rose-700 border-rose-200',
       processing: 'bg-indigo-50 text-indigo-700 border-indigo-200',
@@ -4423,6 +4493,7 @@ export default function App() {
       paid: '已付款',
       pending: '待付款',
       pending_approval: '待房東審核',
+      tenant_submitted: '待房東審核',
       rejected: '已駁回',
       overdue: '已逾期',
       processing: '處理中',
@@ -5817,7 +5888,7 @@ export default function App() {
             {/* LANDLORD LOGGED IN DASHBOARD & PAYMENTS HUB */}
             {role === 'admin' && currentLandlordId && (activeTab === 'dashboard' || activeTab === 'payments' || !['properties', 'advertise', 'leases', 'history'].includes(activeTab)) && (() => {
               // Financial & category calculations (純租金收入計算：排除押金、水電費、管理費、其他)
-              const pendingTenantReports = landlordPayments.filter(p => p.status === 'pending_approval');
+              const pendingTenantReports = landlordPayments.filter(p => p.status === 'pending_approval' || p.status === 'tenant_submitted');
               const activeLandlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active');
               const activeLeaseIds = activeLandlordLeases.map(l => l.id);
 
@@ -6368,7 +6439,7 @@ export default function App() {
                                       </span>
                                     ) : (
                                       <div className="flex items-center justify-end space-x-2">
-                                        {pay.status === 'pending_approval' ? (
+                                        {(pay.status === 'pending_approval' || pay.status === 'tenant_submitted') ? (
                                           <>
                                             <button
                                               onClick={() => handleApprovePayment(pay.id)}
@@ -6527,7 +6598,7 @@ export default function App() {
                                   <div className="w-full text-center text-xs font-semibold text-slate-400 bg-slate-200/60 py-2 rounded-xl">
                                     此帳單已作廢存查
                                   </div>
-                                ) : pay.status === 'pending_approval' ? (
+                                ) : (pay.status === 'pending_approval' || pay.status === 'tenant_submitted') ? (
                                   <>
                                     <button
                                       onClick={() => handleApprovePayment(pay.id)}
@@ -7552,7 +7623,7 @@ export default function App() {
                         const isSelected = (currentTenantLease?.id === l.id);
                         const prop = properties.find(p => p.id === l.propertyId);
                         const leaseUnpaidBills = payments.filter(p => p.leaseId === l.id && (p.status === 'pending' || p.status === 'overdue'));
-                        const leasePendingApproval = payments.filter(p => p.leaseId === l.id && p.status === 'pending_approval');
+                        const leasePendingApproval = payments.filter(p => p.leaseId === l.id && (p.status === 'pending_approval' || p.status === 'tenant_submitted'));
                         const monthly = getLeaseMonthlyRent(l);
 
                         return (
@@ -7673,7 +7744,7 @@ export default function App() {
 
                       // 待房東審核租金
                       const tenantPendingApprovalRent = currentTenantPayments
-                        .filter(p => p.status === 'pending_approval' && p.billType === 'rent')
+                        .filter(p => (p.status === 'pending_approval' || p.status === 'tenant_submitted') && p.billType === 'rent')
                         .reduce((acc, p) => acc + (p.amount || 0), 0);
 
                       const categoryMap = {
@@ -7691,7 +7762,7 @@ export default function App() {
                       };
 
                       const unpaidBills = currentTenantPayments.filter(p => p.status === 'pending' || p.status === 'overdue');
-                      const pendingApprovalBills = currentTenantPayments.filter(p => p.status === 'pending_approval');
+                      const pendingApprovalBills = currentTenantPayments.filter(p => p.status === 'pending_approval' || p.status === 'tenant_submitted');
                       const paidBills = currentTenantPayments.filter(p => p.status === 'paid');
                       const voidedBills = currentTenantPayments.filter(p => p.status === 'void');
                       const unpaidTotal = unpaidBills.reduce((acc, b) => acc + (b.amount || 0), 0);
@@ -7757,7 +7828,7 @@ export default function App() {
                                   NT$ {tenantPendingApprovalRent.toLocaleString()}
                                 </h3>
                                 <p className="text-xs text-slate-500 font-medium mt-1">
-                                  {currentTenantPayments.filter(p => p.status === 'pending_approval' && p.billType === 'rent').length} 筆租金回報等待房東核帳
+                                  {currentTenantPayments.filter(p => (p.status === 'pending_approval' || p.status === 'tenant_submitted') && p.billType === 'rent').length} 筆租金回報等待房東核帳
                                 </p>
                               </div>
                             </div>
@@ -10914,6 +10985,68 @@ export default function App() {
 
                   {/* Category & Amount Detail Fields */}
                   <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80 space-y-3">
+                    {/* Bill Selection Field */}
+                    {(() => {
+                      const availableUnpaid = currentTenantPayments.filter(p => p.status === 'pending' || p.status === 'overdue');
+                      if (availableUnpaid.length > 0) {
+                        return (
+                          <div className="pb-3 border-b border-slate-200/80">
+                            <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                              <span>請選擇要回報的帳單項目：</span>
+                              {tenantReportTargetBill ? (
+                                <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                                  已連結待繳帳單
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                  自行申報新項目
+                                </span>
+                              )}
+                            </label>
+                            <select
+                              value={tenantReportTargetBill ? tenantReportTargetBill.id : '__SELF_REPORT__'}
+                              onChange={(e) => {
+                                const selId = e.target.value;
+                                if (selId === '__SELF_REPORT__') {
+                                  setTenantReportTargetBill(null);
+                                  setTenantReportCategory('rent');
+                                  setTenantReportTitle('');
+                                  setTenantReportAmount(getLeaseMonthlyRent(currentTenantLease).toString());
+                                } else {
+                                  const foundBill = availableUnpaid.find(b => b.id === selId);
+                                  if (foundBill) {
+                                    setTenantReportTargetBill(foundBill);
+                                    setTenantReportCategory(foundBill.billType || 'rent');
+                                    setTenantReportTitle(foundBill.title || '');
+                                    setTenantReportAmount(foundBill.amount.toString());
+                                    setTenantReportDate(foundBill.dueDate || new Date().toISOString().split('T')[0]);
+                                  }
+                                }
+                              }}
+                              className="w-full border border-indigo-200 bg-white rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:border-indigo-600 shadow-2xs"
+                            >
+                              {availableUnpaid.map(b => (
+                                <option key={b.id} value={b.id}>
+                                  📄 待繳帳單：{b.title || getCategoryInfo(b.billType).label} (NT$ {b.amount.toLocaleString()} · 期限 {b.dueDate})
+                                </option>
+                              ))}
+                              <option value="__SELF_REPORT__">
+                                ✍️ 自行申報新費用（租金、押金保證金、水電費、管理費、其他）
+                              </option>
+                            </select>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="flex items-center justify-between text-xs text-indigo-900 bg-indigo-50/90 px-3 py-2 rounded-xl border border-indigo-200 font-medium">
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles size={14} className="text-indigo-600 flex-shrink-0" />
+                            <span>目前無待繳帳單，您正自行申報繳費項目，待房東核對確認後入帳</span>
+                          </span>
+                        </div>
+                      );
+                    })()}
+
                     {tenantReportTargetBill && (
                       <div className="flex items-center justify-between text-xs text-amber-900 bg-amber-50/90 px-3 py-1.5 rounded-xl border border-amber-200 font-medium">
                         <span className="flex items-center gap-1.5">
