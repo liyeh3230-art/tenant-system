@@ -77,6 +77,11 @@ export default function App() {
     return 'portal';
   });
 
+  const roleRef = useRef(role);
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
@@ -1010,7 +1015,31 @@ export default function App() {
         const cleanPhone = String(profile.phone || metaPhone).replace(/[^0-9]/g, '');
 
         setIsSuperadminAuthenticated(false);
-        if (userRole === 'landlord' || userRole === 'admin') {
+        setCurrentUser(user);
+
+        // 判斷目前使用者的操作身分模式 (優先尊重執行中狀態與 localStorage，避免 token 刷新時意外跳回房東模式)
+        const savedSessionStr = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+        let savedRole = null;
+        if (savedSessionStr) {
+          try {
+            savedRole = JSON.parse(savedSessionStr)?.role;
+          } catch (e) {}
+        }
+        const currentActiveRole = roleRef.current || savedRole || userRole;
+
+        if (currentActiveRole === 'tenant') {
+          // 使用者目前處於租客模式（或由房東切換為租客模式）
+          roleRef.current = 'tenant';
+          setRole('tenant');
+          setActiveTab(prev => (['portal', 'tenantHistory', 'contract'].includes(prev) ? prev : 'portal'));
+          setCurrentTenantPhone(cleanPhone);
+          setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
+          setCurrentLandlordId(null);
+          setCurrentLandlordPhone(null);
+          try {
+            localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name || user?.user_metadata?.name || '', role: 'tenant' }));
+          } catch (e) {}
+        } else if (userRole === 'landlord' || userRole === 'admin') {
           const { data: lndRec } = await supabase
             .from('landlords')
             .select('*')
@@ -1018,17 +1047,19 @@ export default function App() {
             .maybeSingle();
 
           if (lndRec && lndRec.status === 'approved') {
+            roleRef.current = 'admin';
             setRole('admin');
-            setActiveTab('dashboard');
+            setActiveTab(prev => (['dashboard', 'payments', 'properties', 'advertise', 'leases', 'history'].includes(prev) ? prev : 'dashboard'));
             setCurrentLandlordId(profile.id);
             setCurrentLandlordPhone(cleanPhone);
             try {
-              localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: userRole }));
+              localStorage.setItem('app_auth_session', JSON.stringify({ id: profile.id, phone: cleanPhone, name: profile.name, role: 'landlord' }));
             } catch (e) {}
           } else {
             // 待審核或退回：維持租客身分進入租客專區
+            roleRef.current = 'tenant';
             setRole('tenant');
-            setActiveTab('portal');
+            setActiveTab(prev => (['portal', 'tenantHistory', 'contract'].includes(prev) ? prev : 'portal'));
             setCurrentTenantPhone(cleanPhone);
             setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
             try {
@@ -1036,8 +1067,9 @@ export default function App() {
             } catch (e) {}
           }
         } else {
+          roleRef.current = 'tenant';
           setRole('tenant');
-          setActiveTab('portal');
+          setActiveTab(prev => (['portal', 'tenantHistory', 'contract'].includes(prev) ? prev : 'portal'));
           setCurrentTenantPhone(cleanPhone);
           setCurrentTenantName(profile.name || user?.user_metadata?.name || '');
           try {
@@ -1055,6 +1087,7 @@ export default function App() {
           if (savedSession && (savedSession.id || savedSession.phone)) {
             if (savedSession.role === 'superadmin') {
               setCurrentUser({ id: 'usr_superadmin', phone: '0900000000', role: 'superadmin' });
+              roleRef.current = 'superadmin';
               setRole('superadmin');
               setActiveTab('landlords');
               setIsSuperadminAuthenticated(true);
@@ -1084,14 +1117,16 @@ export default function App() {
                   .maybeSingle();
 
                 if (lndRec && lndRec.status === 'approved') {
+                  roleRef.current = 'admin';
                   setRole('admin');
-                  setActiveTab('dashboard');
+                  setActiveTab(prev => (['dashboard', 'payments', 'properties', 'advertise', 'leases', 'history'].includes(prev) ? prev : 'dashboard'));
                   setCurrentLandlordId(profile.id);
                   setCurrentLandlordPhone(cleanPhone);
                 } else {
                   // 待審核或退回：維持租客身分進入租客專區
+                  roleRef.current = 'tenant';
                   setRole('tenant');
-                  setActiveTab('portal');
+                  setActiveTab(prev => (['portal', 'tenantHistory', 'contract'].includes(prev) ? prev : 'portal'));
                   setCurrentTenantPhone(cleanPhone);
                   setCurrentTenantName(profile.name || savedSession.name || '');
                   try {
@@ -1099,8 +1134,9 @@ export default function App() {
                   } catch (e) {}
                 }
               } else {
+                roleRef.current = 'tenant';
                 setRole('tenant');
-                setActiveTab('portal');
+                setActiveTab(prev => (['portal', 'tenantHistory', 'contract'].includes(prev) ? prev : 'portal'));
                 setCurrentTenantPhone(cleanPhone);
                 setCurrentTenantName(profile.name || savedSession.name || '');
               }
@@ -1125,13 +1161,21 @@ export default function App() {
       if (!savedSessionStr) {
         setCurrentUser(null);
         setIsSuperadminAuthenticated(false);
+        roleRef.current = 'portal';
         setRole('portal');
       }
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      // 避免在 Supabase callback 內直接發出其他 auth 呼叫。
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // 1. 若為背景 Token 刷新 (TOKEN_REFRESHED)，僅靜態更新 Auth User，絕不打擾使用者目前的頁面與操作模式
+      if (event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          setCurrentUser(session.user);
+        }
+        return;
+      }
+      // 2. 避免在 Supabase callback 內直接發出其他 auth 呼叫。
       setTimeout(() => applySession(session), 0);
     });
 
@@ -1925,6 +1969,7 @@ export default function App() {
       const targetLndPhone = targetLandlord.phone || currentPhone;
       const targetLndName = targetLandlord.name || currentName;
 
+      roleRef.current = 'admin';
       setRole('admin');
       setActiveTab('dashboard');
       setCurrentLandlordId(targetLndId);
@@ -1946,6 +1991,7 @@ export default function App() {
       await fetchSupabaseData('admin', targetLndId, targetLndPhone);
     } else if (targetRole === 'tenant') {
       // 2. 若想切換為租客中心模式
+      roleRef.current = 'tenant';
       setRole('tenant');
       setActiveTab('portal');
       setCurrentTenantPhone(currentPhone);
@@ -7600,25 +7646,14 @@ export default function App() {
                           </p>
                         )}
                       </div>
-                      <div className="bg-white/10 p-4 rounded-xl border border-white/15 backdrop-blur-xs z-10 sm:text-right self-start sm:self-auto space-y-2">
-                        <div>
-                          <p className="text-xs text-indigo-100 mb-0.5">合約總租金 / 期限</p>
-                          <p className="text-base sm:text-lg font-bold">
-                            NT$ {(currentTenantLease?.totalContractRent || (getLeaseMonthlyRent(currentTenantLease) * calculateMonths(currentTenantLease?.startDate, currentTenantLease?.endDate))).toLocaleString()}
-                          </p>
-                          <p className="text-[11px] text-indigo-200">
-                            截止日: {currentTenantLease?.endDate || '無資料'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleOpenLineBinding}
-                          disabled={lineBindingLoading}
-                          className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 focus:outline-none"
-                        >
-                          <MessageSquare size={13} />
-                          <span>{lineBindingLoading ? '產生中...' : '綁定 LINE 帳號'}</span>
-                        </button>
+                      <div className="bg-white/10 p-4 rounded-xl border border-white/15 backdrop-blur-xs z-10 sm:text-right self-start sm:self-auto">
+                        <p className="text-xs text-indigo-100 mb-0.5">合約總租金 / 期限</p>
+                        <p className="text-base sm:text-lg font-bold">
+                          NT$ {(currentTenantLease?.totalContractRent || (getLeaseMonthlyRent(currentTenantLease) * calculateMonths(currentTenantLease?.startDate, currentTenantLease?.endDate))).toLocaleString()}
+                        </p>
+                        <p className="text-[11px] text-indigo-200">
+                          截止日: {currentTenantLease?.endDate || '無資料'}
+                        </p>
                       </div>
                     </div>
 
