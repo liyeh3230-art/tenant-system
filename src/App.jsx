@@ -7971,22 +7971,36 @@ export default function App() {
 
                           {/* 2. 待審核專區 (Pending Approvals) */}
                           {pendingApprovalBills.length > 0 && (
-                            <div className="bg-indigo-50/60 rounded-3xl p-6 border-2 border-indigo-200 shadow-xs space-y-4">
-                              <div className="flex items-center space-x-2">
-                                <span className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
-                                  <Clock size={18} />
-                                </span>
-                                <div>
-                                  <h3 className="text-lg font-bold text-slate-800">
-                                    已提交繳費回報 (待房東核對確認中 · 共 {pendingApprovalBills.length} 筆)
-                                  </h3>
-                                  <p className="text-xs text-slate-500 font-medium">
-                                    房東核帳後將自動開立電子收據，並自尚餘租金中扣減
-                                  </p>
+                            <div className="bg-gradient-to-br from-indigo-50/50 via-slate-50/25 to-indigo-50/40 rounded-2xl p-4 sm:p-6 border border-indigo-200/80 shadow-xs">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-indigo-100/90">
+                                <div className="flex items-center space-x-3">
+                                  <span className="p-2 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-700 border border-indigo-300">
+                                    <Clock size={20} />
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h3 className="text-base sm:text-lg font-bold text-slate-800">
+                                        已提交繳費回報
+                                      </h3>
+                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                        {pendingApprovalBills.length} 筆待審核
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                      房東核帳後將自動開立電子收據，並自尚餘租金中扣減
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="bg-white border border-indigo-200/90 px-3.5 py-1.5 rounded-xl w-full sm:w-auto flex sm:flex-col justify-between sm:justify-center items-center sm:items-end shadow-2xs">
+                                  <span className="text-[11px] text-indigo-700/80 font-semibold">待核總額</span>
+                                  <span className="text-lg sm:text-xl font-black text-indigo-950 font-mono">
+                                    NT$ {pendingApprovalBills.reduce((acc, b) => acc + (b.amount || 0), 0).toLocaleString()}
+                                  </span>
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4 mt-4">
                                 {pendingApprovalBills.map(bill => {
                                   const catInfo = getCategoryInfo(bill.billType);
                                   const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
@@ -7995,42 +8009,76 @@ export default function App() {
                                   const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
 
                                   return (
-                                    <div key={`pending-${bill.id}`} className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-xs flex flex-col justify-between">
-                                      <div>
-                                        <div className="flex justify-between items-start mb-2">
-                                          <div>
-                                            <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
-                                              <span>{catInfo.icon}</span>
-                                              <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                            </span>
-                                            <h4 className="text-2xl font-bold text-slate-800 mt-1 font-mono">NT$ {bill.amount.toLocaleString()}</h4>
+                                    <div
+                                      key={`pending-${bill.id}`}
+                                      className="bg-white hover:bg-indigo-50/20 border-2 border-indigo-200/90 hover:border-indigo-300 rounded-xl p-4 sm:p-5 flex flex-col justify-between transition-all space-y-3.5 shadow-2xs hover:shadow-xs"
+                                    >
+                                      <div className="space-y-2">
+                                        <div className="flex justify-between items-start gap-2">
+                                          <div className="space-y-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
+                                                <span>{catInfo.icon}</span>
+                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                              </span>
+                                              {bill.creatorRole === 'tenant' && (
+                                                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                                  租客自報
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight pt-0.5 font-mono">
+                                              NT$ {bill.amount.toLocaleString()}
+                                            </div>
                                           </div>
                                           <StatusBadge status={bill.status} />
                                         </div>
-                                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs space-y-1.5 mb-4 text-slate-600">
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">承租房源：</span>
-                                            <span className="font-semibold text-slate-800">{propName}</span>
+
+                                        <div className="text-xs text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1.5 pt-2.5 border-t border-indigo-100 font-medium">
+                                          <div className="flex items-center gap-1">
+                                            <Building size={13} className="text-slate-400" />
+                                            <span>房源：</span>
+                                            <span className="text-slate-700 font-semibold truncate max-w-[140px]">
+                                              {propName}
+                                            </span>
                                           </div>
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">出租房東：</span>
-                                            <span className="font-semibold text-slate-700">{landlordName}</span>
+                                          <div className="flex items-center gap-1">
+                                            <User size={13} className="text-slate-400" />
+                                            <span>房東：</span>
+                                            <span className="text-slate-700 font-semibold">
+                                              {landlordName}
+                                            </span>
                                           </div>
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">回報日期：</span>
-                                            <span className="font-semibold text-slate-700">{bill.dueDate}</span>
+                                          <div className="flex items-center gap-1">
+                                            <Calendar size={13} className="text-slate-400" />
+                                            <span>期限：</span>
+                                            <span className="font-semibold text-slate-700">
+                                              {bill.dueDate}
+                                            </span>
                                           </div>
                                           {bill.transferLast5 && (
-                                            <div className="flex justify-between font-bold text-amber-800">
+                                            <div className="flex items-center gap-1 font-bold text-amber-800">
+                                              <CreditCard size={13} className="text-amber-600" />
                                               <span>匯款末5碼：</span>
-                                              <span className="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">{bill.transferLast5}</span>
+                                              <span className="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                                {bill.transferLast5}
+                                              </span>
+                                            </div>
+                                          )}
+                                          {bill.note && (
+                                            <div className="w-full text-slate-500 truncate pt-0.5">
+                                              <span className="text-slate-400">備註：</span>
+                                              <span className="text-slate-700">{bill.note}</span>
                                             </div>
                                           )}
                                         </div>
                                       </div>
-                                      <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 py-2 rounded-xl font-bold flex justify-center items-center text-xs">
-                                        <Clock size={14} className="mr-1.5 text-amber-600" />
-                                        已送出繳費回報，等待房東對帳中
+
+                                      <div className="pt-2 border-t border-slate-100">
+                                        <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 py-2.5 px-4 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
+                                          <Clock size={14} className="mr-1.5 text-amber-600" />
+                                          <span>已送出繳費回報，等待房東對帳中</span>
+                                        </div>
                                       </div>
                                     </div>
                                   );
