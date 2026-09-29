@@ -1275,8 +1275,10 @@ export default function App() {
             setActiveModal('lineFirstLogin');
             showToast(`🎉 ${provider === 'facebook' ? 'Facebook' : 'LINE'} 授權成功！請填寫真實姓名、手機並設定密碼。`, 'info');
           } else {
-            const providerTitle = provider === 'facebook' ? 'Facebook' : 'LINE';
-            if (u.role === 'landlord') {
+            const requestedRole = oauthResult.targetRole || 'tenant';
+            const shouldBeLandlord = (u.role === 'landlord' && requestedRole === 'landlord');
+
+            if (shouldBeLandlord) {
               const { data: lndRec } = await supabase
                 .from('landlords')
                 .select('*')
@@ -1289,16 +1291,18 @@ export default function App() {
                   phone: u.phone,
                   user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
                 });
+                roleRef.current = 'admin';
                 setRole('admin');
                 setCurrentLandlordId(u.id);
                 setCurrentLandlordPhone(u.phone);
                 setActiveTab('dashboard');
                 try {
-                  localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
+                  localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: 'landlord' }));
                 } catch (e) {}
                 showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
               } else {
                 // 待審核或退回：維持租客身分進入租客專區
+                roleRef.current = 'tenant';
                 setRole('tenant');
                 setActiveTab('portal');
                 setCurrentTenantPhone(u.phone);
@@ -1320,11 +1324,13 @@ export default function App() {
                 phone: u.phone,
                 user_metadata: { role: u.role, name: u.name, avatar_url: u.avatar_url }
               });
+              roleRef.current = 'tenant';
               setRole('tenant');
               setCurrentTenantPhone(u.phone);
+              setCurrentTenantName(u.name);
               setActiveTab('portal');
               try {
-                localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: u.role }));
+                localStorage.setItem('app_auth_session', JSON.stringify({ id: u.id, phone: u.phone, name: u.name, role: 'tenant' }));
               } catch (e) {}
               showToast(`🎉 ${providerTitle} 授權快速登入成功！歡迎回來，${u.name}！`, 'success');
             }
