@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Home, Users, FileText, CreditCard, Building,
+  Home, Users, FileText, CreditCard, Building, MapPin,
   LogOut, Plus, CheckCircle, Clock, AlertCircle,
   Search, User, LayoutDashboard, Wallet,
   Calendar, Phone, DollarSign, X, Check, Clipboard, Edit3, Trash2, Menu, FileEdit, XCircle, History, Image, Share2, Lock, FileCheck,
@@ -8556,103 +8556,371 @@ export default function App() {
               </div>
             )}
 
-            {/* TENANT LEASE INFO VIEW (Pure information record, no lengthy legal rules) */}
-            {role === 'tenant' && currentTenantLeaseId && activeTab === 'contract' && (
-              <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 sm:p-8 max-w-3xl mx-auto space-y-6">
-                {!currentTenantLease ? (
-                  <div className="text-center text-slate-400 py-8">找不到您的租約資料。</div>
-                ) : (
-                  <>
-                    <div className="border-b border-slate-100 pb-5 text-center">
-                      <div className="inline-flex p-3 bg-indigo-50 text-indigo-600 rounded-2xl mb-2">
-                        <FileCheck size={28} />
+            {/* TENANT LEASE INFO VIEW (Pure information record, optimized for Mobile, Tablet, Desktop) */}
+            {role === 'tenant' && currentTenantLeaseId && activeTab === 'contract' && (() => {
+              if (!currentTenantLease) {
+                return (
+                  <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8 max-w-3xl mx-auto text-center text-slate-400 py-12 space-y-3">
+                    <FileCheck size={40} className="mx-auto text-slate-300" />
+                    <p className="font-semibold text-slate-600">找不到您的租約資料</p>
+                    <p className="text-xs text-slate-400">請確認是否已綁定租客合約或聯繫房東。</p>
+                  </div>
+                );
+              }
+
+              const targetLandlord = landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId));
+              const contractMonths = calculateMonths(currentTenantLease.startDate, currentTenantLease.endDate);
+              const monthlyRent = getLeaseMonthlyRent(currentTenantLease);
+              const contractTotalRent = currentTenantLease.totalContractRent && Number(currentTenantLease.totalContractRent) > 0
+                ? Number(currentTenantLease.totalContractRent)
+                : (monthlyRent * contractMonths);
+
+              const today = new Date();
+              const startDateObj = new Date(currentTenantLease.startDate);
+              const endDateObj = new Date(currentTenantLease.endDate);
+              const totalDays = Math.max(1, Math.round((endDateObj - startDateObj) / (1000 * 60 * 60 * 24)));
+              const daysPassed = Math.max(0, Math.round((today - startDateObj) / (1000 * 60 * 60 * 24)));
+              const daysRemaining = Math.max(0, Math.round((endDateObj - today) / (1000 * 60 * 60 * 24)));
+              const progressPercent = Math.min(100, Math.max(0, Math.round((daysPassed / totalDays) * 100)));
+              const isExpired = today > endDateObj;
+              const isTerminated = currentTenantLease.status === 'terminated';
+
+              return (
+                <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
+                  {/* Multi-Lease Switcher (if tenant has multiple leases) */}
+                  {tenantLeases.length > 1 && (
+                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-150/80 shadow-xs space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Building size={16} className="text-indigo-600" />
+                          <span className="text-xs sm:text-sm font-bold text-slate-700">切換承租房源：</span>
+                        </div>
+                        <span className="text-xs text-slate-400 font-medium">共 {tenantLeases.length} 筆租賃合約</span>
                       </div>
-                      <h2 className="text-xl sm:text-2xl font-bold text-slate-800">房屋租賃資訊明細</h2>
-                      <p className="text-xs text-slate-400 font-mono mt-1">紀錄編號: {currentTenantLease.id}</p>
+                      <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+                        {tenantLeases.map((l) => {
+                          const isSelected = (currentTenantLease?.id === l.id);
+                          const prop = properties.find(p => p.id === l.propertyId);
+                          return (
+                            <button
+                              key={`contract-pill-${l.id}`}
+                              type="button"
+                              onClick={() => setCurrentTenantLeaseId(l.id)}
+                              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border text-left transition-all flex-shrink-0 cursor-pointer ${
+                                isSelected
+                                  ? 'bg-gradient-to-r from-indigo-600 via-indigo-650 to-indigo-700 text-white border-indigo-600 shadow-md shadow-indigo-100 ring-2 ring-indigo-300/60 scale-[1.01]'
+                                  : 'bg-slate-50/80 hover:bg-slate-100 text-slate-700 border-slate-200/80 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className={`p-2 rounded-lg ${isSelected ? 'bg-white/20 text-white' : 'bg-white text-indigo-600 border border-slate-200/60 shadow-2xs'}`}>
+                                <Building size={16} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold truncate max-w-[130px] sm:max-w-[180px]">
+                                  {prop?.name || '租賃房間'}
+                                </div>
+                                <div className={`text-[11px] font-mono ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                  {l.startDate} ~ {l.endDate}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
+                  )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Property Card */}
-                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-                        <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs">
-                          <Building size={14} />
-                          <span>承租房源資訊</span>
+                  {/* Main Executive Banner Card */}
+                  <div className="bg-white rounded-2xl sm:rounded-3xl shadow-xs border border-slate-100 p-5 sm:p-7 space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-5 border-b border-slate-100">
+                      <div className="flex items-center space-x-3.5">
+                        <div className="p-3 bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-2xl shadow-sm flex items-center justify-center">
+                          <FileCheck size={26} />
                         </div>
-                        <p className="text-base font-bold text-slate-800">{currentTenantProperty ? currentTenantProperty.name : '未知房源'}</p>
-                        <p className="text-xs text-slate-500">{currentTenantProperty?.address || '未填寫地址'}</p>
-                        <p className="text-xs text-slate-600 font-semibold">
-                          房型類型：{currentTenantProperty?.type || '套房'}
-                        </p>
-                      </div>
-
-                      {/* Landlord Card */}
-                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-                        <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs">
-                          <User size={14} />
-                          <span>房東聯絡資訊</span>
-                        </div>
-                        <p className="text-base font-bold text-slate-800">
-                          {landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.name || '房東'}
-                        </p>
-                        <p className="text-xs text-slate-600 flex items-center gap-1 font-semibold">
-                          <Phone size={12} className="text-slate-400" />
-                          <span>電話：</span>
-                          <a href={`tel:${landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.phone || ''}`} className="text-indigo-600 hover:underline">
-                            {landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId))?.phone || '未提供'}
-                          </a>
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Lease Detail Specs */}
-                    <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-100 space-y-3.5 text-xs sm:text-sm">
-                      <div className="flex justify-between items-center py-1 border-b border-slate-200/50">
-                        <span className="text-slate-500 font-medium">承租人姓名</span>
-                        <span className="font-bold text-slate-800">{currentTenantLease.tenantName} ({currentTenantLease.phone})</span>
-                      </div>
-                      {currentTenantLease.coTenantName && (
-                        <div className="flex justify-between items-center py-1 border-b border-slate-200/50">
-                          <span className="text-slate-500 font-medium">同住承租人</span>
-                          <span className="font-bold text-slate-800">{currentTenantLease.coTenantName} ({currentTenantLease.coPhone || '無電話'})</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center py-1 border-b border-slate-200/50">
-                        <span className="text-slate-500 font-medium">租賃期限</span>
-                        <span className="font-bold text-slate-800">{currentTenantLease.startDate} 至 {currentTenantLease.endDate}</span>
-                      </div>
-                      <div className="flex justify-between items-center py-1 border-b border-slate-200/50">
-                        <span className="text-slate-500 font-medium">每月租金</span>
-                        <span className="font-bold text-indigo-600 text-sm">
-                          NT$ {getLeaseMonthlyRent(currentTenantLease).toLocaleString()} / 月
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center py-1 border-b border-slate-200/50">
-                        <span className="text-slate-500 font-medium">履約押金</span>
-                        <span className="font-bold text-slate-800">NT$ {currentTenantLease.deposit.toLocaleString()}</span>
-                      </div>
-                      {currentTenantLease.note && (
-                        <div className="pt-2">
-                          <span className="text-slate-500 font-medium block mb-1">約定備註紀錄</span>
-                          <p className="bg-white p-3 rounded-xl border border-slate-200 text-slate-700 leading-relaxed font-medium">
-                            {currentTenantLease.note}
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">房屋租賃資訊明細</h2>
+                            {isTerminated ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                ● 已終止合約
+                              </span>
+                            ) : isExpired ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                ● 合約已屆期
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse" />
+                                履約生效中
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-2">
+                            <span>合約編號：{currentTenantLease.id}</span>
+                            <span className="text-slate-300">·</span>
+                            <span>{contractMonths} 個月約期</span>
                           </p>
                         </div>
+                      </div>
+
+                      {/* Quick Navigate Button on Tablet/Desktop */}
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('portal')}
+                        className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-colors cursor-pointer"
+                      >
+                        <CreditCard size={14} />
+                        <span>前往租金帳單</span>
+                      </button>
+                    </div>
+
+                    {/* 3-Card Financial Terms Overview (Responsive: 1 col on mobile, 3 cols on tablet & desktop) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4">
+                      {/* Card 1: 每月租金 */}
+                      <div className="bg-gradient-to-br from-indigo-50/60 via-slate-50 to-indigo-50/30 p-4 sm:p-5 rounded-2xl border border-indigo-100/90 shadow-2xs flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                            <Wallet size={15} className="text-indigo-600" />
+                            <span>約定每月租金</span>
+                          </span>
+                          <span className="text-[10px] text-indigo-600 bg-indigo-100/80 px-1.5 py-0.5 rounded font-bold">
+                            每期應繳
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-2xl sm:text-3xl font-black text-indigo-950 font-mono">
+                            NT$ {monthlyRent.toLocaleString()}
+                          </div>
+                          <p className="text-[11px] text-indigo-600/80 font-medium mt-1">
+                            固定每月約定租金金額
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Card 2: 履約押金 */}
+                      <div className="bg-gradient-to-br from-purple-50/60 via-slate-50 to-purple-50/30 p-4 sm:p-5 rounded-2xl border border-purple-100/90 shadow-2xs flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                            <Lock size={15} className="text-purple-600" />
+                            <span>履約押金保證金</span>
+                          </span>
+                          <span className="text-[10px] text-purple-600 bg-purple-100/80 px-1.5 py-0.5 rounded font-bold">
+                            點交保證
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-2xl sm:text-3xl font-black text-purple-950 font-mono">
+                            NT$ {Number(currentTenantLease.deposit || 0).toLocaleString()}
+                          </div>
+                          <p className="text-[11px] text-purple-600/80 font-medium mt-1">
+                            租約期滿點交確認無誤退還
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Card 3: 全期約定總租金 */}
+                      <div className="bg-gradient-to-br from-emerald-50/60 via-slate-50 to-emerald-50/30 p-4 sm:p-5 rounded-2xl border border-emerald-100/90 shadow-2xs flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                            <Receipt size={15} className="text-emerald-600" />
+                            <span>合約約定總租金</span>
+                          </span>
+                          <span className="text-[10px] text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold">
+                            共 {contractMonths} 個月
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-2xl sm:text-3xl font-black text-emerald-950 font-mono">
+                            NT$ {contractTotalRent.toLocaleString()}
+                          </div>
+                          <p className="text-[11px] text-emerald-700/80 font-medium mt-1">
+                            尚餘租金扣減之計算基準
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Lease Timeline & Progress Bar */}
+                    <div className="bg-slate-50/80 p-4 sm:p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <Calendar size={16} className="text-indigo-600 flex-shrink-0" />
+                          <span className="text-xs sm:text-sm font-bold text-slate-800">
+                            租賃期間：{currentTenantLease.startDate} 至 {currentTenantLease.endDate}
+                          </span>
+                        </div>
+                        <div className="text-xs font-medium text-slate-500">
+                          {isExpired ? (
+                            <span className="text-rose-600 font-bold">合約已逾期屆滿</span>
+                          ) : (
+                            <span>尚餘 <strong className="text-indigo-600 font-bold">{daysRemaining}</strong> 天到期 (已完成 {progressPercent}%)</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress Track */}
+                      <div className="w-full bg-slate-200/80 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Responsive 2-Column Info Grid (Property & Landlord) */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                      {/* Property Details Card */}
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="text-xs font-bold text-indigo-700 flex items-center gap-1.5">
+                            <Building size={15} />
+                            <span>承租房源標的物</span>
+                          </span>
+                          <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {currentTenantProperty?.type || '獨立套房'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div>
+                            <span className="text-[11px] text-slate-400 font-medium block">房源名稱</span>
+                            <p className="text-base sm:text-lg font-bold text-slate-800">
+                              {currentTenantProperty?.name || currentTenantLease.propertyName || '租賃房源'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] text-slate-400 font-medium block">座落地址</span>
+                            <p className="text-xs sm:text-sm text-slate-600 flex items-start gap-1.5 mt-0.5">
+                              <MapPin size={14} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                              <span>{currentTenantProperty?.address || '房東尚未填寫詳細座落地址'}</span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Landlord Contact Card */}
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3.5">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <span className="text-xs font-bold text-indigo-700 flex items-center gap-1.5">
+                            <User size={15} />
+                            <span>出租房東聯絡資訊</span>
+                          </span>
+                          <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                            合約相對人
+                          </span>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <span className="text-[11px] text-slate-400 font-medium block">房東姓名</span>
+                              <p className="text-base sm:text-lg font-bold text-slate-800">
+                                {targetLandlord?.name || '房東'}
+                              </p>
+                            </div>
+                            {targetLandlord?.phone && (
+                              <a
+                                href={`tel:${targetLandlord.phone}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200 transition-colors cursor-pointer"
+                              >
+                                <Phone size={13} />
+                                <span>撥打電話</span>
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-slate-600 flex items-center gap-1.5">
+                            <Phone size={13} className="text-slate-400" />
+                            <span className="text-slate-500">聯絡電話：</span>
+                            <span className="font-semibold text-slate-800">{targetLandlord?.phone || '未提供電話'}</span>
+                          </div>
+
+                          {targetLandlord?.bank_name && targetLandlord?.bank_account && (
+                            <div className="pt-2 border-t border-slate-100 text-xs">
+                              <span className="text-slate-400 text-[11px] block">約定收款銀行帳戶</span>
+                              <div className="flex justify-between items-center mt-1">
+                                <span className="font-bold text-slate-700">{targetLandlord.bank_name} {targetLandlord.bank_account}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(targetLandlord.bank_account.replace(/\D/g, ''));
+                                    showToast('已複製銀行帳號至剪貼簿！', 'success');
+                                  }}
+                                  className="text-indigo-600 hover:text-indigo-800 p-1 cursor-pointer"
+                                  title="複製帳號"
+                                >
+                                  <Copy size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tenant Information Specs Table */}
+                    <div className="bg-slate-50/70 p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-200/70">
+                        <Users size={15} className="text-indigo-600" />
+                        <span className="text-xs sm:text-sm font-bold text-slate-800">承租人身分資訊</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                        <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 space-y-1">
+                          <span className="text-[11px] font-semibold text-slate-400 block">主承租人</span>
+                          <p className="font-bold text-slate-800 text-sm">{currentTenantLease.tenantName}</p>
+                          <p className="text-xs text-slate-500 font-mono">{currentTenantLease.phone}</p>
+                        </div>
+
+                        {currentTenantLease.coTenantName ? (
+                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-400 block">同住承租人</span>
+                            <p className="font-bold text-slate-800 text-sm">{currentTenantLease.coTenantName}</p>
+                            <p className="text-xs text-slate-500 font-mono">{currentTenantLease.coPhone || '未提供電話'}</p>
+                          </div>
+                        ) : (
+                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/70 space-y-1 flex flex-col justify-center">
+                            <span className="text-[11px] font-semibold text-slate-400 block">同住承租人</span>
+                            <p className="text-xs text-slate-400">合約未登記共同承租人</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Special Notes & Rules */}
+                      {currentTenantLease.note && (
+                        <div className="pt-2">
+                          <span className="text-[11px] text-slate-500 font-bold block mb-1.5">約定備註與補充事項</span>
+                          <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
+                            {currentTenantLease.note}
+                          </div>
+                        </div>
                       )}
                     </div>
 
-                    <div className="pt-2">
+                    {/* Responsive Actions Footer */}
+                    <div className="pt-2 flex flex-col sm:flex-row gap-3">
                       <button
+                        type="button"
                         onClick={() => setActiveTab('portal')}
-                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-colors focus:outline-none flex items-center justify-center gap-1.5"
+                        className="flex-1 py-3 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-colors focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
                       >
-                        <CreditCard size={15} />
-                        <span>前往租金帳單清單</span>
+                        <CreditCard size={16} />
+                        <span>前往租金帳單與回報專區</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('tenantHistory')}
+                        className="py-3 px-5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-bold transition-colors focus:outline-none flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <History size={16} />
+                        <span>查看歷史租約紀錄</span>
                       </button>
                     </div>
-                  </>
-                )}
-              </div>
-            )}
+                  </div>
+                </div>
+              );
+            })()}
 
           </div>
         </main>
