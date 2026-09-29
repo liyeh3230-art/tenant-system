@@ -20,6 +20,7 @@ const itemsToCopy = [
   'src',
   'public',
   'supabase',
+  'scripts',
   'tests',
   'dist',
   'index.html',
@@ -29,6 +30,8 @@ const itemsToCopy = [
   'eslint.config.js',
   'README.md',
   '.gitignore',
+  '.env',
+  '.env.example',
 ];
 
 function copyRecursive(src, dest) {
