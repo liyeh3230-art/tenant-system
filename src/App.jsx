@@ -3310,6 +3310,42 @@ export default function App() {
     return months > 0 ? months : 1;
   };
 
+  // Helper to calculate duration in months and days between two dates
+  const calculateContractDuration = (start, end) => {
+    if (!start || !end) return { months: 0, days: 0, formatted: '0 個月' };
+    const d1 = new Date(start);
+    const d2 = new Date(end);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return { months: 0, days: 0, formatted: '0 個月' };
+
+    let y1 = d1.getFullYear(), m1 = d1.getMonth(), day1 = d1.getDate();
+    let y2 = d2.getFullYear(), m2 = d2.getMonth(), day2 = d2.getDate();
+
+    let months = (y2 - y1) * 12 + (m2 - m1);
+    let days = day2 - day1;
+
+    if (days < 0) {
+      months -= 1;
+      const prevMonthDays = new Date(y2, m2, 0).getDate();
+      days += prevMonthDays;
+    }
+
+    if (months < 0) {
+      months = 0;
+      days = Math.max(0, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+    }
+
+    let formatted = '';
+    if (months > 0 && days > 0) {
+      formatted = `${months} 個月又 ${days} 天`;
+    } else if (months > 0) {
+      formatted = `${months} 個月`;
+    } else {
+      formatted = `${days} 天`;
+    }
+
+    return { months, days, formatted };
+  };
+
   // Helper to get locked-in monthly rent for a lease independent of property rent changes
   const getLeaseMonthlyRent = (lease) => {
     if (!lease) return 0;
@@ -8570,6 +8606,7 @@ export default function App() {
 
               const targetLandlord = landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId));
               const contractMonths = calculateMonths(currentTenantLease.startDate, currentTenantLease.endDate);
+              const contractDuration = calculateContractDuration(currentTenantLease.startDate, currentTenantLease.endDate);
               const monthlyRent = getLeaseMonthlyRent(currentTenantLease);
               const contractTotalRent = currentTenantLease.totalContractRent && Number(currentTenantLease.totalContractRent) > 0
                 ? Number(currentTenantLease.totalContractRent)
@@ -8658,7 +8695,7 @@ export default function App() {
                           <p className="text-xs text-slate-400 font-mono mt-1 flex items-center gap-2">
                             <span>合約編號：{currentTenantLease.id}</span>
                             <span className="text-slate-300">·</span>
-                            <span>{contractMonths} 個月約期</span>
+                            <span>{contractDuration.formatted}約期</span>
                           </p>
                         </div>
                       </div>
@@ -8705,7 +8742,7 @@ export default function App() {
                             <span>合約約定總租金</span>
                           </span>
                           <span className="text-[11px] text-emerald-700 bg-emerald-100/90 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
-                            全期共 {contractMonths} 個月
+                            全期共 {contractDuration.formatted}
                           </span>
                         </div>
                         <div>
@@ -8730,7 +8767,7 @@ export default function App() {
                                 租賃期間時光旅程
                               </h3>
                               <span className="text-[11px] font-bold bg-amber-200/80 text-amber-900 px-2.5 py-0.5 rounded-full whitespace-nowrap">
-                                ✨ 全程 {contractMonths} 個月
+                                ✨ 全程 {contractDuration.formatted}
                               </span>
                             </div>
                             <p className="text-xs text-amber-800/80 font-medium whitespace-nowrap">記錄在溫馨空間生活的每一天</p>
