@@ -1,0 +1,10 @@
+project_id = "hpphlfmtyxrulirpyejp"
+
+[functions.line-webhook]
+verify_jwt = false
+
+[functions.line-auth]
+verify_jwt = false
+
+[functions.facebook-auth]
+verify_jwt = false
