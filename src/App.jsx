@@ -7835,11 +7835,11 @@ export default function App() {
                                 <h3 className={`text-2xl sm:text-3xl font-black ${tenantRemainingRent > 0 ? 'text-amber-950' : 'text-emerald-950'}`}>
                                   NT$ {tenantRemainingRent.toLocaleString()}
                                 </h3>
-                                <p className={`text-xs font-semibold mt-1 ${tenantRemainingRent > 0 ? 'text-amber-800' : 'text-emerald-700'}`}>
-                                  {tenantRemainingRent > 0
-                                    ? `合約總租金 NT$ ${tenantBaseContractRent.toLocaleString()} · 已繳納租金 NT$ ${tenantPaidRent.toLocaleString()}`
-                                    : '🎉 所有合約租金皆已結清！'}
-                                </p>
+                                {tenantRemainingRent <= 0 && (
+                                  <p className="text-xs font-semibold mt-1 text-emerald-700">
+                                    🎉 所有合約租金皆已結清！
+                                  </p>
+                                )}
                               </div>
                             </div>
 
