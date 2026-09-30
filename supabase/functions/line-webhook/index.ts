@@ -263,52 +263,142 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
   };
 }
 
-// 2. 已繳金額與收據 Flex Message
+// 2. 已繳金額與收據 Flex Message (支援多頁左右滑動 Carousel 卷軸)
 function buildPaidPaymentsFlex(payments: any[], profile: any) {
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const items = payments.slice(0, 5);
+  const totalPaid = (payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-  const bodyContents: any[] = [
-    {
-      type: "box",
-      layout: "vertical",
-      backgroundColor: "#ECFDF5",
-      borderColor: "#A7F3D0",
-      borderWidth: "1px",
-      cornerRadius: "12px",
-      paddingAll: "14px",
-      contents: [
-        { type: "text", text: "累計已核銷繳納總額", size: "xs", color: "#065F46", weight: "bold" },
-        { type: "text", text: `NT$ ${totalPaid.toLocaleString()}`, size: "xxl", weight: "bold", color: "#047857", margin: "xs" },
-        { type: "text", text: `共 ${payments.length} 筆款項已確認入帳並開立收據`, size: "xxs", color: "#059669", margin: "xs" }
-      ]
-    },
-    { type: "separator", margin: "md" }
-  ];
+  // 若無已繳款項，回傳空狀態 Bubble
+  if (!payments || payments.length === 0) {
+    return {
+      type: "flex",
+      altText: "💰 歷史繳費清單：目前尚無已核銷之繳費紀錄",
+      contents: {
+        type: "bubble",
+        size: "mega",
+        header: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#059669",
+          paddingAll: "16px",
+          contents: [
+            { type: "text", text: "智慧租屋 · 歷史繳費清單", color: "#A7F3D0", size: "xs", weight: "bold" },
+            { type: "text", text: "已繳款項與電子收據", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
+          ]
+        },
+        body: {
+          type: "box",
+          layout: "vertical",
+          paddingAll: "20px",
+          contents: [
+            { type: "text", text: "目前尚無已核銷之繳費紀錄。", size: "sm", color: "#94A3B8", align: "center", margin: "lg" }
+          ]
+        },
+        footer: {
+          type: "box",
+          layout: "vertical",
+          paddingAll: "14px",
+          contents: [
+            {
+              type: "button",
+              style: "primary",
+              color: "#059669",
+              height: "sm",
+              action: { type: "message", label: "⏳ 查詢待繳帳單", text: "待繳帳單" }
+            }
+          ]
+        }
+      }
+    };
+  }
 
-  if (items.length === 0) {
-    bodyContents.push({
-      type: "text",
-      text: "目前尚無已核銷之繳費紀錄。",
-      size: "sm",
-      color: "#94A3B8",
-      align: "center",
-      margin: "lg"
-    });
-  } else {
-    items.forEach((p, idx) => {
+  // 排序：最新新增或最新繳納的款項排在最前面
+  const sortedPayments = [...payments].sort((a, b) => {
+    const timeA = new Date(a.created_at || a.paid_date || 0).getTime();
+    const timeB = new Date(b.created_at || b.paid_date || 0).getTime();
+    if (timeA !== timeB) return timeB - timeA;
+    const dateA = a.paid_date || a.due_date || "";
+    const dateB = b.paid_date || b.due_date || "";
+    return dateB.localeCompare(dateA);
+  });
+
+  const ITEMS_PER_PAGE = 4;
+  const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
+
+  const getCatIcon = (type: string) => {
+    switch (type) {
+      case "rent": return "🏠";
+      case "deposit": return "🔒";
+      case "utilities": return "⚡";
+      case "management": return "🏢";
+      default: return "📋";
+    }
+  };
+
+  const buildPageBubble = (pageIndex: number) => {
+    const startIdx = pageIndex * ITEMS_PER_PAGE;
+    const pageItems = sortedPayments.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+    const isFirstPage = pageIndex === 0;
+    const isLastPage = pageIndex === totalPages - 1;
+
+    const bodyContents: any[] = [];
+
+    // 第一頁顯示累計已繳總額概況看板
+    if (isFirstPage) {
+      bodyContents.push(
+        {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#ECFDF5",
+          borderColor: "#A7F3D0",
+          borderWidth: "1px",
+          cornerRadius: "12px",
+          paddingAll: "12px",
+          contents: [
+            { type: "text", text: "累計已核銷繳納總額", size: "xxs", color: "#065F46", weight: "bold" },
+            { type: "text", text: `NT$ ${totalPaid.toLocaleString()}`, size: "xl", weight: "bold", color: "#047857", margin: "xs" },
+            { type: "text", text: `共 ${sortedPayments.length} 筆已核銷 · 左右滑動可翻頁檢視`, size: "xxs", color: "#059669", margin: "xs" }
+          ]
+        },
+        { type: "separator", margin: "md" }
+      );
+    }
+
+    // 每一筆已繳費用清單
+    pageItems.forEach((p, idx) => {
+      const catIcon = getCatIcon(p.bill_type || p.billType || "rent");
+      const title = p.title || "租金帳單";
+      const amtStr = Number(p.amount || 0).toLocaleString();
+      const paidDate = p.paid_date || p.due_date || "已結清";
+      const last5 = p.transfer_last5 ? `末五碼：${p.transfer_last5}` : "✅ 已核銷入帳";
+
       bodyContents.push({
         type: "box",
         layout: "vertical",
-        margin: idx > 0 ? "md" : "sm",
+        margin: idx > 0 || isFirstPage ? "md" : "none",
         contents: [
           {
             type: "box",
             layout: "horizontal",
             justifyContent: "space-between",
+            alignItems: "center",
             contents: [
-              { type: "text", text: p.title || "租金帳單", size: "xs", weight: "bold", color: "#1E293B", flex: 1, wrap: true },
-              { type: "text", text: `NT$ ${Number(p.amount || 0).toLocaleString()}`, size: "xs", weight: "bold", color: "#059669", align: "end" }
+              {
+                type: "text",
+                text: `${catIcon} ${title}`,
+                size: "xs",
+                weight: "bold",
+                color: "#1E293B",
+                flex: 1,
+                wrap: true
+              },
+              {
+                type: "text",
+                text: `NT$ ${amtStr}`,
+                size: "sm",
+                weight: "bold",
+                color: "#059669",
+                align: "end"
+              }
             ]
           },
           {
@@ -317,32 +407,99 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
             justifyContent: "space-between",
             margin: "xs",
             contents: [
-              { type: "text", text: `繳納日：${p.paid_date || p.due_date || '無紀錄'}`, size: "xxs", color: "#64748B" },
-              { type: "text", text: p.transfer_last5 ? `末五碼：${p.transfer_last5}` : "✅ 已核銷入帳", size: "xxs", color: "#10B981" }
+              {
+                type: "text",
+                text: `繳納日：${paidDate}`,
+                size: "xxs",
+                color: "#64748B"
+              },
+              {
+                type: "text",
+                text: last5,
+                size: "xxs",
+                color: "#10B981",
+                weight: "bold"
+              }
             ]
           }
         ]
       });
-      if (idx < items.length - 1) {
+
+      if (idx < pageItems.length - 1) {
         bodyContents.push({ type: "separator", margin: "sm" });
       }
     });
-  }
 
-  return {
-    type: "flex",
-    altText: `💰 已繳費紀錄總計：NT$ ${totalPaid.toLocaleString()}`,
-    contents: {
+    // 頁尾
+    const footerContents: any[] = [];
+
+    if (totalPages > 1) {
+      footerContents.push({
+        type: "text",
+        text: isLastPage
+          ? `🎉 已顯示全數 ${sortedPayments.length} 筆已繳紀錄`
+          : `👉 往左滑動檢視更早紀錄 (第 ${pageIndex + 2}/${totalPages} 頁)`,
+        size: "xxs",
+        color: isLastPage ? "#94A3B8" : "#059669",
+        align: "center",
+        margin: "none"
+      });
+    }
+
+    footerContents.push({
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      margin: totalPages > 1 ? "sm" : "none",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#059669",
+          height: "sm",
+          action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" }
+        },
+        {
+          type: "button",
+          style: "secondary",
+          height: "sm",
+          action: { type: "message", label: "📝 回報繳款", text: "回報繳費" }
+        }
+      ]
+    });
+
+    return {
       type: "bubble",
       size: "mega",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#059669",
+        backgroundColor: isFirstPage ? "#059669" : "#0D9488",
         paddingAll: "16px",
         contents: [
-          { type: "text", text: "智慧租屋 · 歷史繳費清單", color: "#A7F3D0", size: "xs", weight: "bold" },
-          { type: "text", text: "已繳款項與電子收據", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
+          {
+            type: "text",
+            text: isFirstPage ? "智慧租屋 · 歷史繳費清單" : "智慧租屋 · 前期繳費存根",
+            color: isFirstPage ? "#A7F3D0" : "#99F6E4",
+            size: "xs",
+            weight: "bold"
+          },
+          {
+            type: "text",
+            text: isFirstPage ? "最新已繳核銷款項" : `歷史繳款存根 (頁 ${pageIndex + 1})`,
+            color: "#FFFFFF",
+            size: "xl",
+            weight: "bold",
+            margin: "xs"
+          },
+          {
+            type: "text",
+            text: `● 顯示第 ${startIdx + 1} ~ ${startIdx + pageItems.length} 筆 · 共 ${sortedPayments.length} 筆 (頁 ${pageIndex + 1}/${totalPages})`,
+            color: isFirstPage ? "#A7F3D0" : "#CCFBF1",
+            size: "xs",
+            weight: "bold",
+            margin: "xs"
+          }
         ]
       },
       body: {
@@ -353,25 +510,35 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
       },
       footer: {
         type: "box",
-        layout: "horizontal",
-        spacing: "sm",
+        layout: "vertical",
         paddingAll: "14px",
-        contents: [
-          {
-            type: "button",
-            style: "primary",
-            color: "#059669",
-            height: "sm",
-            action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" }
-          },
-          {
-            type: "button",
-            style: "secondary",
-            height: "sm",
-            action: { type: "message", label: "📝 回報新繳款", text: "回報繳費" }
-          }
-        ]
+        contents: footerContents
       }
+    };
+  };
+
+  // 若只有 1 頁（<= 4 筆），以單卡呈現
+  if (totalPages <= 1) {
+    return {
+      type: "flex",
+      altText: `💰 已繳費紀錄總計：NT$ ${totalPaid.toLocaleString()} (共 ${sortedPayments.length} 筆)`,
+      contents: buildPageBubble(0)
+    };
+  }
+
+  // 多於 1 頁時，產生左右滑動之 Carousel 輪播卷軸（最多 10 頁）
+  const carouselBubbles = [];
+  const maxPages = Math.min(totalPages, 10);
+  for (let i = 0; i < maxPages; i++) {
+    carouselBubbles.push(buildPageBubble(i));
+  }
+
+  return {
+    type: "flex",
+    altText: `💰 已繳費紀錄總計：NT$ ${totalPaid.toLocaleString()} (共 ${sortedPayments.length} 筆，左右滑動卷軸翻頁)`,
+    contents: {
+      type: "carousel",
+      contents: carouselBubbles
     }
   };
 }
@@ -1163,7 +1330,7 @@ serve(async (req: Request) => {
               .in("lease_id", leaseIds)
               .eq("status", "paid")
               .is("deleted_at", null)
-              .order("paid_date", { ascending: false });
+              .order("created_at", { ascending: false });
             paidPayments = pData || [];
           }
 
