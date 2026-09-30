@@ -182,24 +182,24 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "📍 物業地址", size: "xs", color: "#64748B", width: "75px", flex: 0 },
-              { type: "text", text: property?.address || "詳見合約約定", size: "xs", color: "#1E293B", weight: "bold", wrap: true }
+              { type: "text", text: "📍 物業地址", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: property?.address || "詳見合約約定", size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "🗓️ 租賃期間", size: "xs", color: "#64748B", width: "75px", flex: 0 },
-              { type: "text", text: `${lease.start_date} ~ ${lease.end_date}`, size: "xs", color: "#1E293B", weight: "bold", wrap: true }
+              { type: "text", text: "🗓️ 租賃期間", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${lease.start_date} ~ ${lease.end_date}`, size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "✨ 合約約期", size: "xs", color: "#64748B", width: "75px", flex: 0 },
-              { type: "text", text: `${duration.formatted} (已住 ${daysPassed} 天 · 倒數 ${daysRemaining} 天)`, size: "xs", color: "#D97706", weight: "bold", wrap: true }
+              { type: "text", text: "✨ 合約約期", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${duration.formatted} (已住 ${daysPassed} 天 · 倒數 ${daysRemaining} 天)`, size: "xs", color: "#D97706", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           { type: "separator", margin: "md" },
@@ -232,8 +232,8 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "👤 出租甲方", size: "xs", color: "#64748B", width: "75px", flex: 0 },
-              { type: "text", text: `${bankInfo.landlordName} (${bankInfo.landlordPhone})`, size: "xs", color: "#334155", weight: "bold" }
+              { type: "text", text: "👤 出租甲方", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${bankInfo.landlordName} (${bankInfo.landlordPhone})`, size: "xs", color: "#334155", weight: "bold", flex: 7 }
             ]
           }
         ]
@@ -555,32 +555,32 @@ function buildReportSuccessFlex(payment: any, last5: string) {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "回報項目", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: payment?.title || "租金帳單", size: "xs", color: "#1E293B", weight: "bold", wrap: true }
+              { type: "text", text: "回報項目", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: payment?.title || "租金帳單", size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "回報金額", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: `NT$ ${Number(payment?.amount || 0).toLocaleString()}`, size: "sm", color: "#059669", weight: "bold" }
+              { type: "text", text: "回報金額", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `NT$ ${Number(payment?.amount || 0).toLocaleString()}`, size: "sm", color: "#059669", weight: "bold", flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "轉帳末五碼", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: `●●●●● ${last5}`, size: "xs", color: "#1E293B", weight: "bold" }
+              { type: "text", text: "轉帳末五碼", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `●●●●● ${last5}`, size: "xs", color: "#1E293B", weight: "bold", flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "審核狀態", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: "🔍 房東審核中", size: "xs", color: "#3B82F6", weight: "bold" }
+              { type: "text", text: "審核狀態", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: "🔍 房東審核中", size: "xs", color: "#3B82F6", weight: "bold", flex: 7 }
             ]
           },
           { type: "separator", margin: "md" },
@@ -648,24 +648,24 @@ function buildBankInfoFlex(landlord: any) {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "收款銀行", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: bank.bankName, size: "xs", color: "#0F172A", weight: "bold" }
+              { type: "text", text: "收款銀行", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.bankName, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "銀行帳號", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: bank.bankAccount, size: "sm", color: "#4F46E5", weight: "bold" }
+              { type: "text", text: "銀行帳號", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.bankAccount, size: "sm", color: "#4F46E5", weight: "bold", flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "戶名／房東", size: "xs", color: "#64748B", width: "70px", flex: 0 },
-              { type: "text", text: `${bank.landlordName} (${bank.landlordPhone})`, size: "xs", color: "#0F172A", weight: "bold" }
+              { type: "text", text: "戶名／房東", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${bank.landlordName} (${bank.landlordPhone})`, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
             ]
           },
           { type: "separator", margin: "md" },

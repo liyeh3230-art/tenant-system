@@ -1,0 +1,516 @@
+// Supabase Edge Function: line-push
+// Real-time Push Notification service via LINE Messaging API
+// Sends high-aesthetic Flex Message notices when landlords add bills, utilities, or updates
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+
+const LINE_CHANNEL_ACCESS_TOKEN =
+  Deno.env.get("LINE_CHANNEL_ACCESS_TOKEN") ||
+  "3tRsfe2hSYJvT0Ygrvvu+vbkpgd+CkMbv0335PxTeGq+L7nklrr2/6e2ENGlpwZoHc+LVnmOzgPQPl1KUGr7byBd0PsjoQFhcJ8YastIH29ANr8RSWDR9kz97+6zlhpGIqofGT/lBL41ohwsH1MFDQdB04t89/1O/w1cDnyilFU=";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://hpphlfmtyxrulirpyejp.supabase.co";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+};
+
+// Helper: category info
+function getCategoryMeta(billType: string) {
+  const meta: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+    rent: { label: "房屋租金", icon: "🏠", color: "#4F46E5", bg: "#EEF2FF" },
+    deposit: { label: "押金保證金", icon: "🔒", color: "#0D9488", bg: "#F0FDFA" },
+    utilities: { label: "水電瓦斯代繳", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
+    management: { label: "大樓管理費", icon: "🏢", color: "#2563EB", bg: "#EFF6FF" },
+    other: { label: "其他代繳雜支", icon: "📋", color: "#7C3AED", bg: "#F5F3FF" },
+  };
+  return meta[billType] || meta.other;
+}
+
+// Helper: extract landlord bank info
+function parseLandlordBank(landlord: any) {
+  let bankName = landlord?.bank_name || "";
+  let bankAccount = landlord?.bank_account || "";
+  if ((!bankName || !bankAccount) && landlord?.company_name) {
+    try {
+      const parsed = JSON.parse(landlord.company_name);
+      if (parsed.bankName) bankName = parsed.bankName;
+      if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+    } catch {}
+  }
+  return {
+    bankName: bankName || "請洽詢房東",
+    bankAccount: bankAccount || "請洽詢房東",
+    landlordName: landlord?.name || "房東",
+    landlordPhone: landlord?.phone || ""
+  };
+}
+
+// -----------------------------------------------------------------------------
+// LINE Flex Message Builder: New Bill / Utility Notification
+// -----------------------------------------------------------------------------
+function buildNewBillFlex(params: {
+  payment: any;
+  lease: any;
+  property: any;
+  landlord: any;
+  tenantName: string;
+}) {
+  const { payment, lease, property, landlord, tenantName } = params;
+  const isDirectlyPaid = payment.status === "paid";
+  const cat = getCategoryMeta(payment.bill_type || payment.billType || "utilities");
+  const bank = parseLandlordBank(landlord);
+  const amountStr = Number(payment.amount || 0).toLocaleString();
+  const titleStr = payment.title || cat.label;
+  const dueDateStr = payment.due_date || payment.dueDate || "依約定繳款";
+  const propName = property?.name || lease?.property_name || "承租房源";
+  const noteStr = payment.note ? String(payment.note).trim() : "";
+
+  const headerBgColor = isDirectlyPaid ? "#059669" : "#D97706";
+  const headerSubText = isDirectlyPaid ? "🧾 智慧租屋 · 費用入帳收據憑證" : "🔔 智慧租屋 · 新增待繳帳單通知";
+  const headerTitle = isDirectlyPaid ? "代繳費用已入帳結清" : "新增代繳帳單待繳納";
+  const statusBadge = isDirectlyPaid ? "● 已收訖入帳" : "● 待租客繳納";
+  const statusColor = isDirectlyPaid ? "#A7F3D0" : "#FEF08A";
+
+  const postbackData = `action=select_bill&title=${encodeURIComponent(titleStr)}&amount=${payment.amount || 0}&billId=${payment.id || ""}`;
+
+  const bodyContents: any[] = [
+    // 房源與承租人資訊
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "🏠 承租房源", size: "xs", color: "#64748B", flex: 3 },
+        { type: "text", text: `${propName} (${tenantName})`, size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
+      ]
+    },
+    // 費用項目
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "📋 費用項目", size: "xs", color: "#64748B", flex: 3 },
+        { type: "text", text: `${cat.icon} ${titleStr}`, size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
+      ]
+    },
+    // 應繳金額突出區塊
+    {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: isDirectlyPaid ? "#ECFDF5" : "#FFFBEB",
+      cornerRadius: "14px",
+      paddingAll: "14px",
+      margin: "md",
+      contents: [
+        {
+          type: "box",
+          layout: "horizontal",
+          justifyContent: "space-between",
+          alignItems: "center",
+          contents: [
+            {
+              type: "text",
+              text: isDirectlyPaid ? "已繳金額" : "應繳金額",
+              size: "xs",
+              color: isDirectlyPaid ? "#047857" : "#B45309",
+              weight: "bold"
+            },
+            {
+              type: "text",
+              text: `NT$ ${amountStr}`,
+              size: "xxl",
+              color: isDirectlyPaid ? "#065F46" : "#92400E",
+              weight: "bold",
+              align: "end"
+            }
+          ]
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          justifyContent: "space-between",
+          margin: "sm",
+          contents: [
+            {
+              type: "text",
+              text: isDirectlyPaid ? "入帳日期" : "繳費期限",
+              size: "xxs",
+              color: isDirectlyPaid ? "#059669" : "#B45309"
+            },
+            {
+              type: "text",
+              text: isDirectlyPaid ? (payment.paid_date || dueDateStr) : `${dueDateStr} 前`,
+              size: "xxs",
+              color: isDirectlyPaid ? "#065F46" : "#92400E",
+              weight: "bold"
+            }
+          ]
+        }
+      ]
+    }
+  ];
+
+  // 房東備註說明 (若有填寫)
+  if (noteStr) {
+    bodyContents.push({
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#F8FAFC",
+      cornerRadius: "10px",
+      paddingAll: "10px",
+      margin: "sm",
+      contents: [
+        { type: "text", text: "📝 房東備註：", size: "xxs", color: "#64748B", weight: "bold" },
+        { type: "text", text: noteStr, size: "xs", color: "#334155", wrap: true, margin: "xs" }
+      ]
+    });
+  }
+
+  // 匯款帳號 (若為待繳款)
+  if (!isDirectlyPaid) {
+    bodyContents.push(
+      { type: "separator", margin: "md" },
+      {
+        type: "box",
+        layout: "vertical",
+        margin: "sm",
+        spacing: "xs",
+        contents: [
+          { type: "text", text: "🏦 房東收款帳戶", size: "xxs", color: "#64748B", weight: "bold" },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "銀行：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.bankName, size: "xs", color: "#1E293B", weight: "bold", flex: 7 }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "帳號：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.bankAccount, size: "xs", color: "#4F46E5", weight: "bold", flex: 7 }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "戶名：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.landlordName, size: "xs", color: "#1E293B", flex: 7 }
+            ]
+          }
+        ]
+      }
+    );
+  }
+
+  // Footer 按鈕
+  const footerContents: any[] = [];
+  if (!isDirectlyPaid) {
+    footerContents.push(
+      {
+        type: "button",
+        style: "primary",
+        color: "#4F46E5",
+        height: "sm",
+        action: {
+          type: "postback",
+          label: "📝 匯款完成 · 回報末五碼",
+          data: postbackData,
+          displayText: `回報繳款【${titleStr}】`
+        }
+      },
+      {
+        type: "button",
+        style: "link",
+        height: "sm",
+        action: {
+          type: "message",
+          label: "💬 詢問房東 / 說明",
+          text: `您好，關於剛才新增的帳單【${titleStr}】，我想詢問一些細節。`
+        }
+      }
+    );
+  } else {
+    footerContents.push({
+      type: "button",
+      style: "secondary",
+      color: "#059669",
+      height: "sm",
+      action: {
+        type: "message",
+        label: "🔍 查詢所有已繳紀錄",
+        text: "已繳金額"
+      }
+    });
+  }
+
+  return {
+    type: "flex",
+    altText: `🔔 ${headerTitle}：${titleStr} NT$ ${amountStr}`,
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: headerBgColor,
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "text",
+            text: headerSubText,
+            color: "#FFFFFF",
+            size: "xs",
+            weight: "bold"
+          },
+          {
+            type: "text",
+            text: headerTitle,
+            color: "#FFFFFF",
+            size: "xl",
+            weight: "bold",
+            margin: "xs"
+          },
+          {
+            type: "text",
+            text: statusBadge,
+            color: statusColor,
+            size: "xs",
+            weight: "bold",
+            margin: "xs"
+          }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "sm",
+        contents: bodyContents
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        spacing: "xs",
+        contents: footerContents
+      }
+    }
+  };
+}
+
+// -----------------------------------------------------------------------------
+// LINE Messaging API Push sender
+// -----------------------------------------------------------------------------
+async function pushLineMessage(lineUserId: string, messages: any[]): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
+      to: lineUserId,
+      messages,
+    }),
+  });
+
+  const bodyText = await res.text();
+  return {
+    ok: res.ok,
+    status: res.status,
+    body: bodyText,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Main HTTP Handler
+// -----------------------------------------------------------------------------
+serve(async (req: Request) => {
+  // 1. Handle CORS Preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  if (req.method === "GET") {
+    return new Response(JSON.stringify({ status: "ok", service: "line-push" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  try {
+    const payload = await req.json();
+    const { action = "push_bill", payment, lease, property } = payload;
+
+    if (!payment) {
+      return new Response(
+        JSON.stringify({ error: "Missing required parameter: payment" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // 1. Locate the target lease
+    let targetLease = lease;
+    const leaseId = payment.lease_id || payment.leaseId || lease?.id;
+    if (!targetLease && leaseId) {
+      const { data: lData } = await supabase
+        .from("leases")
+        .select("*")
+        .eq("id", leaseId)
+        .maybeSingle();
+      targetLease = lData;
+    }
+
+    const tenantPhone = targetLease?.phone || payment.tenantPhone;
+    const cleanPhone = tenantPhone ? String(tenantPhone).replace(/[^0-9]/g, "") : "";
+    const tenantName = targetLease?.tenant_name || targetLease?.tenantName || payment.tenant_name || payment.tenantName || "房客";
+
+    // 2. Find tenant profile & LINE binding
+    let lineUserId = "";
+    let targetProfileId = targetLease?.tenant_id;
+
+    if (cleanPhone) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, name, phone")
+        .eq("phone", cleanPhone)
+        .is("deleted_at", null);
+
+      if (profs && profs.length > 0) {
+        targetProfileId = profs[0].id;
+      }
+    }
+
+    if (targetProfileId) {
+      const { data: bindings } = await supabase
+        .from("line_bindings")
+        .select("line_user_id, status")
+        .eq("tenant_id", targetProfileId)
+        .eq("status", "active");
+
+      if (bindings && bindings.length > 0) {
+        // Find binding that is a genuine LINE User ID (starts with 'U' and not 'fb_')
+        const activeBinding = bindings.find((b: any) => b.line_user_id && b.line_user_id.startsWith("U") && !b.line_user_id.startsWith("fb_"));
+        if (activeBinding) {
+          lineUserId = activeBinding.line_user_id;
+        }
+      }
+    }
+
+    // If still not found, check if line_bindings has any entry directly by tenant phone or search
+    if (!lineUserId && cleanPhone) {
+      const { data: allActiveBindings } = await supabase
+        .from("line_bindings")
+        .select("line_user_id, tenant_id")
+        .eq("status", "active")
+        .like("line_user_id", "U%");
+
+      if (allActiveBindings && allActiveBindings.length > 0) {
+        for (const b of allActiveBindings) {
+          const { data: p } = await supabase
+            .from("profiles")
+            .select("phone")
+            .eq("id", b.tenant_id)
+            .maybeSingle();
+          if (p && String(p.phone).replace(/[^0-9]/g, "") === cleanPhone) {
+            lineUserId = b.line_user_id;
+            break;
+          }
+        }
+      }
+    }
+
+    // If tenant has not bound LINE, return notice without error
+    if (!lineUserId) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          pushed: false,
+          reason: "tenant_not_bound",
+          message: `房客「${tenantName}」尚未綁定 LINE 帳號，已略過推播。`,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 3. Locate Property & Landlord
+    let targetProperty = property;
+    if (!targetProperty && targetLease?.property_id) {
+      const { data: pData } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("id", targetLease.property_id)
+        .maybeSingle();
+      targetProperty = pData;
+    }
+
+    let landlord: any = null;
+    const landlordId = targetLease?.landlord_id || targetLease?.landlordId;
+    if (landlordId) {
+      const { data: lnd } = await supabase
+        .from("landlords")
+        .select("*")
+        .eq("id", landlordId)
+        .maybeSingle();
+      landlord = lnd;
+    }
+
+    // 4. Construct Flex Message
+    const flexMessage = buildNewBillFlex({
+      payment,
+      lease: targetLease,
+      property: targetProperty,
+      landlord,
+      tenantName
+    });
+
+    // 5. Send Push Notification via LINE Messaging API
+    const pushResult = await pushLineMessage(lineUserId, [flexMessage]);
+
+    if (!pushResult.ok) {
+      console.error("LINE Push failed:", pushResult.status, pushResult.body);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          pushed: false,
+          error: `LINE Push API Error (${pushResult.status}): ${pushResult.body}`,
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        pushed: true,
+        lineUserId,
+        tenantName,
+        billTitle: payment.title || "代繳帳單",
+        amount: payment.amount,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (err: any) {
+    console.error("line-push execution error:", err);
+    return new Response(
+      JSON.stringify({ success: false, error: err.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+});

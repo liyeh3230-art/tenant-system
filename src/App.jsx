@@ -4024,6 +4024,46 @@ export default function App() {
         if (insertedRows && insertedRows[0]) {
           newPayment.id = insertedRows[0].id;
         }
+
+        // 📲 觸發 LINE Messaging API 主動推播（若租客已綁定 LINE）
+        try {
+          supabase.functions.invoke('line-push', {
+            body: {
+              action: 'push_bill',
+              payment: {
+                id: newPayment.id,
+                lease_id: targetLease.id,
+                amount: amt,
+                bill_type: newPayment.billType,
+                title: newPayment.title,
+                due_date: newPayment.dueDate,
+                status: newPayment.status,
+                paid_date: newPayment.paidDate,
+                note: newPayment.note
+              },
+              lease: {
+                id: targetLease.id,
+                tenantName: targetLease.tenantName,
+                phone: targetLease.phone,
+                landlordId: targetLease.landlordId || currentLandlordId,
+                propertyId: targetLease.propertyId
+              },
+              property: targetProp ? { name: targetProp.name } : null
+            }
+          }).then(({ data: pushRes, error: pushErr }) => {
+            if (pushErr) {
+              console.warn('LINE push notification warning:', pushErr);
+            } else if (pushRes?.pushed) {
+              showToast(`📲 已自動發送 LINE 帳單通知至「${targetLease.tenantName}」的手機！`, 'success');
+            } else if (pushRes?.reason === 'tenant_not_bound') {
+              console.log(`租客「${targetLease.tenantName}」尚未綁定 LINE，已略過推播。`);
+            }
+          }).catch(err => {
+            console.warn('LINE push async call failed:', err);
+          });
+        } catch (pushErr) {
+          console.warn('LINE push invoke notice:', pushErr);
+        }
       }
       setPayments(prev => {
         if (prev.some(p => p.id === newPayment.id)) return prev;
@@ -10543,6 +10583,20 @@ export default function App() {
                         );
                       })}
                     </select>
+                  </div>
+
+                  {/* LINE Bot 自動推播提示卡片 */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/90 text-xs">
+                    <div className="flex items-center space-x-2">
+                      <span className="flex h-2.5 w-2.5 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="font-bold text-emerald-900">📲 LINE 官方機器人推播</span>
+                    </div>
+                    <span className="text-emerald-700 text-xxs font-semibold">
+                      儲存後系統將自動將此帳單 Flex 票卡發送至租客 LINE
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
