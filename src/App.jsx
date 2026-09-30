@@ -6180,6 +6180,13 @@ export default function App() {
 
                               <div className="flex justify-end space-x-2 pt-1 border-t border-slate-100">
                                 <button
+                                  onClick={() => handleDeletePayment(rep.id, rep.title || `${rep.tenantName} 的回報`)}
+                                  className="px-3 py-1.5 text-xs text-slate-500 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 border border-slate-200 rounded-lg font-bold transition-colors"
+                                  title="作廢此筆自報項目"
+                                >
+                                  作廢
+                                </button>
+                                <button
                                   onClick={() => handleRejectPayment(rep.id)}
                                   className="px-3 py-1.5 text-xs text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg font-bold transition-colors"
                                 >
@@ -6549,6 +6556,8 @@ export default function App() {
                                             <Printer size={13} className="mr-1" />
                                             <span>收據</span>
                                           </button>
+                                        ) : pay.status === 'rejected' ? (
+                                          null
                                         ) : (
                                           <>
                                             <button
@@ -6722,6 +6731,14 @@ export default function App() {
                                       作廢
                                     </button>
                                   </>
+                                ) : pay.status === 'rejected' ? (
+                                  <button
+                                    onClick={() => handleDeletePayment(pay.id, pay.title || `${pay.tenantName} 的紀錄`)}
+                                    className="w-full text-xs bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600 py-2 rounded-xl font-bold transition-colors flex items-center justify-center gap-1 border border-slate-200"
+                                    title="作廢此紀錄"
+                                  >
+                                    <Trash2 size={14} /> 作廢
+                                  </button>
                                 ) : (
                                   <>
                                     <button
@@ -7850,6 +7867,7 @@ export default function App() {
                       const unpaidBills = currentTenantPayments.filter(p => p.status === 'pending' || p.status === 'overdue');
                       const pendingApprovalBills = currentTenantPayments.filter(p => p.status === 'pending_approval' || p.status === 'tenant_submitted');
                       const paidBills = currentTenantPayments.filter(p => p.status === 'paid');
+                      const rejectedBills = currentTenantPayments.filter(p => p.status === 'rejected');
                       const voidedBills = currentTenantPayments.filter(p => p.status === 'void');
                       const unpaidTotal = unpaidBills.reduce((acc, b) => acc + (b.amount || 0), 0);
 
@@ -8164,6 +8182,121 @@ export default function App() {
                                         <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 py-2.5 px-4 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
                                           <Clock size={14} className="mr-1.5 text-amber-600" />
                                           <span>已送出繳費回報，等待房東對帳中</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 已駁回繳費回報專區 (Rejected Reports - 僅供查閱，無法更動) */}
+                          {rejectedBills.length > 0 && (
+                            <div className="bg-rose-50/60 rounded-2xl p-4 sm:p-6 border border-rose-200/90 shadow-2xs space-y-4">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-rose-100">
+                                <div className="flex items-center space-x-3">
+                                  <span className="p-2 rounded-xl flex items-center justify-center bg-rose-100 text-rose-700 border border-rose-300">
+                                    <XCircle size={20} />
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h3 className="text-base sm:text-lg font-bold text-slate-800">
+                                        已駁回繳費回報
+                                      </h3>
+                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                        {rejectedBills.length} 筆已駁回
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                      以下款項回報已被房東退回駁回，狀態已鎖定無法再更動。如有款項疑問請向房東洽詢
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <span className="text-xs font-bold text-rose-800 bg-rose-100/80 border border-rose-200 px-3 py-1.5 rounded-xl">
+                                  已駁回存查
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4 mt-4">
+                                {rejectedBills.map(bill => {
+                                  const catInfo = getCategoryInfo(bill.billType);
+                                  const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
+                                  const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
+                                  const propName = currentTenantProperty?.name || bill.propertyName || targetProp?.name || '租賃房間';
+                                  const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
+
+                                  return (
+                                    <div
+                                      key={`rejected-${bill.id}`}
+                                      className="bg-white/95 border-2 border-rose-200/90 rounded-xl p-4 sm:p-5 flex flex-col justify-between space-y-3.5 shadow-2xs"
+                                    >
+                                      <div className="space-y-2">
+                                        <div className="flex justify-between items-start gap-2">
+                                          <div className="space-y-1">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
+                                                <span>{catInfo.icon}</span>
+                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                              </span>
+                                              {bill.creatorRole === 'tenant' && (
+                                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                                                  租客自報
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="text-2xl sm:text-3xl font-black text-rose-900 tracking-tight pt-0.5 font-mono line-through opacity-85">
+                                              NT$ {bill.amount.toLocaleString()}
+                                            </div>
+                                          </div>
+                                          <StatusBadge status="rejected" />
+                                        </div>
+
+                                        <div className="text-xs text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1.5 pt-2.5 border-t border-rose-100 font-medium">
+                                          <div className="flex items-center gap-1">
+                                            <Building size={13} className="text-slate-400" />
+                                            <span>房源：</span>
+                                            <span className="text-slate-700 font-semibold truncate max-w-[140px]">
+                                              {propName}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1">
+                                            <User size={13} className="text-slate-400" />
+                                            <span>房東：</span>
+                                            <span className="text-slate-700 font-semibold">
+                                              {landlordName}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1">
+                                            <Calendar size={13} className="text-slate-400" />
+                                            <span>回報日期：</span>
+                                            <span className="font-semibold text-slate-700">
+                                              {bill.paidDate || bill.dueDate}
+                                            </span>
+                                          </div>
+                                          {bill.transferLast5 && (
+                                            <div className="flex items-center gap-1 font-bold text-amber-800">
+                                              <CreditCard size={13} className="text-amber-600" />
+                                              <span>原報末5碼：</span>
+                                              <span className="font-mono bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                                {bill.transferLast5}
+                                              </span>
+                                            </div>
+                                          )}
+                                          {bill.note && (
+                                            <div className="w-full text-slate-500 truncate pt-0.5">
+                                              <span className="text-slate-400">備註：</span>
+                                              <span className="text-slate-700">{bill.note}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="pt-2 border-t border-rose-100">
+                                        <div className="w-full bg-rose-50 border border-rose-200 text-rose-700 py-2.5 px-4 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
+                                          <XCircle size={14} className="mr-1.5 text-rose-500 shrink-0" />
+                                          <span>此筆自報繳款已被房東駁回，已鎖定無法更動</span>
                                         </div>
                                       </div>
                                     </div>
