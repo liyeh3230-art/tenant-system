@@ -134,6 +134,9 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
   const daysRemaining = Math.max(0, Math.round((dEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
   const isExpired = today > dEnd;
   const bankInfo = parseLandlordBank(landlord);
+  const totalContractRent = (lease.total_contract_rent && Number(lease.total_contract_rent) > 0)
+    ? Number(lease.total_contract_rent)
+    : (Number(lease.monthly_rent || 0) * (duration.months > 0 ? duration.months : 1));
 
   return {
     type: "flex",
@@ -212,8 +215,8 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
                 layout: "vertical",
                 flex: 1,
                 contents: [
-                  { type: "text", text: "約定每月租金", size: "xxs", color: "#64748B" },
-                  { type: "text", text: `NT$ ${Number(lease.monthly_rent || 0).toLocaleString()}`, size: "sm", weight: "bold", color: "#4F46E5" }
+                  { type: "text", text: "合約總租金", size: "xxs", color: "#64748B" },
+                  { type: "text", text: `NT$ ${totalContractRent.toLocaleString()}`, size: "sm", weight: "bold", color: "#4F46E5" }
                 ]
               },
               {
