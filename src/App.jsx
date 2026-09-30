@@ -156,6 +156,7 @@ export default function App() {
   const [filterPaymentMonth, setFilterPaymentMonth] = useState('all');
   const [filterPaymentProperty, setFilterPaymentProperty] = useState('all');
   const [filterPaymentCategory, setFilterPaymentCategory] = useState('all');
+  const [filterTenantPaymentStatus, setFilterTenantPaymentStatus] = useState('all');
 
   const [activeModal, setActiveModal] = useState(null);
   const [photoModalProperty, setPhotoModalProperty] = useState(null);
@@ -7953,528 +7954,460 @@ export default function App() {
                             </button>
                           </div>
 
-                          {/* 1. 【置頂簡約 RWD】待繳納帳單專區 (柔和暖色醒目底色) */}
-                          <div className="bg-gradient-to-br from-amber-50/50 via-orange-50/25 to-amber-50/40 rounded-2xl p-4 sm:p-6 border border-amber-200/80 shadow-xs">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-amber-100/90">
-                              <div className="flex items-center space-x-3">
-                                <span className={`p-2 rounded-xl flex items-center justify-center ${unpaidBills.length > 0 ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                                  }`}>
-                                  {unpaidBills.length > 0 ? <AlertCircle size={20} /> : <CheckCircle size={20} />}
-                                </span>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="text-base sm:text-lg font-bold text-slate-800">
-                                      {unpaidBills.length > 0 ? '當前待繳納帳單' : '帳單繳納狀態良好'}
-                                    </h3>
-                                    {unpaidBills.length > 0 && (
-                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                        {unpaidBills.length} 筆待繳
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                                    {unpaidBills.length > 0
-                                      ? '請於到期日前完成繳款，支援線上繳費與轉帳回報'
-                                      : '目前無任何待繳帳單，所有款項皆已結清'}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {unpaidBills.length > 0 && (
-                                <div className="bg-white border border-amber-200/90 px-3.5 py-1.5 rounded-xl w-full sm:w-auto flex sm:flex-col justify-between sm:justify-center items-center sm:items-end shadow-2xs">
-                                  <span className="text-[11px] text-amber-700/80 font-semibold">待繳總額</span>
-                                  <span className="text-lg sm:text-xl font-black text-amber-950 font-mono">
-                                    NT$ {unpaidTotal.toLocaleString()}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-
-                            {unpaidBills.length === 0 ? (
-                              <div className="bg-white/80 rounded-xl p-5 text-center border border-emerald-100 text-emerald-700 font-medium text-xs sm:text-sm flex items-center justify-center space-x-2 mt-4">
-                                <CheckCircle size={16} className="text-emerald-500" />
-                                <span>目前無待繳費用，所有款項皆已結清！</span>
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4 mt-4">
-                                {unpaidBills.map(bill => {
-                                  const catInfo = getCategoryInfo(bill.billType);
-                                  const isOverdue = bill.status === 'overdue';
-                                  return (
-                                    <div
-                                      key={`unpaid-${bill.id}`}
-                                      className="bg-white hover:bg-amber-50/20 border-2 border-amber-200/90 hover:border-amber-400 rounded-xl p-4 sm:p-5 flex flex-col justify-between transition-all space-y-3.5 shadow-2xs hover:shadow-xs"
-                                    >
-                                      <div className="space-y-2">
-                                        <div className="flex justify-between items-start gap-2">
-                                          <div className="space-y-1">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
-                                                <span>{catInfo.icon}</span>
-                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                              </span>
-                                              {isOverdue && (
-                                                <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                                                  已逾期
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight pt-0.5 font-mono">
-                                              NT$ {bill.amount.toLocaleString()}
-                                            </div>
-                                          </div>
-                                          <StatusBadge status={bill.status} />
-                                        </div>
-
-                                        <div className="text-xs text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1.5 pt-2.5 border-t border-amber-100 font-medium">
-                                          <div className="flex items-center gap-1">
-                                            <Building size={13} className="text-slate-400" />
-                                            <span>房源：</span>
-                                            <span className="text-slate-700 font-semibold truncate max-w-[140px]">
-                                              {currentTenantProperty?.name || bill.propertyName || '租賃房間'}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <User size={13} className="text-slate-400" />
-                                            <span>房東：</span>
-                                            <span className="text-slate-700 font-semibold">
-                                              {landlords.find(l => l.id === currentTenantProperty?.landlordId)?.name || '房東'}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <Calendar size={13} className="text-slate-400" />
-                                            <span>期限：</span>
-                                            <span className={`font-semibold ${isOverdue ? 'text-rose-600' : 'text-slate-700'}`}>
-                                              {bill.dueDate}
-                                            </span>
-                                          </div>
-                                          {bill.note && (
-                                            <div className="w-full text-slate-500 truncate pt-0.5">
-                                              <span className="text-slate-400">備註：</span>
-                                              <span className="text-slate-700">{bill.note}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="pt-2 border-t border-slate-100">
-                                        <button
-                                          onClick={() => handleOpenTenantReportPayment(bill)}
-                                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
-                                        >
-                                          <Send size={15} />
-                                          <span>回報已繳費用</span>
-                                        </button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* 2. 待審核專區 (Pending Approvals) */}
-                          {pendingApprovalBills.length > 0 && (
-                            <div className="bg-gradient-to-br from-indigo-50/50 via-slate-50/25 to-indigo-50/40 rounded-2xl p-4 sm:p-6 border border-indigo-200/80 shadow-xs">
-                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-indigo-100/90">
-                                <div className="flex items-center space-x-3">
-                                  <span className="p-2 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-700 border border-indigo-300">
-                                    <Clock size={20} />
-                                  </span>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <h3 className="text-base sm:text-lg font-bold text-slate-800">
-                                        已提交繳費回報
-                                      </h3>
-                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                        {pendingApprovalBills.length} 筆待審核
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
-                                      房東核帳後將自動開立電子收據，並自尚餘租金中扣減
-                                    </p>
-                                  </div>
-                                </div>
-
-                                <div className="bg-white border border-indigo-200/90 px-3.5 py-1.5 rounded-xl w-full sm:w-auto flex sm:flex-col justify-between sm:justify-center items-center sm:items-end shadow-2xs">
-                                  <span className="text-[11px] text-indigo-700/80 font-semibold">待核總額</span>
-                                  <span className="text-lg sm:text-xl font-black text-indigo-950 font-mono">
-                                    NT$ {pendingApprovalBills.reduce((acc, b) => acc + (b.amount || 0), 0).toLocaleString()}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4 mt-4">
-                                {pendingApprovalBills.map(bill => {
-                                  const catInfo = getCategoryInfo(bill.billType);
-                                  const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
-                                  const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
-                                  const propName = currentTenantProperty?.name || bill.propertyName || targetProp?.name || '租賃房間';
-                                  const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
-
-                                  return (
-                                    <div
-                                      key={`pending-${bill.id}`}
-                                      className="bg-white hover:bg-indigo-50/20 border-2 border-indigo-200/90 hover:border-indigo-300 rounded-xl p-4 sm:p-5 flex flex-col justify-between transition-all space-y-3.5 shadow-2xs hover:shadow-xs"
-                                    >
-                                      <div className="space-y-2">
-                                        <div className="flex justify-between items-start gap-2">
-                                          <div className="space-y-1">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
-                                                <span>{catInfo.icon}</span>
-                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                              </span>
-                                              {bill.creatorRole === 'tenant' && (
-                                                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                                  租客自報
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight pt-0.5 font-mono">
-                                              NT$ {bill.amount.toLocaleString()}
-                                            </div>
-                                          </div>
-                                          <StatusBadge status={bill.status} />
-                                        </div>
-
-                                        <div className="text-xs text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1.5 pt-2.5 border-t border-indigo-100 font-medium">
-                                          <div className="flex items-center gap-1">
-                                            <Building size={13} className="text-slate-400" />
-                                            <span>房源：</span>
-                                            <span className="text-slate-700 font-semibold truncate max-w-[140px]">
-                                              {propName}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <User size={13} className="text-slate-400" />
-                                            <span>房東：</span>
-                                            <span className="text-slate-700 font-semibold">
-                                              {landlordName}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <Calendar size={13} className="text-slate-400" />
-                                            <span>期限：</span>
-                                            <span className="font-semibold text-slate-700">
-                                              {bill.dueDate}
-                                            </span>
-                                          </div>
-                                          {bill.transferLast5 && (
-                                            <div className="flex items-center gap-1 font-bold text-amber-800">
-                                              <CreditCard size={13} className="text-amber-600" />
-                                              <span>匯款末5碼：</span>
-                                              <span className="font-mono bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
-                                                {bill.transferLast5}
-                                              </span>
-                                            </div>
-                                          )}
-                                          {bill.note && (
-                                            <div className="w-full text-slate-500 truncate pt-0.5">
-                                              <span className="text-slate-400">備註：</span>
-                                              <span className="text-slate-700">{bill.note}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="pt-2 border-t border-slate-100">
-                                        <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 py-2.5 px-4 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
-                                          <Clock size={14} className="mr-1.5 text-amber-600" />
-                                          <span>已送出繳費回報，等待房東對帳中</span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 已駁回繳費回報專區 (Rejected Reports - 僅供查閱，無法更動) */}
-                          {rejectedBills.length > 0 && (
-                            <div className="bg-rose-50/60 rounded-2xl p-4 sm:p-6 border border-rose-200/90 shadow-2xs space-y-4">
-                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-rose-100">
-                                <div className="flex items-center space-x-3">
-                                  <span className="p-2 rounded-xl flex items-center justify-center bg-rose-100 text-rose-700 border border-rose-300">
-                                    <XCircle size={20} />
-                                  </span>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <h3 className="text-base sm:text-lg font-bold text-slate-800">
-                                        已駁回繳費回報
-                                      </h3>
-                                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                        {rejectedBills.length} 筆已駁回
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
-                                      以下款項回報已被房東退回駁回，狀態已鎖定無法再更動。如有款項疑問請向房東洽詢
-                                    </p>
-                                  </div>
-                                </div>
-
-                                <span className="text-xs font-bold text-rose-800 bg-rose-100/80 border border-rose-200 px-3 py-1.5 rounded-xl">
-                                  已駁回存查
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4 mt-4">
-                                {rejectedBills.map(bill => {
-                                  const catInfo = getCategoryInfo(bill.billType);
-                                  const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
-                                  const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
-                                  const propName = currentTenantProperty?.name || bill.propertyName || targetProp?.name || '租賃房間';
-                                  const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
-
-                                  return (
-                                    <div
-                                      key={`rejected-${bill.id}`}
-                                      className="bg-white/95 border-2 border-rose-200/90 rounded-xl p-4 sm:p-5 flex flex-col justify-between space-y-3.5 shadow-2xs"
-                                    >
-                                      <div className="space-y-2">
-                                        <div className="flex justify-between items-start gap-2">
-                                          <div className="space-y-1">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
-                                                <span>{catInfo.icon}</span>
-                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                              </span>
-                                              {bill.creatorRole === 'tenant' && (
-                                                <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
-                                                  租客自報
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="text-2xl sm:text-3xl font-black text-rose-900 tracking-tight pt-0.5 font-mono line-through opacity-85">
-                                              NT$ {bill.amount.toLocaleString()}
-                                            </div>
-                                          </div>
-                                          <StatusBadge status="rejected" />
-                                        </div>
-
-                                        <div className="text-xs text-slate-500 flex flex-wrap justify-between gap-x-4 gap-y-1.5 pt-2.5 border-t border-rose-100 font-medium">
-                                          <div className="flex items-center gap-1">
-                                            <Building size={13} className="text-slate-400" />
-                                            <span>房源：</span>
-                                            <span className="text-slate-700 font-semibold truncate max-w-[140px]">
-                                              {propName}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <User size={13} className="text-slate-400" />
-                                            <span>房東：</span>
-                                            <span className="text-slate-700 font-semibold">
-                                              {landlordName}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-1">
-                                            <Calendar size={13} className="text-slate-400" />
-                                            <span>回報日期：</span>
-                                            <span className="font-semibold text-slate-700">
-                                              {bill.paidDate || bill.dueDate}
-                                            </span>
-                                          </div>
-                                          {bill.transferLast5 && (
-                                            <div className="flex items-center gap-1 font-bold text-amber-800">
-                                              <CreditCard size={13} className="text-amber-600" />
-                                              <span>原報末5碼：</span>
-                                              <span className="font-mono bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                                {bill.transferLast5}
-                                              </span>
-                                            </div>
-                                          )}
-                                          {bill.note && (
-                                            <div className="w-full text-slate-500 truncate pt-0.5">
-                                              <span className="text-slate-400">備註：</span>
-                                              <span className="text-slate-700">{bill.note}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="pt-2 border-t border-rose-100">
-                                        <div className="w-full bg-rose-50 border border-rose-200 text-rose-700 py-2.5 px-4 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
-                                          <XCircle size={14} className="mr-1.5 text-rose-500 shrink-0" />
-                                          <span>此筆自報繳款已被房東駁回，已鎖定無法更動</span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 3. 歷史已繳納紀錄與電子收據 (Paid Bills & Receipts - Table View Matching Landlord Format) */}
-                          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6">
-                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                          {/* 繳納狀態與電子收據明細 (Unified Tenant Payments Ledger & Receipts) */}
+                          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6 space-y-5">
+                            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                               <div>
-                                <h3 className="text-base sm:text-lg font-bold text-slate-800">已繳納明細與電子收據</h3>
+                                <h3 className="text-base sm:text-lg font-bold text-slate-800">繳納狀態與電子收據明細</h3>
                                 <p className="text-xs sm:text-sm text-slate-500 font-medium">
-                                  查看已結清之各項費用紀錄、入帳日期與開立之電子繳費收據
+                                  查看各項費用之繳納狀態（代繳納、待審核、已付款、已駁回）與開立之電子繳費收據
                                 </p>
                               </div>
-                              <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-                                共 {paidBills.length} 筆已結清
-                              </span>
+
+                              {/* Filter Pills */}
+                              <div className="flex flex-wrap gap-1.5 w-full lg:w-auto">
+                                <button
+                                  onClick={() => setFilterTenantPaymentStatus('all')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                    filterTenantPaymentStatus === 'all'
+                                      ? 'bg-indigo-600 text-white shadow-xs'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  全部 ({currentTenantPayments.filter(p => p.status !== 'void').length})
+                                </button>
+                                <button
+                                  onClick={() => setFilterTenantPaymentStatus('pending')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                    filterTenantPaymentStatus === 'pending'
+                                      ? 'bg-blue-600 text-white shadow-xs'
+                                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                  }`}
+                                >
+                                  代繳納 ({unpaidBills.length})
+                                </button>
+                                <button
+                                  onClick={() => setFilterTenantPaymentStatus('pending_approval')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                    filterTenantPaymentStatus === 'pending_approval'
+                                      ? 'bg-amber-600 text-white shadow-xs'
+                                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300'
+                                  }`}
+                                >
+                                  待審核 ({pendingApprovalBills.length})
+                                </button>
+                                <button
+                                  onClick={() => setFilterTenantPaymentStatus('paid')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                    filterTenantPaymentStatus === 'paid'
+                                      ? 'bg-emerald-600 text-white shadow-xs'
+                                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                                  }`}
+                                >
+                                  已付款 ({paidBills.length})
+                                </button>
+                                <button
+                                  onClick={() => setFilterTenantPaymentStatus('rejected')}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                    filterTenantPaymentStatus === 'rejected'
+                                      ? 'bg-rose-600 text-white shadow-xs'
+                                      : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                                  }`}
+                                >
+                                  已駁回 ({rejectedBills.length})
+                                </button>
+                                {voidedBills.length > 0 && (
+                                  <button
+                                    onClick={() => setFilterTenantPaymentStatus('void')}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                                      filterTenantPaymentStatus === 'void'
+                                        ? 'bg-slate-700 text-white shadow-xs'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'
+                                    }`}
+                                  >
+                                    已作廢 ({voidedBills.length})
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
-                            {/* Desktop Table View */}
-                            <div className="hidden md:block overflow-x-auto">
-                              <table className="w-full text-left text-sm">
-                                <thead>
-                                  <tr className="text-slate-500 border-b border-slate-100 text-xs bg-slate-50/50">
-                                    <th className="py-3 px-4 font-semibold rounded-l-xl">項目編號 / 類別</th>
-                                    <th className="py-3 px-4 font-semibold">承租房源 / 房東</th>
-                                    <th className="py-3 px-4 font-semibold">繳納金額</th>
-                                    <th className="py-3 px-4 font-semibold">入帳日期</th>
-                                    <th className="py-3 px-4 font-semibold">狀態與管道</th>
-                                    <th className="py-3 px-4 font-semibold text-right rounded-r-xl">操作動作</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50 text-slate-600">
-                                  {paidBills.length === 0 ? (
-                                    <tr>
-                                      <td colSpan="6" className="py-12 text-center text-slate-400">
-                                        <div className="max-w-xs mx-auto space-y-2">
-                                          <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
-                                            <Receipt size={24} />
-                                          </div>
-                                          <p className="font-semibold text-slate-600">尚無已完成繳費的歷史紀錄</p>
-                                          <p className="text-xs text-slate-400">待繳款項結清並由房東入帳後將顯示於此處</p>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ) : (
-                                    paidBills.map(bill => {
-                                      const catInfo = getCategoryInfo(bill.billType);
-                                      return (
-                                        <tr key={`paid-row-${bill.id}`} className="hover:bg-slate-50/80 transition-colors">
-                                          <td className="py-3.5 px-4">
-                                            <div className="space-y-1">
-                                              <span className="text-slate-500 font-mono text-xs block">{bill.id.split('_')[0]}</span>
-                                              <span className={`inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
-                                                <span>{catInfo.icon}</span>
-                                                <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                              </span>
-                                            </div>
-                                          </td>
-                                          <td className="py-3.5 px-4">
-                                            <div>
-                                              <span className="text-slate-800 font-bold block">{currentTenantProperty?.name || bill.propertyName || '租賃房間'}</span>
-                                              <span className="text-xs text-slate-500 font-medium">
-                                                房東：{landlords.find(l => l.id === currentTenantProperty?.landlordId)?.name || '房東'}
-                                              </span>
-                                            </div>
-                                          </td>
-                                          <td className="py-3.5 px-4">
-                                            <span className="text-slate-900 font-extrabold text-base">
-                                              NT$ {bill.amount.toLocaleString()}
-                                            </span>
-                                          </td>
-                                          <td className="py-3.5 px-4">
-                                            <div>
-                                              <span className="text-slate-700 font-semibold text-xs block">{bill.paidDate || bill.dueDate}</span>
-                                              <span className="text-[10px] text-emerald-600 font-bold">已入帳結清</span>
-                                            </div>
-                                          </td>
-                                          <td className="py-3.5 px-4">
-                                            <div className="space-y-1">
-                                              <StatusBadge status={bill.status} />
-                                              <div className="text-[11px] text-slate-500">
-                                                <span>{formatPaymentMethod(bill.paymentMethod)}</span>
+                            {(() => {
+                              const displayedTenantBills = currentTenantPayments.filter(bill => {
+                                if (filterTenantPaymentStatus === 'all') return bill.status !== 'void';
+                                if (filterTenantPaymentStatus === 'pending') return bill.status === 'pending' || bill.status === 'overdue';
+                                if (filterTenantPaymentStatus === 'pending_approval') return bill.status === 'pending_approval' || bill.status === 'tenant_submitted';
+                                if (filterTenantPaymentStatus === 'paid') return bill.status === 'paid';
+                                if (filterTenantPaymentStatus === 'rejected') return bill.status === 'rejected';
+                                if (filterTenantPaymentStatus === 'void') return bill.status === 'void';
+                                return true;
+                              });
+
+                              const sortedTenantBills = [...displayedTenantBills].sort((a, b) => {
+                                const priority = {
+                                  overdue: 1,
+                                  pending: 2,
+                                  pending_approval: 3,
+                                  tenant_submitted: 3,
+                                  rejected: 4,
+                                  paid: 5,
+                                  void: 6
+                                };
+                                const priDiff = (priority[a.status] || 99) - (priority[b.status] || 99);
+                                if (priDiff !== 0) return priDiff;
+                                return new Date(b.dueDate || b.paidDate || 0) - new Date(a.dueDate || a.paidDate || 0);
+                              });
+
+                              const renderStatusBadge = (status) => {
+                                if (status === 'rejected') {
+                                  return (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border bg-rose-50 text-rose-700 border-rose-200">
+                                      已駁回
+                                    </span>
+                                  );
+                                }
+                                if (status === 'pending_approval' || status === 'tenant_submitted') {
+                                  return (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border bg-amber-50 text-amber-800 border-amber-300">
+                                      待審核
+                                    </span>
+                                  );
+                                }
+                                if (status === 'pending' || status === 'overdue') {
+                                  return (
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                                      status === 'overdue'
+                                        ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                                    }`}>
+                                      代繳納{status === 'overdue' ? ' (已逾期)' : ''}
+                                    </span>
+                                  );
+                                }
+                                if (status === 'paid') {
+                                  return (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200">
+                                      已付款
+                                    </span>
+                                  );
+                                }
+                                if (status === 'void' || status === 'voided') {
+                                  return (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border bg-slate-100 text-slate-600 border-slate-300 font-bold">
+                                      已作廢
+                                    </span>
+                                  );
+                                }
+                                return <StatusBadge status={status} />;
+                              };
+
+                              return (
+                                <>
+                                  {/* Desktop Table View */}
+                                  <div className="hidden md:block overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                      <thead>
+                                        <tr className="text-slate-500 border-b border-slate-100 text-xs bg-slate-50/50">
+                                          <th className="py-3 px-4 font-semibold rounded-l-xl">項目編號 / 類別</th>
+                                          <th className="py-3 px-4 font-semibold">承租房源 / 房東</th>
+                                          <th className="py-3 px-4 font-semibold">應繳 / 實繳金額</th>
+                                          <th className="py-3 px-4 font-semibold">日期 / 期限</th>
+                                          <th className="py-3 px-4 font-semibold">狀態與管道</th>
+                                          <th className="py-3 px-4 font-semibold text-right rounded-r-xl">操作動作</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-50 text-slate-600">
+                                        {sortedTenantBills.length === 0 ? (
+                                          <tr>
+                                            <td colSpan="6" className="py-12 text-center text-slate-400">
+                                              <div className="max-w-xs mx-auto space-y-2">
+                                                <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                                                  <Receipt size={24} />
+                                                </div>
+                                                <p className="font-semibold text-slate-600">此篩選條件下無任何費用紀錄</p>
+                                                <p className="text-xs text-slate-400">若有新帳單開立或繳費回報將即時顯示於此處</p>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        ) : (
+                                          sortedTenantBills.map(bill => {
+                                            const catInfo = getCategoryInfo(bill.billType);
+                                            const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
+                                            const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
+                                            const propName = currentTenantProperty?.name || bill.propertyName || targetProp?.name || '租賃房間';
+                                            const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
+
+                                            return (
+                                              <tr key={`tenant-bill-row-${bill.id}`} className="hover:bg-slate-50/80 transition-colors">
+                                                <td className="py-3.5 px-4">
+                                                  <div className="space-y-1">
+                                                    <span className="text-slate-500 font-mono text-xs block">{bill.id.split('_')[0]}</span>
+                                                    <span className={`inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
+                                                      <span>{catInfo.icon}</span>
+                                                      <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                                    </span>
+                                                  </div>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                  <div>
+                                                    <span className="text-slate-800 font-bold block">{propName}</span>
+                                                    <span className="text-xs text-slate-500 font-medium">
+                                                      房東：{landlordName}
+                                                    </span>
+                                                  </div>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                  <div>
+                                                    <span className={`font-extrabold text-base ${
+                                                      bill.status === 'rejected' || bill.status === 'void'
+                                                        ? 'line-through text-slate-400'
+                                                        : bill.status === 'overdue'
+                                                          ? 'text-rose-700'
+                                                          : 'text-slate-900'
+                                                    }`}>
+                                                      NT$ {bill.amount.toLocaleString()}
+                                                    </span>
+                                                    {bill.creatorRole === 'tenant' && (
+                                                      <span className="block text-[10px] text-amber-700 font-bold">
+                                                        租客自報
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                  <div>
+                                                    <span className="text-slate-700 font-semibold text-xs block">
+                                                      {bill.paidDate || bill.dueDate}
+                                                    </span>
+                                                    {bill.status === 'paid' ? (
+                                                      <span className="text-[10px] text-emerald-600 font-bold">已入帳結清</span>
+                                                    ) : (bill.status === 'pending_approval' || bill.status === 'tenant_submitted') ? (
+                                                      <span className="text-[10px] text-amber-700 font-bold">回報待查核</span>
+                                                    ) : bill.status === 'rejected' ? (
+                                                      <span className="text-[10px] text-rose-600 font-bold">已被駁回</span>
+                                                    ) : bill.status === 'overdue' ? (
+                                                      <span className="text-[10px] text-rose-600 font-bold">繳費已逾期</span>
+                                                    ) : bill.status === 'void' ? (
+                                                      <span className="text-[10px] text-slate-400 font-semibold">已作廢</span>
+                                                    ) : (
+                                                      <span className="text-[10px] text-blue-600 font-bold">繳費期限</span>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td className="py-3.5 px-4">
+                                                  <div className="space-y-1">
+                                                    {renderStatusBadge(bill.status)}
+                                                    <div className="text-[11px] text-slate-500">
+                                                      {bill.status === 'paid' ? (
+                                                        <>
+                                                          <span>{formatPaymentMethod(bill.paymentMethod)}</span>
+                                                          {bill.transferLast5 && (
+                                                            <span className="block font-bold text-amber-700">
+                                                              末5碼: {bill.transferLast5}
+                                                            </span>
+                                                          )}
+                                                        </>
+                                                      ) : (bill.status === 'pending_approval' || bill.status === 'tenant_submitted') ? (
+                                                        <>
+                                                          <span>{formatPaymentMethod(bill.paymentMethod) || '線上回報'}</span>
+                                                          {bill.transferLast5 && (
+                                                            <span className="block font-bold text-amber-800">
+                                                              末5碼: {bill.transferLast5}
+                                                            </span>
+                                                          )}
+                                                        </>
+                                                      ) : bill.status === 'rejected' ? (
+                                                        <>
+                                                          <span className="text-rose-600 font-semibold">已駁回</span>
+                                                          {bill.transferLast5 && (
+                                                            <span className="block font-bold text-amber-800">
+                                                              原報末5碼: {bill.transferLast5}
+                                                            </span>
+                                                          )}
+                                                        </>
+                                                      ) : bill.status === 'void' ? (
+                                                        <span className="text-slate-400">已作廢存查</span>
+                                                      ) : (
+                                                        <span className="text-slate-400">尚未繳納</span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </td>
+                                                <td className="py-3.5 px-4 text-right">
+                                                  {bill.status === 'paid' ? (
+                                                    <button
+                                                      onClick={() => handleOpenReceipt(bill)}
+                                                      className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-lg transition-colors inline-flex items-center shadow-2xs"
+                                                    >
+                                                      <Printer size={13} className="mr-1" />
+                                                      <span>電子收據</span>
+                                                    </button>
+                                                  ) : (bill.status === 'pending' || bill.status === 'overdue') ? (
+                                                    <button
+                                                      onClick={() => handleOpenTenantReportPayment(bill)}
+                                                      className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1 shadow-2xs"
+                                                    >
+                                                      <Send size={13} />
+                                                      <span>回報繳款</span>
+                                                    </button>
+                                                  ) : (bill.status === 'pending_approval' || bill.status === 'tenant_submitted') ? (
+                                                    <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 font-bold px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1">
+                                                      <Clock size={13} className="text-amber-600" />
+                                                      <span>待審核</span>
+                                                    </span>
+                                                  ) : bill.status === 'rejected' ? (
+                                                    <span className="text-xs text-rose-700 bg-rose-50 border border-rose-200 font-bold px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1">
+                                                      <XCircle size={13} className="text-rose-500 shrink-0" />
+                                                      <span>已駁回鎖定</span>
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-xs text-slate-400 bg-slate-100 border border-slate-200 font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1">
+                                                      <XCircle size={13} />
+                                                      <span>已作廢存查</span>
+                                                    </span>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  {/* Mobile Responsive Cards View */}
+                                  <div className="md:hidden space-y-3">
+                                    {sortedTenantBills.length === 0 ? (
+                                      <div className="py-8 text-center text-slate-400 text-sm">此篩選條件下無任何費用紀錄</div>
+                                    ) : (
+                                      sortedTenantBills.map(bill => {
+                                        const catInfo = getCategoryInfo(bill.billType);
+                                        const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
+                                        const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
+                                        const propName = targetProp?.name || bill.propertyName || '租賃房間';
+                                        const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
+
+                                        return (
+                                          <div key={`m-tenant-bill-${bill.id}`} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3 shadow-2xs">
+                                            <div className="flex justify-between items-start gap-2">
+                                              <div className="space-y-1">
+                                                <span className="text-[10px] text-slate-400 font-mono block">{bill.id.split('_')[0]}</span>
+                                                <h4 className="font-bold text-slate-800 text-base">{propName}</h4>
+                                                <div className="text-xs text-slate-600 font-medium flex items-center gap-1">
+                                                  <User size={13} className="text-slate-400" />
+                                                  <span>房東：{landlordName}</span>
+                                                </div>
+                                                <div className="pt-0.5 flex items-center gap-1.5 flex-wrap">
+                                                  <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
+                                                    <span>{catInfo.icon}</span>
+                                                    <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                                  </span>
+                                                  {bill.creatorRole === 'tenant' && (
+                                                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                                      租客自報
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                              <div>
+                                                {renderStatusBadge(bill.status)}
                                               </div>
                                             </div>
-                                          </td>
-                                          <td className="py-3.5 px-4 text-right">
-                                            <button
-                                              onClick={() => handleOpenReceipt(bill)}
-                                              className="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3.5 py-1.5 rounded-lg transition-colors inline-flex items-center shadow-2xs"
-                                            >
-                                              <Printer size={13} className="mr-1" />
-                                              <span>電子收據</span>
-                                            </button>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
 
-                            {/* Mobile Responsive Cards */}
-                            <div className="md:hidden space-y-3">
-                              {paidBills.length === 0 ? (
-                                <div className="py-8 text-center text-slate-400 text-sm">尚無已完成繳費的歷史紀錄</div>
-                              ) : (
-                                paidBills.map(bill => {
-                                  const catInfo = getCategoryInfo(bill.billType);
-                                  const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
-                                  const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
-                                  const propName = targetProp?.name || bill.propertyName || '租賃房間';
-                                  const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
+                                            <div className="text-xs text-slate-600 space-y-1.5 pt-2 border-t border-slate-200/60 bg-white p-3 rounded-xl border">
+                                              <div className="flex justify-between items-center">
+                                                <span className="text-slate-500 font-medium">
+                                                  {bill.status === 'paid' ? '實繳金額' : '應繳金額'}
+                                                </span>
+                                                <span className={`font-bold text-sm font-mono ${
+                                                  bill.status === 'rejected' || bill.status === 'void'
+                                                    ? 'line-through text-slate-400'
+                                                    : bill.status === 'overdue'
+                                                      ? 'text-rose-700'
+                                                      : 'text-slate-900'
+                                                }`}>
+                                                  NT$ {bill.amount.toLocaleString()}
+                                                </span>
+                                              </div>
+                                              <div className="flex justify-between items-center">
+                                                <span className="text-slate-500 font-medium">
+                                                  {bill.status === 'paid' ? '入帳日期' : bill.status === 'pending' || bill.status === 'overdue' ? '繳納期限' : '回報日期'}
+                                                </span>
+                                                <span className={`font-semibold ${
+                                                  bill.status === 'overdue' ? 'text-rose-600' : bill.status === 'paid' ? 'text-emerald-700' : 'text-slate-700'
+                                                }`}>
+                                                  {bill.paidDate || bill.dueDate}
+                                                </span>
+                                              </div>
+                                              <div className="flex justify-between items-center">
+                                                <span className="text-slate-500 font-medium">狀態與管道</span>
+                                                <span className="text-slate-700 font-semibold">
+                                                  {bill.status === 'paid' || bill.status === 'pending_approval' || bill.status === 'tenant_submitted'
+                                                    ? formatPaymentMethod(bill.paymentMethod)
+                                                    : bill.status === 'rejected'
+                                                      ? '已駁回'
+                                                      : bill.status === 'void'
+                                                        ? '已作廢存查'
+                                                        : '尚未繳納'}
+                                                </span>
+                                              </div>
+                                              {bill.transferLast5 && (
+                                                <div className="flex justify-between items-center">
+                                                  <span className="text-slate-500 font-medium">
+                                                    {bill.status === 'rejected' ? '原報末5碼' : '轉帳末5碼'}
+                                                  </span>
+                                                  <span className="font-mono bg-amber-50 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200">
+                                                    {bill.transferLast5}
+                                                  </span>
+                                                </div>
+                                              )}
+                                              {bill.note && (
+                                                <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-100">
+                                                  <span>備註說明</span>
+                                                  <span className="text-slate-700 truncate max-w-[180px]">{bill.note}</span>
+                                                </div>
+                                              )}
+                                            </div>
 
-                                  return (
-                                    <div key={`m-paid-${bill.id}`} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3 shadow-2xs">
-                                      <div className="flex justify-between items-start gap-2">
-                                        <div className="space-y-1">
-                                          <span className="text-[10px] text-slate-400 font-mono block">{bill.id.split('_')[0]}</span>
-                                          <h4 className="font-bold text-slate-800 text-base">{propName}</h4>
-                                          <div className="text-xs text-slate-600 font-medium flex items-center gap-1">
-                                            <User size={13} className="text-slate-400" />
-                                            <span>房東：{landlordName}</span>
+                                            {/* Mobile Action */}
+                                            {bill.status === 'paid' ? (
+                                              <button
+                                                onClick={() => handleOpenReceipt(bill)}
+                                                className="w-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2.5 rounded-xl font-bold transition-colors flex items-center justify-center shadow-2xs"
+                                              >
+                                                <Printer size={14} className="mr-1.5" />
+                                                <span>檢視與列印電子收據</span>
+                                              </button>
+                                            ) : (bill.status === 'pending' || bill.status === 'overdue') ? (
+                                              <button
+                                                onClick={() => handleOpenTenantReportPayment(bill)}
+                                                className="w-full text-xs bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-bold transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
+                                              >
+                                                <Send size={14} />
+                                                <span>回報已繳費用</span>
+                                              </button>
+                                            ) : (bill.status === 'pending_approval' || bill.status === 'tenant_submitted') ? (
+                                              <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 py-2.5 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
+                                                <Clock size={14} className="mr-1.5 text-amber-600" />
+                                                <span>待審核（等待房東對帳中）</span>
+                                              </div>
+                                            ) : bill.status === 'rejected' ? (
+                                              <div className="w-full bg-rose-50 border border-rose-200 text-rose-700 py-2.5 rounded-xl font-bold flex justify-center items-center text-xs shadow-2xs">
+                                                <XCircle size={14} className="mr-1.5 text-rose-500 shrink-0" />
+                                                <span>此筆自報繳款已被房東駁回，已鎖定無法更動</span>
+                                              </div>
+                                            ) : (
+                                              <div className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl font-semibold flex justify-center items-center text-xs">
+                                                此帳單已作廢存查
+                                              </div>
+                                            )}
                                           </div>
-                                          <div className="pt-0.5">
-                                            <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
-                                              <span>{catInfo.icon}</span>
-                                              <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                            </span>
-                                          </div>
-                                        </div>
-                                        <StatusBadge status={bill.status} />
-                                      </div>
-
-                                      <div className="text-xs text-slate-600 space-y-1.5 pt-2 border-t border-slate-200/60 bg-white p-3 rounded-xl border">
-                                        <div className="flex justify-between items-center">
-                                          <span className="text-slate-500 font-medium">實繳金額</span>
-                                          <span className="text-slate-900 font-bold text-sm font-mono">NT$ {bill.amount.toLocaleString()}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                          <span className="text-slate-500 font-medium">入帳日期</span>
-                                          <span className="text-emerald-700 font-semibold">{bill.paidDate || bill.dueDate}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center">
-                                          <span className="text-slate-500 font-medium">繳納管道</span>
-                                          <span className="text-slate-700 font-semibold">{formatPaymentMethod(bill.paymentMethod)}</span>
-                                        </div>
-                                        {bill.transferLast5 && (
-                                          <div className="flex justify-between items-center">
-                                            <span className="text-slate-500 font-medium">轉帳末5碼</span>
-                                            <span className="font-mono bg-amber-50 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200">{bill.transferLast5}</span>
-                                          </div>
-                                        )}
-                                        {bill.note && (
-                                          <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-100">
-                                            <span>備註說明</span>
-                                            <span className="text-slate-700 truncate max-w-[180px]">{bill.note}</span>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      <button
-                                        onClick={() => handleOpenReceipt(bill)}
-                                        className="w-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2.5 rounded-xl font-bold transition-colors flex items-center justify-center shadow-2xs"
-                                      >
-                                        <Printer size={14} className="mr-1.5" />
-                                        <span>檢視與列印電子收據</span>
-                                      </button>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
 
                           {/* 4. 已作廢帳單紀錄 (Voided Bills) */}
