@@ -698,10 +698,11 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
 }
 
 // 4. 回報成功 Flex Message
-function buildReportSuccessFlex(payment: any, last5: string) {
+function buildReportSuccessFlex(payment: any, last5: string | null, isCash: boolean = false) {
+  const methodDesc = isCash ? "現金交付" : `末五碼 ${last5}`;
   return {
     type: "flex",
-    altText: `🎉 繳款回報成功：${payment?.title || '租金帳單'} (末五碼 ${last5})`,
+    altText: `🎉 繳款回報成功：${payment?.title || '租金帳單'} (${methodDesc})`,
     contents: {
       type: "bubble",
       size: "mega",
@@ -741,8 +742,8 @@ function buildReportSuccessFlex(payment: any, last5: string) {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "轉帳末五碼", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `●●●●● ${last5}`, size: "xs", color: "#1E293B", weight: "bold", flex: 7 }
+              { type: "text", text: isCash ? "繳款方式" : "轉帳末五碼", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: isCash ? "💵 現金交付" : `●●●●● ${last5}`, size: "xs", color: isCash ? "#059669" : "#1E293B", weight: "bold", flex: 7 }
             ]
           },
           {
@@ -756,7 +757,9 @@ function buildReportSuccessFlex(payment: any, last5: string) {
           { type: "separator", margin: "md" },
           {
             type: "text",
-            text: "💡 房東核對入帳後，系統將自動開立電子收據，並自尚餘租金中扣減。",
+            text: isCash
+              ? "💡 房東查收現金並核對入帳後，系統將自動開立電子收據，並自尚餘租金中扣減。"
+              : "💡 房東核對入帳後，系統將自動開立電子收據，並自尚餘租金中扣減。",
             size: "xxs",
             color: "#64748B",
             wrap: true,
@@ -1169,7 +1172,19 @@ serve(async (req: Request) => {
         await replyLineMessage(replyToken, [
           {
             type: "text",
-            text: `📌 已為您鎖定帳單：【${title}】\n應繳金額：NT$ ${Number(amount || 0).toLocaleString()}\n\n請直接在此輸入您的【轉帳末五碼】（5 位數字，例如直接輸入 88621），系統將自動為您完成回報對帳！`
+            text: `📌 已為您鎖定帳單：【${title}】\n應繳金額：NT$ ${Number(amount || 0).toLocaleString()}\n\n請直接在此輸入您的【轉帳末五碼】（5 位數字，例如直接輸入 88621）或是輸入「現金交付」，系統將自動為您完成回報對帳！`,
+            quickReply: {
+              items: [
+                {
+                  type: "action",
+                  action: {
+                    type: "message",
+                    label: "💵 現金交付",
+                    text: "現金交付"
+                  }
+                }
+              ]
+            }
           }
         ]);
         continue;
@@ -1185,7 +1200,19 @@ serve(async (req: Request) => {
         await replyLineMessage(replyToken, [
           {
             type: "text",
-            text: "📷 已收到您的轉帳憑證截圖！\n\n請直接在下方回覆您的【轉帳末五碼】（5 位數字，例如：88621），系統將立即為您完成繳費回報，送交房東核帳！"
+            text: "📷 已收到您的轉帳憑證截圖！\n\n請直接在下方回覆您的【轉帳末五碼】（5 位數字，例如：88621）或是輸入「現金交付」，系統將立即為您完成繳費回報，送交房東核帳！",
+            quickReply: {
+              items: [
+                {
+                  type: "action",
+                  action: {
+                    type: "message",
+                    label: "💵 現金交付",
+                    text: "現金交付"
+                  }
+                }
+              ]
+            }
           }
         ]);
         continue;
@@ -1237,10 +1264,13 @@ serve(async (req: Request) => {
 
         const leaseIds = context.leases.map((l: any) => l.id);
 
-        // 3. 繳款回報後五碼偵測 (例如: "88621", "回報 88621", "末五碼 88621")
+        // 3. 繳款回報判斷：轉帳後五碼偵測 (例如: "88621", "回報 88621") 或 現金交付 (例如: "現金交付", "現金")
         const last5Match = text.match(/(?:後五碼|末五碼|回報|轉帳)\s*(\d{5})\b|^\s*(\d{5})\s*$/);
-        if (last5Match) {
-          const matchedLast5 = last5Match[1] || last5Match[2];
+        const isCash = /^(現金|現金交付|付現|現金繳費|現金支付|已付現金)$/i.test(text.replace(/\s+/g, '')) || text.includes("現金交付");
+
+        if (last5Match || isCash) {
+          const matchedLast5 = last5Match ? (last5Match[1] || last5Match[2]) : null;
+          const reportMethod = isCash ? "現金交付" : "銀行轉帳";
 
           // 尋找此租約最近一筆待繳帳單 (pending)
           let targetPayment: any = null;
@@ -1268,10 +1298,13 @@ serve(async (req: Request) => {
               .is("deleted_at", null);
 
             if (submittedPayments && submittedPayments.length > 0) {
+              const prevDesc = submittedPayments[0].payment_method === '現金交付'
+                ? '現金交付'
+                : `轉帳末五碼：${submittedPayments[0].transfer_last5 || '已登記'}`;
               await replyLineMessage(replyToken, [
                 {
                   type: "text",
-                  text: `🔍 您先前已送交【${submittedPayments[0].title}】之繳款回報（末五碼：${submittedPayments[0].transfer_last5 || '已登記'}），房東正在核對入帳中，請耐心等候開立收據！`
+                  text: `🔍 您先前已送交【${submittedPayments[0].title}】之繳款回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`
                 }
               ]);
             } else {
@@ -1291,6 +1324,7 @@ serve(async (req: Request) => {
             .from("payments")
             .update({
               status: "tenant_submitted",
+              payment_method: reportMethod,
               transfer_last5: matchedLast5,
               paid_date: todayStr,
               updated_at: new Date().toISOString()
@@ -1303,7 +1337,7 @@ serve(async (req: Request) => {
             ]);
           } else {
             await replyLineMessage(replyToken, [
-              buildReportSuccessFlex(targetPayment, matchedLast5)
+              buildReportSuccessFlex(targetPayment, matchedLast5, isCash)
             ]);
           }
           continue;
