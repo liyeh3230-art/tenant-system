@@ -11429,10 +11429,10 @@ export default function App() {
 
                         {/* When Landlord is selected, expand landlord verification fields directly */}
                         {lineFirstLoginRole === 'landlord' && (
-                          <div className="space-y-3 p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 animate-in fade-in duration-200">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950 pb-1 border-b border-indigo-100">
-                              <ShieldCheck size={16} className="text-indigo-600" />
-                              <span>請填寫房東身分查核資料</span>
+                          <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-200/80 rounded-2xl animate-in fade-in duration-200">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-950">
+                              <ShieldCheck size={16} className="text-indigo-600 flex-shrink-0" />
+                              <span>房東身分真實性查核資料（管理員審核必填）</span>
                             </div>
 
                             <div>
@@ -11441,12 +11441,15 @@ export default function App() {
                               </label>
                               <input
                                 type="text"
-                                placeholder="例如：A123456789 或 公司統編 8 碼"
+                                placeholder="例如：A123456789 或 統一編號 8 碼"
                                 value={landlordAppForm.idNumber}
-                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value }))}
+                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, idNumber: e.target.value.toUpperCase() }))}
                                 className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold uppercase"
                                 required
                               />
+                              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                                供平台總管理員查核身分真實性與租屋合規，資料採高規格加密保護。
+                              </span>
                             </div>
 
                             <div>
@@ -11455,52 +11458,11 @@ export default function App() {
                               </label>
                               <input
                                 type="text"
-                                placeholder="例如：台北市中正區忠孝東路一段 100 號 5 樓"
+                                placeholder="例如：台北市信義區信義路五段7號"
                                 value={landlordAppForm.contactAddress}
                                 onChange={(e) => setLandlordAppForm(prev => ({ ...prev, contactAddress: e.target.value }))}
                                 className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
                                 required
-                              />
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  公司抬頭 / 物業名稱 (選填)
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="例如：安居物業管理 或 個人"
-                                  value={landlordAppForm.companyName}
-                                  onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
-                                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  預設收款機構與帳號 (選填)
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="例如：玉山銀行 1234567890"
-                                  value={landlordAppForm.bankAccount}
-                                  onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
-                                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
-                                />
-                              </div>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-700 mb-1">
-                                補充說明 / 備註 (選填)
-                              </label>
-                              <textarea
-                                rows="2"
-                                placeholder="可填寫管理物業座落區域或額外說明..."
-                                value={landlordAppForm.notes}
-                                onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-indigo-500 font-medium"
                               />
                             </div>
                           </div>
