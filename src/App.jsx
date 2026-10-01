@@ -6918,13 +6918,6 @@ export default function App() {
                       <option value="vacant">未出租</option>
                     </select>
                     <button
-                      onClick={handleOpenLandlordBankModal}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center border border-slate-250 flex-1 sm:flex-none focus:outline-none"
-                    >
-                      <CreditCard size={16} className="mr-1 text-slate-550" />
-                      <span>設定收款帳戶</span>
-                    </button>
-                    <button
                       onClick={() => {
                         setNewAddressText('');
                         setActiveModal('manageAddresses');
