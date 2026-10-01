@@ -397,11 +397,20 @@ export default function App() {
           : supabase.from('landlord_addresses').select('*');
         const { data: addrData } = await addrQuery;
         if (addrData) {
-          setLandlordAddresses(addrData.map(a => ({
-            id: a.id,
-            landlordId: a.landlord_id,
-            address: a.address
-          })));
+          const seenKeys = new Set();
+          const cleanAddrs = [];
+          for (const a of addrData) {
+            const key = `${a.landlord_id || ''}_${(a.address || '').trim()}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              cleanAddrs.push({
+                id: a.id,
+                landlordId: a.landlord_id,
+                address: (a.address || '').trim()
+              });
+            }
+          }
+          setLandlordAddresses(cleanAddrs);
         }
 
         // 抓取該房東的房源 (包含軟刪除以供歷史合約參照)
@@ -895,11 +904,20 @@ export default function App() {
 
         const { data: addrData } = await supabase.from('landlord_addresses').select('*');
         if (addrData) {
-          setLandlordAddresses(addrData.map(a => ({
-            id: a.id,
-            landlordId: a.landlord_id,
-            address: a.address
-          })));
+          const seenKeys = new Set();
+          const cleanAddrs = [];
+          for (const a of addrData) {
+            const key = `${a.landlord_id || ''}_${(a.address || '').trim()}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              cleanAddrs.push({
+                id: a.id,
+                landlordId: a.landlord_id,
+                address: (a.address || '').trim()
+              });
+            }
+          }
+          setLandlordAddresses(cleanAddrs);
         }
 
         const { data: profileData } = await supabase.from('profiles').select('*');
@@ -3011,46 +3029,99 @@ export default function App() {
       showToast('請填寫房源名稱、租金，並選擇租屋地址！', 'error');
       return;
     }
-    const nextIdNum = properties.reduce((max, p) => Math.max(max, parseInt(String(p.id).replace(/\D/g, ''), 10) || 0), 0) + 1;
-    const newProp = {
-      id: `P${String(nextIdNum).padStart(3, '0')}`,
-      landlordId: currentLandlordId,
-      name: propName.trim(),
-      type: propType,
-      rent: Number(propRent),
-      rentPeriod: propRentPeriod,
-      status: 'vacant',
-      address: propAddress.trim(),
-      isAdvertised: false,
-      photos: [],
-      deletedAt: null
-    };
 
     try {
+      let chosenId = '';
+      if (isSupabaseConfigured) {
+        // 從資料庫即時查詢所有現存房源 ID，避免本地快取落後或多房東之間產生衝突
+        const { data: allProps } = await supabase.from('properties').select('id');
+        const existingIdSet = new Set((allProps || []).map(p => String(p.id)));
+        properties.forEach(p => existingIdSet.add(String(p.id)));
+
+        let maxNum = 0;
+        existingIdSet.forEach(id => {
+          const num = parseInt(id.replace(/\D/g, ''), 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        });
+
+        let candidateNum = maxNum + 1;
+        while (existingIdSet.has(`P${String(candidateNum).padStart(3, '0')}`)) {
+          candidateNum++;
+        }
+        chosenId = `P${String(candidateNum).padStart(3, '0')}`;
+      } else {
+        const nextIdNum = properties.reduce((max, p) => Math.max(max, parseInt(String(p.id).replace(/\D/g, ''), 10) || 0), 0) + 1;
+        chosenId = `P${String(nextIdNum).padStart(3, '0')}`;
+      }
+
+      const newProp = {
+        id: chosenId,
+        landlordId: currentLandlordId,
+        name: propName.trim(),
+        type: propType,
+        rent: Number(propRent),
+        rentPeriod: propRentPeriod,
+        status: 'vacant',
+        address: propAddress.trim(),
+        isAdvertised: false,
+        photos: [],
+        deletedAt: null
+      };
+
       if (isSupabaseConfigured && currentLandlordId) {
-        const { data: insertedRows, error: insertErr } = await supabase.from('properties').insert({
-          id: newProp.id,
-          landlord_id: currentLandlordId,
-          name: newProp.name,
-          type: newProp.type,
-          rent: newProp.rent,
-          rent_period: newProp.rentPeriod,
-          status: 'vacant',
-          address: newProp.address,
-          is_advertised: false,
-          photos: []
-        }).select();
-        if (insertErr) throw insertErr;
-        if (insertedRows && insertedRows[0]) {
-          newProp.id = insertedRows[0].id;
+        let attempts = 0;
+        let success = false;
+        let lastErr = null;
+
+        while (attempts < 5 && !success) {
+          const { data: insertedRows, error: insertErr } = await supabase.from('properties').insert({
+            id: chosenId,
+            landlord_id: currentLandlordId,
+            name: newProp.name,
+            type: newProp.type,
+            rent: newProp.rent,
+            rent_period: newProp.rentPeriod,
+            status: 'vacant',
+            address: newProp.address,
+            is_advertised: false,
+            photos: []
+          }).select();
+
+          if (!insertErr) {
+            if (insertedRows && insertedRows[0]) {
+              newProp.id = insertedRows[0].id;
+            }
+            success = true;
+            break;
+          }
+
+          // 遇到唯一鍵衝突 (23505 或包含 properties_pkey / duplicate key)，自動遞增序號並重試
+          if (insertErr.code === '23505' || insertErr.message?.includes('duplicate key') || insertErr.message?.includes('properties_pkey')) {
+            const currentNum = parseInt(chosenId.replace(/\D/g, ''), 10) || 0;
+            chosenId = `P${String(currentNum + 1).padStart(3, '0')}`;
+            newProp.id = chosenId;
+            attempts++;
+          } else {
+            lastErr = insertErr;
+            break;
+          }
+        }
+
+        if (!success && lastErr) {
+          throw lastErr;
         }
       }
+
       setProperties(prev => {
         if (prev.some(p => p.id === newProp.id)) return prev;
         return [...prev, newProp];
       });
+      setPropName('');
+      setPropRent('');
       setActiveModal(null);
-      showToast(`房源「${propName}」新增成功並同步至雲端！`, 'success');
+      showToast(`房源「${propName.trim()}」新增成功並同步至雲端！`, 'success');
       fetchSupabaseData();
     } catch (err) {
       showToast(`新增失敗: ${err.message}`, 'error');
@@ -9223,8 +9294,8 @@ export default function App() {
                       onChange={(e) => setPropAddress(e.target.value)}
                       className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
                     >
-                      {landlordAddresses.filter(addr => addr.landlordId === currentLandlordId).map(addr => (
-                        <option key={addr.id} value={addr.address}>{addr.address}</option>
+                      {Array.from(new Set(landlordAddresses.filter(addr => addr.landlordId === currentLandlordId).map(addr => (addr.address || '').trim()))).filter(Boolean).map(addressText => (
+                        <option key={addressText} value={addressText}>{addressText}</option>
                       ))}
                     </select>
                   </div>
@@ -9333,8 +9404,8 @@ export default function App() {
                       onChange={(e) => setPropAddress(e.target.value)}
                       className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
                     >
-                      {landlordAddresses.filter(addr => addr.landlordId === currentLandlordId).map(addr => (
-                        <option key={addr.id} value={addr.address}>{addr.address}</option>
+                      {Array.from(new Set(landlordAddresses.filter(addr => addr.landlordId === currentLandlordId).map(addr => (addr.address || '').trim()))).filter(Boolean).map(addressText => (
+                        <option key={addressText} value={addressText}>{addressText}</option>
                       ))}
                     </select>
                   </div>
@@ -9514,8 +9585,9 @@ export default function App() {
                           <button
                             type="button"
                             onClick={async () => {
-                              const isUsed = properties.some(p => p.landlordId === currentLandlordId && p.address === addr.address);
-                              if (isUsed) {
+                              const duplicates = landlordAddresses.filter(a => a.landlordId === currentLandlordId && (a.address || '').trim() === (addr.address || '').trim());
+                              const isUsed = properties.some(p => p.landlordId === currentLandlordId && (p.address || '').trim() === (addr.address || '').trim() && !p.deletedAt);
+                              if (duplicates.length <= 1 && isUsed) {
                                 showToast('此地址已被您旗下的房間房號使用中，無法直接刪除！', 'error');
                                 return;
                               }
