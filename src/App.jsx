@@ -253,16 +253,7 @@ export default function App() {
   const [landlordSelfName, setLandlordSelfName] = useState('');
   const [landlordSelfPhone, setLandlordSelfPhone] = useState('');
   const [landlordSelfPassword, setLandlordSelfPassword] = useState('');
-  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(() => {
-    try {
-      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed?.role === 'superadmin') return true;
-      }
-    } catch (e) {}
-    return false;
-  });
+  const [isSuperadminAuthenticated, setIsSuperadminAuthenticated] = useState(false);
   const [superadminLoginPhone, setSuperadminLoginPhone] = useState('');
   const [superadminPasswordInput, setSuperadminPasswordInput] = useState('');
   const [superadminLoginLoading, setSuperadminLoginLoading] = useState(false);
@@ -337,21 +328,58 @@ export default function App() {
         ? (overrideTenantPhone !== undefined ? overrideTenantPhone : (currentTenantPhone || currentUser?.phone || ''))
         : null;
 
-      // 🚀 優化 A：針對「房東視角」進行精確查詢 (僅在角色為 admin 時執行)
+      // 🛡️ 核心防護：若身分為入口首頁 (portal) 或未通過登入身分驗證，嚴格清空並禁止查詢任何後台資料
+      if (effectiveRole === 'portal' || (!effectiveLandlordId && !effectiveTenantPhone && effectiveRole !== 'superadmin')) {
+        setLandlords([]);
+        setProperties([]);
+        setLeases([]);
+        setPayments([]);
+        setHistoricalLeases([]);
+        setLandlordAddresses([]);
+        return;
+      }
+
+      // 🚀 優化 A：針對「房東視角」進行精確查詢 (僅在角色為 admin 且有明確已登入身分時執行)
       if (effectiveRole === 'admin') {
         const cleanLndPhone = effectiveLandlordPhone
           ? String(effectiveLandlordPhone).replace(/[^0-9]/g, '')
           : (currentLandlordPhone ? String(currentLandlordPhone).replace(/[^0-9]/g, '') : '');
         let targetLandlordId = effectiveLandlordId;
 
-        // 查詢當前房東 Profile / Landlord 資訊
-        const { data: myProfileData } = await supabase.from('profiles').select('*').eq('role', 'landlord');
-        const { data: myLandlordsData } = await supabase.from('landlords').select('*');
+        // 若無明確登入之房東 ID 與手機，嚴禁進入房東後台查詢
+        if (!targetLandlordId && !cleanLndPhone) {
+          setLandlords([]);
+          setProperties([]);
+          setLeases([]);
+          setPayments([]);
+          setHistoricalLeases([]);
+          setLandlordAddresses([]);
+          return;
+        }
+
+        // 精確查詢當前登入之房東資料（禁止下載全表資料）
+        const lndConds = [];
+        if (targetLandlordId) lndConds.push(`id.eq.${targetLandlordId}`);
+        if (cleanLndPhone) lndConds.push(`phone.eq.${cleanLndPhone}`);
+        const condStr = lndConds.join(',');
+
+        const { data: myProfileData } = await supabase.from('profiles').select('*').or(condStr).eq('role', 'landlord');
+        const { data: myLandlordsData } = await supabase.from('landlords').select('*').or(condStr);
 
         const matchedProfile = (myProfileData || []).find(p => (targetLandlordId && p.id === targetLandlordId) || (cleanLndPhone && String(p.phone || '').replace(/[^0-9]/g, '') === cleanLndPhone));
         const matchedLandlord = (myLandlordsData || []).find(l => (targetLandlordId && l.id === targetLandlordId) || (cleanLndPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanLndPhone));
 
-        const resolvedId = targetLandlordId || matchedProfile?.id || matchedLandlord?.id || (myLandlordsData?.[0]?.id) || (myProfileData?.[0]?.id);
+        const resolvedId = targetLandlordId || matchedProfile?.id || matchedLandlord?.id;
+        if (!resolvedId) {
+          setLandlords([]);
+          setProperties([]);
+          setLeases([]);
+          setPayments([]);
+          setHistoricalLeases([]);
+          setLandlordAddresses([]);
+          return;
+        }
+
         const resolvedPhone = cleanLndPhone || matchedProfile?.phone || matchedLandlord?.phone || '';
         const resolvedName = matchedProfile?.name || matchedLandlord?.name || '房東';
 
@@ -682,7 +710,10 @@ export default function App() {
           let combinedLandlords = [];
           if (lndIds.length > 0) {
             const { data: lndProfs } = await supabase.from('profiles').select('id, name, phone, bank_info').in('id', lndIds);
-            const { data: lndTable } = await supabase.from('landlords').select('*').in('id', lndIds);
+            const { data: lndTable } = await supabase
+              .from('landlords')
+              .select('id, name, phone, company_name, bank_name, bank_account, status, ad_listing_enabled, bank_info')
+              .in('id', lndIds);
 
             combinedLandlords = (lndTable || []).map(l => {
               const matchedProf = (lndProfs || []).find(p => p.id === l.id);
@@ -691,8 +722,8 @@ export default function App() {
                 name: l.name || matchedProf?.name || '房東',
                 phone: l.phone || matchedProf?.phone || '',
                 company_name: l.company_name || '',
-                id_number: l.id_number || '',
-                contact_address: l.contact_address || '',
+                id_number: '',
+                contact_address: '',
                 bank_name: l.bank_name || '',
                 bank_account: l.bank_account || '',
                 application_notes: l.application_notes || '',
@@ -854,8 +885,19 @@ export default function App() {
         }
       }
 
-      // 🚀 優化 C：若為「總管理員」，才抓取全平台資料以進行統計
+      // 🚀 優化 C：若為「總管理員」，且已通過管理員身分驗證，才抓取全平台資料以進行統計
       else if (effectiveRole === 'superadmin') {
+        if (!isSuperadminAuthenticated) {
+          // 嚴密防護：若未經管理員驗證，絕對禁止查詢或載入全站後台資料
+          setProperties([]);
+          setLeases([]);
+          setPayments([]);
+          setLandlords([]);
+          setHistoricalLeases([]);
+          setLandlordAddresses([]);
+          return;
+        }
+
         const { data: propData } = await supabase.from('properties').select('*');
         if (propData) {
           setProperties(propData.map(p => ({
@@ -9701,7 +9743,7 @@ export default function App() {
                       <label className="block text-xs font-bold text-slate-700 mb-1">戶名</label>
                       <input
                         type="text"
-                        placeholder="例如：周金在"
+                        placeholder="請輸入銀行收款戶名（例如：王小明）"
                         value={tempAccountName}
                         onChange={(e) => setTempAccountName(e.target.value)}
                         className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-semibold outline-none focus:border-indigo-600 bg-white"

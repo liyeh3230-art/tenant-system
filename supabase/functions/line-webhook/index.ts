@@ -153,8 +153,8 @@ function parseLandlordBank(landlord: any) {
   return {
     bankName: bankName || "未填寫銀行名稱",
     bankAccount: bankAccount || "未填寫銀行帳號",
-    accountName: accountName,       // 銀行收款戶名（例如：徐立業、XX有限公司）
-    landlordName: landlordName,     // 合約出租甲方（例如：周金在，依法不可變更）
+    accountName: accountName,       // 銀行收款戶名（公司或個人指定受款帳戶）
+    landlordName: landlordName,     // 合約出租甲方（法定出租人，依法不可變更）
     landlordPhone: landlordPhone,
     note: note
   };

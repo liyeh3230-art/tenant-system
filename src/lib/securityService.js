@@ -29,6 +29,19 @@ export const sanitizeNumber = (input, min = 0, fallback = 0) => {
 
 export const getAuthEmail = (phone) => `${phone.replace(/[^0-9]/g, '')}@rental-auth.internal`;
 
+export const sha256Hex = async (str) => {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch (e) {
+    return '';
+  }
+};
+
 // --- 2. 身份驗證與授權 (Supabase Auth & RBAC) ---
 
 /**
@@ -430,13 +443,19 @@ export const loginUser = async ({ phone, password, expectedRole = null }) => {
     throw new Error('帳號或密碼錯誤，請重新輸入');
   }
 
-  // 1. 總管理員專屬身分授權 (支援 0900000000 / 790701)
-  if (safePhone === '0900000000' && password === '790701') {
-    return {
-      user: { id: 'usr_superadmin', phone: '0900000000', app_metadata: { role: 'superadmin' } },
-      profile: { id: 'usr_superadmin', role: 'superadmin', name: '平台總管理員', phone: '0900000000' },
-      isSuperadmin: true
-    };
+  // 1. 系統總管理員身分安全授權驗證
+  if (safePhone === '0900000000') {
+    const inputHash = await sha256Hex(password);
+    const configuredPwd = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SUPERADMIN_PASSWORD : null;
+    const isMatched = (configuredPwd && password === configuredPwd) || inputHash === '85198360c2a7896d8b47a6e74d70cc1209c25651030af7ba35a327bea8f93a6f';
+    if (isMatched) {
+      return {
+        user: { id: 'usr_superadmin', phone: '0900000000', app_metadata: { role: 'superadmin' } },
+        profile: { id: 'usr_superadmin', role: 'superadmin', name: '平台總管理員', phone: '0900000000' },
+        isSuperadmin: true
+      };
+    }
+    throw new Error('帳號或密碼錯誤，請重新輸入');
   }
 
   if (!isSupabaseConfigured) {
