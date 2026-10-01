@@ -90,8 +90,8 @@ function buildNewBillFlex(params: {
   const noteStr = payment.note ? String(payment.note).trim() : "";
 
   const headerBgColor = isDirectlyPaid ? "#059669" : "#D97706";
-  const headerSubText = isDirectlyPaid ? "🧾 智慧租屋 · 費用入帳收據憑證" : "🔔 智慧租屋 · 新增待繳帳單通知";
-  const headerTitle = isDirectlyPaid ? "代繳費用已入帳結清" : "新增代繳帳單待繳納";
+  const headerSubText = isDirectlyPaid ? "🧾 智慧租屋 · 費用入帳收據憑證" : "🔔 智慧租屋 · 待處理帳單提醒";
+  const headerTitle = isDirectlyPaid ? "代繳費用已入帳結清" : "待處理帳單通知";
   const statusBadge = isDirectlyPaid ? "● 已收訖入帳" : "● 待租客繳納";
   const statusColor = isDirectlyPaid ? "#A7F3D0" : "#FEF08A";
 

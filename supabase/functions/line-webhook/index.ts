@@ -584,7 +584,7 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
   };
 }
 
-// 3. 待繳帳單 Flex Message
+// 3. 待繳帳單 Flex Message (針對行動裝置與 LINE 閱讀全面優化排版)
 function buildPendingBillsFlex(payments: any[], profile: any) {
   if (!payments || payments.length === 0) {
     return {
@@ -628,80 +628,238 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
     };
   }
 
-  const billBoxes: any[] = [];
-  payments.forEach((p, idx) => {
-    const isSubmitted = (p.status === "tenant_submitted" || p.status === "pending_approval");
-    billBoxes.push({
-      type: "box",
-      layout: "vertical",
-      backgroundColor: isSubmitted ? "#F8FAFC" : "#FFFBEB",
-      borderColor: isSubmitted ? "#CBD5E1" : "#FDE68A",
-      borderWidth: "1px",
-      cornerRadius: "12px",
-      paddingAll: "12px",
-      margin: idx > 0 ? "md" : "none",
-      contents: [
-        {
-          type: "box",
-          layout: "horizontal",
-          justifyContent: "space-between",
-          contents: [
-            { type: "text", text: p.title || "租金帳單", size: "sm", weight: "bold", color: "#1E293B", flex: 1, wrap: true },
-            { type: "text", text: `NT$ ${Number(p.amount || 0).toLocaleString()}`, size: "sm", weight: "bold", color: isSubmitted ? "#475569" : "#D97706", align: "end" }
-          ]
-        },
-        {
-          type: "box",
-          layout: "horizontal",
-          justifyContent: "space-between",
-          margin: "xs",
-          contents: [
-            { type: "text", text: `到期日：${p.due_date || '依約定'}`, size: "xs", color: "#64748B" },
-            {
-              type: "text",
-              text: isSubmitted ? `🔍 核帳中 (${p.transfer_last5 || '已報'})` : "⏳ 尚未繳納",
-              size: "xs",
-              weight: "bold",
-              color: isSubmitted ? "#3B82F6" : "#DC2626"
-            }
-          ]
-        },
-        !isSubmitted ? {
-          type: "button",
-          style: "primary",
-          color: "#D97706",
-          height: "sm",
-          margin: "sm",
-          action: {
-            type: "postback",
-            label: "📝 回報此筆繳款",
-            data: `action=select_bill&id=${p.id}&title=${encodeURIComponent(p.title || '租金帳單')}&amount=${p.amount}`
-          }
-        } : {
-          type: "text",
-          text: "房東正在核對銀行入帳中，請耐心等候開立收據。",
-          size: "xxs",
-          color: "#64748B",
-          margin: "xs"
-        }
-      ]
-    });
+  // 1. 統計待繳總額並排序（未回報者依到期日由近到遠優先，已回報核帳中放後方）
+  const totalPending = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const sortedPayments = [...payments].sort((a, b) => {
+    const isSubA = (a.status === "tenant_submitted" || a.status === "pending_approval");
+    const isSubB = (b.status === "tenant_submitted" || b.status === "pending_approval");
+    if (isSubA !== isSubB) return isSubA ? 1 : -1;
+    const dueA = a.due_date || "9999-12-31";
+    const dueB = b.due_date || "9999-12-31";
+    return dueA.localeCompare(dueB);
   });
 
-  return {
-    type: "flex",
-    altText: `📋 您有 ${payments.length} 筆待繳帳單，請查看明細`,
-    contents: {
+  const getCatMeta = (type: string) => {
+    switch (type) {
+      case "rent": return { icon: "🏠", label: "房屋租金" };
+      case "deposit": return { icon: "🔒", label: "押金保證金" };
+      case "utilities":
+      case "electricity":
+      case "water":
+      case "power": return { icon: "⚡", label: "水電瓦斯" };
+      case "management": return { icon: "🏢", label: "大樓管理" };
+      default: return { icon: "📄", label: "代繳帳單" };
+    }
+  };
+
+  // 每頁 2 筆，卡片更寬敞大器，保證手機全螢幕瀏覽不被截斷
+  const ITEMS_PER_PAGE = 2;
+  const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
+
+  const buildPageBubble = (pageIndex: number) => {
+    const startIdx = pageIndex * ITEMS_PER_PAGE;
+    const pageItems = sortedPayments.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+
+    const billBoxes: any[] = [];
+    pageItems.forEach((p, idx) => {
+      const isSubmitted = (p.status === "tenant_submitted" || p.status === "pending_approval");
+      const dueDateClean = p.due_date ? String(p.due_date).substring(0, 10) : "";
+      const isOverdue = !isSubmitted && dueDateClean && dueDateClean < todayStr;
+      const cat = getCatMeta(p.bill_type || p.billType || "rent");
+      const title = p.title || cat.label;
+      const amountStr = Number(p.amount || 0).toLocaleString();
+
+      // 狀態顏色設定
+      let cardBg = "#FFFBEB";
+      let cardBorder = "#FDE68A";
+      let statusBg = "#FEF3C7";
+      let statusTextColor = "#B45309";
+      let statusText = "⏳ 待繳納";
+      let amountColor = "#92400E";
+
+      if (isSubmitted) {
+        cardBg = "#F8FAFC";
+        cardBorder = "#CBD5E1";
+        statusBg = "#EFF6FF";
+        statusTextColor = "#2563EB";
+        statusText = "🔍 核帳中";
+        amountColor = "#475569";
+      } else if (isOverdue) {
+        cardBg = "#FEF2F2";
+        cardBorder = "#FECACA";
+        statusBg = "#FEE2E2";
+        statusTextColor = "#DC2626";
+        statusText = "⚠️ 已逾期";
+        amountColor = "#DC2626";
+      }
+
+      billBoxes.push({
+        type: "box",
+        layout: "vertical",
+        backgroundColor: cardBg,
+        borderColor: cardBorder,
+        borderWidth: "1px",
+        cornerRadius: "14px",
+        paddingAll: "14px",
+        margin: idx > 0 ? "md" : "none",
+        contents: [
+          // 1. 標題列：類別圖示 + 名稱 + 狀態標籤 (左右對齊)
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            contents: [
+              {
+                type: "text",
+                text: `${cat.icon} ${title}`,
+                size: "sm",
+                weight: "bold",
+                color: "#1E293B",
+                wrap: true,
+                flex: 7
+              },
+              {
+                type: "box",
+                layout: "vertical",
+                backgroundColor: statusBg,
+                cornerRadius: "6px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                flex: 0,
+                contents: [
+                  {
+                    type: "text",
+                    text: statusText,
+                    size: "xxs",
+                    color: statusTextColor,
+                    weight: "bold"
+                  }
+                ]
+              }
+            ]
+          },
+          // 2. 應繳金額醒目區塊 (獨立基線列，金額與幣別全寬顯示永不截斷)
+          {
+            type: "box",
+            layout: "baseline",
+            spacing: "xs",
+            margin: "sm",
+            contents: [
+              { type: "text", text: "應繳金額", size: "xxs", color: "#64748B", flex: 0 },
+              { type: "text", text: "NT$", size: "xs", color: amountColor, weight: "bold", flex: 0 },
+              {
+                type: "text",
+                text: ` ${amountStr}`,
+                size: "xxl",
+                weight: "bold",
+                color: amountColor,
+                wrap: true,
+                flex: 1
+              }
+            ]
+          },
+          // 3. 到期日與備註列
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            margin: "xs",
+            contents: [
+              {
+                type: "text",
+                text: `📅 繳費期限：${dueDateClean || '依約定'}`,
+                size: "xs",
+                color: isOverdue ? "#DC2626" : "#64748B",
+                weight: isOverdue ? "bold" : "regular"
+              }
+            ]
+          },
+          ...(p.note ? [
+            {
+              type: "text",
+              text: `📝 備註：${p.note}`,
+              size: "xxs",
+              color: "#64748B",
+              wrap: true,
+              margin: "xs"
+            }
+          ] : []),
+          // 4. 按鈕或狀態確認
+          !isSubmitted ? {
+            type: "button",
+            style: "primary",
+            color: isOverdue ? "#DC2626" : "#D97706",
+            height: "sm",
+            margin: "sm",
+            action: {
+              type: "postback",
+              label: "📝 回報此筆繳款",
+              data: `action=select_bill&id=${p.id}&title=${encodeURIComponent(title)}&amount=${p.amount}`
+            }
+          } : {
+            type: "box",
+            layout: "horizontal",
+            backgroundColor: "#EFF6FF",
+            cornerRadius: "8px",
+            paddingAll: "8px",
+            margin: "sm",
+            contents: [
+              {
+                type: "text",
+                text: `🔍 已回報末五碼 [${p.transfer_last5 || '已報'}]，房東核對入帳中`,
+                size: "xxs",
+                color: "#2563EB",
+                weight: "bold",
+                wrap: true
+              }
+            ]
+          }
+        ]
+      });
+    });
+
+    return {
       type: "bubble",
       size: "mega",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#D97706",
+        backgroundColor: "#B45309",
         paddingAll: "16px",
         contents: [
-          { type: "text", text: "智慧租屋 · 待繳納帳單", color: "#FEF3C7", size: "xs", weight: "bold" },
-          { type: "text", text: `待處理帳單 (共 ${payments.length} 筆)`, color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            contents: [
+              { type: "text", text: "智慧租屋 · 待繳納帳單", color: "#FEF3C7", size: "xs", weight: "bold" },
+              { type: "text", text: `共 ${sortedPayments.length} 筆`, color: "#FDE68A", size: "xs", weight: "bold" }
+            ]
+          },
+          {
+            type: "text",
+            text: totalPages > 1 ? `待處理帳單 (${pageIndex + 1}/${totalPages})` : `待處理帳單 (共 ${sortedPayments.length} 筆)`,
+            color: "#FFFFFF",
+            size: "xl",
+            weight: "bold",
+            margin: "xs"
+          },
+          {
+            type: "box",
+            layout: "baseline",
+            spacing: "xs",
+            margin: "xs",
+            contents: [
+              { type: "text", text: "待繳總計", size: "xs", color: "#FEF3C7", flex: 0 },
+              { type: "text", text: "NT$", size: "xs", color: "#FFFFFF", weight: "bold", flex: 0 },
+              { type: "text", text: ` ${totalPending.toLocaleString()}`, size: "lg", color: "#FFFFFF", weight: "bold", wrap: true, flex: 1 }
+            ]
+          }
         ]
       },
       body: {
@@ -712,25 +870,67 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
       },
       footer: {
         type: "box",
-        layout: "horizontal",
+        layout: "vertical",
         spacing: "sm",
         paddingAll: "14px",
         contents: [
           {
-            type: "button",
-            style: "secondary",
-            height: "sm",
-            action: { type: "message", label: "🏦 房東帳號", text: "匯款帳號" }
+            type: "box",
+            layout: "horizontal",
+            spacing: "sm",
+            contents: [
+              {
+                type: "button",
+                style: "secondary",
+                height: "sm",
+                action: { type: "message", label: "🏦 房東帳號", text: "匯款帳號" }
+              },
+              {
+                type: "button",
+                style: "primary",
+                color: "#4F46E5",
+                height: "sm",
+                action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
+              }
+            ]
           },
-          {
-            type: "button",
-            style: "primary",
-            color: "#4F46E5",
-            height: "sm",
-            action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
-          }
+          ...(totalPages > 1 ? [
+            {
+              type: "text",
+              text: `👉 左右滑動查看其餘帳單 (第 ${pageIndex + 1}/${totalPages} 頁)`,
+              size: "xxs",
+              color: "#94A3B8",
+              align: "center",
+              margin: "xs"
+            }
+          ] : [])
         ]
       }
+    };
+  };
+
+  // 若只有 1 頁，直接回傳單一 Bubble 卡片
+  if (totalPages <= 1) {
+    return {
+      type: "flex",
+      altText: `📋 待處理帳單：共 ${sortedPayments.length} 筆，待繳總計 NT$ ${totalPending.toLocaleString()}`,
+      contents: buildPageBubble(0)
+    };
+  }
+
+  // 多於 1 頁時，產生左右滑動之 Carousel 輪播卷軸（最多 10 頁）
+  const carouselBubbles = [];
+  const maxPages = Math.min(totalPages, 10);
+  for (let i = 0; i < maxPages; i++) {
+    carouselBubbles.push(buildPageBubble(i));
+  }
+
+  return {
+    type: "flex",
+    altText: `📋 待處理帳單：共 ${sortedPayments.length} 筆，待繳總計 NT$ ${totalPending.toLocaleString()} (左右滑動翻頁)`,
+    contents: {
+      type: "carousel",
+      contents: carouselBubbles
     }
   };
 }
