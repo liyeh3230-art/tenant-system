@@ -160,6 +160,45 @@ function parseLandlordBank(landlord: any) {
   };
 }
 
+// Helper: 費用類別標準定義與視覺標籤設定
+function getCategoryMeta(billType: string | undefined | null) {
+  const type = String(billType || "").toLowerCase().trim();
+  switch (type) {
+    case "rent":
+      return { key: "rent", label: "房屋租金", icon: "🏠", color: "#4F46E5", bg: "#EEF2FF", border: "#C7D2FE" };
+    case "deposit":
+      return { key: "deposit", label: "押金保證金", icon: "🔒", color: "#0D9488", bg: "#F0FDFA", border: "#99F6E4" };
+    case "management":
+      return { key: "management", label: "大樓管理費", icon: "🏢", color: "#2563EB", bg: "#EFF6FF", border: "#BFDBFE" };
+    case "electricity":
+    case "power":
+      return { key: "electricity", label: "用電費用", icon: "⚡", color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" };
+    case "water":
+      return { key: "water", label: "自來水費", icon: "💧", color: "#0284C7", bg: "#F0F9FF", border: "#BAE6FD" };
+    case "gas":
+      return { key: "gas", label: "天然瓦斯", icon: "🔥", color: "#EA580C", bg: "#FFF7ED", border: "#FFEDD5" };
+    case "utilities":
+      return { key: "utilities", label: "水電瓦斯", icon: "⚡", color: "#D97706", bg: "#FFFBEB", border: "#FDE68A" };
+    case "parking":
+      return { key: "parking", label: "車位租金", icon: "🅿️", color: "#7C3AED", bg: "#F5F3FF", border: "#DDD6FE" };
+    case "maintenance":
+    case "repair":
+      return { key: "maintenance", label: "修繕雜費", icon: "🔧", color: "#B45309", bg: "#FEF3C7", border: "#FDE68A" };
+    default:
+      return { key: "other", label: "代繳雜支", icon: "📋", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" };
+  }
+}
+
+// Helper: 取得款項項目正確名稱（優先使用自訂標題，若無則依據費用類別顯示，絕不預設為「租金帳單」）
+function getPaymentTitle(payment: any): string {
+  const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
+  const rawTitle = (payment?.title || "").trim();
+  if (!rawTitle) {
+    return cat.label;
+  }
+  return rawTitle;
+}
+
 // -----------------------------------------------------------------------------
 // LINE Flex Message Builders
 // -----------------------------------------------------------------------------
@@ -365,18 +404,8 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     return dateB.localeCompare(dateA);
   });
 
-  const ITEMS_PER_PAGE = 4;
+  const ITEMS_PER_PAGE = 3;
   const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
-
-  const getCatIcon = (type: string) => {
-    switch (type) {
-      case "rent": return "🏠";
-      case "deposit": return "🔒";
-      case "utilities": return "⚡";
-      case "management": return "🏢";
-      default: return "📋";
-    }
-  };
 
   const buildPageBubble = (pageIndex: number) => {
     const startIdx = pageIndex * ITEMS_PER_PAGE;
@@ -407,19 +436,27 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
       );
     }
 
-    // 每一筆已繳費用清單
+    // 每一筆已繳費用清單（獨立卡片設計，清楚標示分類徽章、金額、自訂標題與核銷資訊）
     pageItems.forEach((p, idx) => {
-      const catIcon = getCatIcon(p.bill_type || p.billType || "rent");
-      const title = p.title || "租金帳單";
+      const cat = getCategoryMeta(p.bill_type || p.billType);
+      const title = getPaymentTitle(p);
       const amtStr = Number(p.amount || 0).toLocaleString();
       const paidDate = p.paid_date || p.due_date || "已結清";
-      const last5 = p.transfer_last5 ? `末五碼：${p.transfer_last5}` : "✅ 已核銷入帳";
+      const methodInfo = p.payment_method === "現金交付" ? "💵 現金交付" : (p.transfer_last5 ? `末五碼：${p.transfer_last5}` : "✅ 已核銷入帳");
+      const hasCustomTitle = Boolean(p.title && p.title.trim() && p.title.trim() !== cat.label);
+      const noteStr = p.note ? String(p.note).trim() : "";
 
       bodyContents.push({
         type: "box",
         layout: "vertical",
+        backgroundColor: "#F8FAFC",
+        borderColor: "#E2E8F0",
+        borderWidth: "1px",
+        cornerRadius: "12px",
+        paddingAll: "12px",
         margin: idx > 0 || isFirstPage ? "md" : "none",
         contents: [
+          // 1. 首列：分類彩色徽章標籤 (Pill Badge) + 金額 (左右對齊)
           {
             type: "box",
             layout: "horizontal",
@@ -427,51 +464,93 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
             alignItems: "center",
             contents: [
               {
-                type: "text",
-                text: `${catIcon} ${title}`,
-                size: "xs",
-                weight: "bold",
-                color: "#1E293B",
-                flex: 1,
-                wrap: true
+                type: "box",
+                layout: "horizontal",
+                alignItems: "center",
+                backgroundColor: cat.bg,
+                borderColor: cat.border,
+                borderWidth: "1px",
+                cornerRadius: "6px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                flex: 0,
+                contents: [
+                  {
+                    type: "text",
+                    text: `${cat.icon} ${cat.label}`,
+                    size: "xxs",
+                    color: cat.color,
+                    weight: "bold"
+                  }
+                ]
               },
               {
                 type: "text",
                 text: `NT$ ${amtStr}`,
-                size: "sm",
+                size: "md",
                 weight: "bold",
                 color: "#059669",
-                align: "end"
+                align: "end",
+                flex: 1
               }
             ]
           },
+          // 2. 自訂標題（若有填寫自訂名稱且非預設分類名，例如「10月份租金」、「A棟公共電費」）
+          ...(hasCustomTitle ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              margin: "xs",
+              contents: [
+                {
+                  type: "text",
+                  text: `📌 ${p.title.trim()}`,
+                  size: "xs",
+                  weight: "bold",
+                  color: "#1E293B",
+                  wrap: true
+                }
+              ]
+            }
+          ] : []),
+          // 3. 繳納日期與入帳資訊
           {
             type: "box",
             layout: "horizontal",
             justifyContent: "space-between",
+            alignItems: "center",
             margin: "xs",
             contents: [
               {
                 type: "text",
-                text: `繳納日：${paidDate}`,
+                text: `📅 繳納日：${paidDate}`,
                 size: "xxs",
                 color: "#64748B"
               },
               {
                 type: "text",
-                text: last5,
+                text: methodInfo,
                 size: "xxs",
-                color: "#10B981",
+                color: "#059669",
                 weight: "bold"
               }
             ]
-          }
+          },
+          // 4. 若有備註資訊，顯示備註
+          ...(noteStr ? [
+            {
+              type: "text",
+              text: `📝 備註：${noteStr}`,
+              size: "xxs",
+              color: "#64748B",
+              wrap: true,
+              margin: "xs"
+            }
+          ] : [])
         ]
       });
-
-      if (idx < pageItems.length - 1) {
-        bodyContents.push({ type: "separator", margin: "sm" });
-      }
     });
 
     // 頁尾
@@ -644,19 +723,6 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
     return dueA.localeCompare(dueB);
   });
 
-  const getCatMeta = (type: string) => {
-    switch (type) {
-      case "rent": return { icon: "🏠", label: "房屋租金" };
-      case "deposit": return { icon: "🔒", label: "押金保證金" };
-      case "utilities":
-      case "electricity":
-      case "water":
-      case "power": return { icon: "⚡", label: "水電瓦斯" };
-      case "management": return { icon: "🏢", label: "大樓管理" };
-      default: return { icon: "📄", label: "代繳帳單" };
-    }
-  };
-
   // 每頁 2 筆，卡片更寬敞大器，保證手機全螢幕瀏覽不被截斷
   const ITEMS_PER_PAGE = 2;
   const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
@@ -670,8 +736,8 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
       const isSubmitted = (p.status === "tenant_submitted" || p.status === "pending_approval");
       const dueDateClean = p.due_date ? String(p.due_date).substring(0, 10) : "";
       const isOverdue = !isSubmitted && dueDateClean && dueDateClean < todayStr;
-      const cat = getCatMeta(p.bill_type || p.billType || "rent");
-      const title = p.title || cat.label;
+      const cat = getCategoryMeta(p.bill_type || p.billType);
+      const title = getPaymentTitle(p);
       const amountStr = Number(p.amount || 0).toLocaleString();
 
       // 狀態顏色設定
@@ -940,10 +1006,12 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
 
 // 4. 回報成功 Flex Message
 function buildReportSuccessFlex(payment: any, last5: string | null, isCash: boolean = false) {
+  const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
+  const displayTitle = getPaymentTitle(payment);
   const methodDesc = isCash ? "現金交付" : `末五碼 ${last5}`;
   return {
     type: "flex",
-    altText: `🎉 繳款回報成功：${payment?.title || '租金帳單'} (${methodDesc})`,
+    altText: `🎉 繳款回報成功：${cat.icon} ${displayTitle} (${methodDesc})`,
     contents: {
       type: "bubble",
       size: "mega",
@@ -966,9 +1034,34 @@ function buildReportSuccessFlex(payment: any, last5: string | null, isCash: bool
           {
             type: "box",
             layout: "horizontal",
+            alignItems: "center",
+            contents: [
+              { type: "text", text: "費用類別", size: "xs", color: "#64748B", flex: 3 },
+              {
+                type: "box",
+                layout: "horizontal",
+                alignItems: "center",
+                backgroundColor: cat.bg,
+                borderColor: cat.border,
+                borderWidth: "1px",
+                cornerRadius: "6px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                flex: 0,
+                contents: [
+                  { type: "text", text: `${cat.icon} ${cat.label}`, size: "xxs", color: cat.color, weight: "bold" }
+                ]
+              }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
             contents: [
               { type: "text", text: "回報項目", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: payment?.title || "租金帳單", size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
+              { type: "text", text: displayTitle, size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           {
@@ -1588,7 +1681,7 @@ serve(async (req: Request) => {
       const action = params.get("action");
 
       if (action === "select_bill") {
-        const title = decodeURIComponent(params.get("title") || "租金帳單");
+        const title = decodeURIComponent(params.get("title") || "待繳帳單");
         const amount = params.get("amount") || "";
         await replyLineMessage(replyToken, [
           {
@@ -1733,13 +1826,14 @@ serve(async (req: Request) => {
               .is("deleted_at", null);
 
             if (submittedPayments && submittedPayments.length > 0) {
+              const prevTitle = getPaymentTitle(submittedPayments[0]);
               const prevDesc = submittedPayments[0].payment_method === '現金交付'
                 ? '現金交付'
                 : `轉帳末五碼：${submittedPayments[0].transfer_last5 || '已登記'}`;
               await replyLineMessage(replyToken, [
                 {
                   type: "text",
-                  text: `🔍 您先前已送交【${submittedPayments[0].title}】之繳款回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`
+                  text: `🔍 您先前已送交【${prevTitle}】之繳款回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`
                 }
               ]);
             } else {

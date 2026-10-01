@@ -20,14 +20,21 @@ const corsHeaders = {
 
 // Helper: category info
 function getCategoryMeta(billType: string) {
+  const type = String(billType || "").toLowerCase().trim();
   const meta: Record<string, { label: string; icon: string; color: string; bg: string }> = {
     rent: { label: "房屋租金", icon: "🏠", color: "#4F46E5", bg: "#EEF2FF" },
     deposit: { label: "押金保證金", icon: "🔒", color: "#0D9488", bg: "#F0FDFA" },
     utilities: { label: "水電瓦斯代繳", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
+    electricity: { label: "用電費用", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
+    power: { label: "用電費用", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
+    water: { label: "自來水費", icon: "💧", color: "#0284C7", bg: "#F0F9FF" },
+    gas: { label: "天然瓦斯", icon: "🔥", color: "#EA580C", bg: "#FFF7ED" },
     management: { label: "大樓管理費", icon: "🏢", color: "#2563EB", bg: "#EFF6FF" },
+    parking: { label: "車位租金", icon: "🅿️", color: "#7C3AED", bg: "#F5F3FF" },
+    maintenance: { label: "修繕雜費", icon: "🔧", color: "#B45309", bg: "#FEF3C7" },
     other: { label: "其他代繳雜支", icon: "📋", color: "#7C3AED", bg: "#F5F3FF" },
   };
-  return meta[billType] || meta.other;
+  return meta[type] || meta.other;
 }
 
 // Helper: extract landlord bank info
