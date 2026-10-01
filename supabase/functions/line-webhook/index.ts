@@ -1159,6 +1159,47 @@ serve(async (req: Request) => {
     if (!replyToken) continue;
 
     // -------------------------------------------------------------------------
+    // 0. 處理 FOLLOW 事件（使用者加入 LINE BOT 好友或解除封鎖）
+    // -------------------------------------------------------------------------
+    if (event.type === "follow") {
+      const { data: binding } = await supabase
+        .from("line_bindings")
+        .select("tenant_id, line_display_name")
+        .eq("line_user_id", lineUserId)
+        .maybeSingle();
+
+      const welcomeName = binding?.line_display_name || "租客朋友";
+
+      await replyLineMessage(replyToken, [
+        {
+          type: "text",
+          text: `🎉 歡迎您加入智慧租屋管家系統！\n\n您好，${welcomeName}！您已成功連動 LINE 官方帳號服務。\n\n日後有任何新帳單、代繳費用產生或繳費確認，系統將在此為您進行即時推播通知！\n\n您可隨時點擊下方快捷按鈕查詢當前租屋資訊：`,
+          quickReply: {
+            items: [
+              {
+                type: "action",
+                action: {
+                  type: "message",
+                  label: "📋 查詢當期帳單",
+                  text: "帳單查詢"
+                }
+              },
+              {
+                type: "action",
+                action: {
+                  type: "message",
+                  label: "📜 查詢租約狀況",
+                  text: "租約狀況"
+                }
+              }
+            ]
+          }
+        }
+      ]);
+      continue;
+    }
+
+    // -------------------------------------------------------------------------
     // A. 處理 POSTBACK 事件（按鈕回調）
     // -------------------------------------------------------------------------
     if (event.type === "postback") {

@@ -688,7 +688,7 @@ export const redirectToLineLogin = (targetRole = 'tenant') => {
     const redirectUri = window.location.origin + window.location.pathname;
     const lineAuthUrl = `https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=${LINE_LOGIN_CHANNEL_ID}&redirect_uri=${encodeURIComponent(
       redirectUri
-    )}&state=${encodeURIComponent(state)}&scope=profile%20openid&nonce=${nonce}&bot_prompt=normal`;
+    )}&state=${encodeURIComponent(state)}&scope=profile%20openid&nonce=${nonce}&bot_prompt=aggressive`;
 
     window.location.href = lineAuthUrl;
   }
@@ -744,6 +744,7 @@ export const handleLineOAuthCallback = async () => {
         return {
           user: result.user,
           isNewUser: result.isNewUser,
+          isFriend: result.isFriend ?? null,
           targetRole: result.user?.role || targetRole,
           lineProfile: result.lineProfile,
         };

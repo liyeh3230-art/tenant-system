@@ -75,6 +75,20 @@ serve(async (req: Request) => {
       });
     }
 
+    // 2.1 Fetch Friendship Status with LINE BOT from LINE API
+    let isFriend = false;
+    try {
+      const friendshipRes = await fetch("https://api.line.me/friendship/v1/status", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      });
+      if (friendshipRes.ok) {
+        const friendshipData = await friendshipRes.json();
+        isFriend = Boolean(friendshipData?.friendFlag);
+      }
+    } catch (fErr) {
+      console.warn("Failed to check friendship status:", fErr);
+    }
+
     const lineUserId = profileData.userId;
     const lineDisplayName = profileData.displayName || "LINE 用戶";
     const linePictureUrl = profileData.pictureUrl || "";
@@ -161,6 +175,7 @@ serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         isNewUser,
+        isFriend,
         user: matchedUser,
         lineProfile: {
           userId: lineUserId,
