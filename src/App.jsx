@@ -8137,7 +8137,7 @@ export default function App() {
                               <div>
                                 <h3 className="text-base sm:text-lg font-bold text-slate-800">繳納狀態與電子收據明細</h3>
                                 <p className="text-xs sm:text-sm text-slate-500 font-medium">
-                                  查看各項費用之繳納狀態（代繳納、待審核、已付款、已駁回）與開立之電子繳費收據
+                                  查看各項費用之繳納狀態（代繳納、待審核、已付款、已駁回、已作廢存查）與開立之電子繳費收據
                                 </p>
                               </div>
 
@@ -8151,7 +8151,7 @@ export default function App() {
                                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                   }`}
                                 >
-                                  全部 ({currentTenantPayments.filter(p => p.status !== 'void').length})
+                                  全部 ({currentTenantPayments.length})
                                 </button>
                                 <button
                                   onClick={() => setFilterTenantPaymentStatus('pending')}
@@ -8210,7 +8210,7 @@ export default function App() {
 
                             {(() => {
                               const displayedTenantBills = currentTenantPayments.filter(bill => {
-                                if (filterTenantPaymentStatus === 'all') return bill.status !== 'void';
+                                if (filterTenantPaymentStatus === 'all') return true;
                                 if (filterTenantPaymentStatus === 'pending') return bill.status === 'pending' || bill.status === 'overdue';
                                 if (filterTenantPaymentStatus === 'pending_approval') return bill.status === 'pending_approval' || bill.status === 'tenant_submitted';
                                 if (filterTenantPaymentStatus === 'paid') return bill.status === 'paid';
@@ -8537,6 +8537,22 @@ export default function App() {
                                                   </span>
                                                 </div>
                                               )}
+                                              {bill.status === 'void' && (
+                                                <>
+                                                  {bill.voidedBy && (
+                                                    <div className="flex justify-between items-center text-slate-500">
+                                                      <span>作廢人員</span>
+                                                      <span className="text-rose-700 font-semibold">{bill.voidedBy}</span>
+                                                    </div>
+                                                  )}
+                                                  {bill.voidedAt && (
+                                                    <div className="flex justify-between items-center text-slate-500">
+                                                      <span>作廢時間</span>
+                                                      <span className="text-slate-600 font-mono text-[11px]">{bill.voidedAt}</span>
+                                                    </div>
+                                                  )}
+                                                </>
+                                              )}
                                               {bill.note && (
                                                 <div className="flex justify-between text-slate-500 pt-1 border-t border-slate-100">
                                                   <span>備註說明</span>
@@ -8573,8 +8589,9 @@ export default function App() {
                                                 <span>此筆自報繳款已被房東駁回，已鎖定無法更動</span>
                                               </div>
                                             ) : (
-                                              <div className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl font-semibold flex justify-center items-center text-xs">
-                                                此帳單已作廢存查
+                                              <div className="w-full bg-slate-100 border border-slate-200 text-slate-500 py-2.5 rounded-xl font-bold flex justify-center items-center text-xs">
+                                                <XCircle size={14} className="mr-1.5 text-slate-400" />
+                                                此帳單已作廢存查，無需繳納
                                               </div>
                                             )}
                                           </div>
@@ -8586,94 +8603,6 @@ export default function App() {
                               );
                             })()}
                           </div>
-
-                          {/* 4. 已作廢帳單紀錄 (Voided Bills) */}
-                          {voidedBills.length > 0 && (
-                            <div className="bg-slate-100/70 rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <span className="p-2 bg-slate-300 text-slate-700 rounded-xl shadow-2xs">
-                                    <XCircle size={18} />
-                                  </span>
-                                  <div>
-                                    <h3 className="text-base sm:text-lg font-bold text-slate-700">
-                                      已作廢帳單紀錄 (共 {voidedBills.length} 筆)
-                                    </h3>
-                                    <p className="text-xs text-slate-500 font-medium">
-                                      以下為已被作廢之帳單，保留存查紀錄且不列入應繳金額與財務計算
-                                    </p>
-                                  </div>
-                                </div>
-                                <span className="text-xs font-bold text-slate-600 bg-slate-200 px-3 py-1 rounded-full">
-                                  已作廢存查
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {voidedBills.map(bill => {
-                                  const catInfo = getCategoryInfo(bill.billType);
-                                  const targetLease = leases.find(l => l.id === bill.leaseId) || currentTenantLease;
-                                  const targetProp = properties.find(p => p.id === targetLease?.propertyId) || currentTenantProperty;
-                                  const propName = currentTenantProperty?.name || bill.propertyName || targetProp?.name || '租賃房間';
-                                  const landlordName = landlords.find(l => l.id === targetProp?.landlordId || l.id === currentTenantProperty?.landlordId)?.name || '房東';
-
-                                  return (
-                                    <div key={`void-${bill.id}`} className="bg-white/90 p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between opacity-80 hover:opacity-100 transition-opacity">
-                                      <div>
-                                        <div className="flex justify-between items-start mb-2">
-                                          <div>
-                                            <span className={`inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
-                                              <span>{catInfo.icon}</span>
-                                              <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
-                                            </span>
-                                            <h4 className="text-2xl font-bold text-slate-400 line-through mt-1 font-mono">
-                                              NT$ {bill.amount.toLocaleString()}
-                                            </h4>
-                                          </div>
-                                          <StatusBadge status="void" />
-                                        </div>
-
-                                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 text-xs space-y-1.5 mb-3 text-slate-600">
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">承租房源：</span>
-                                            <span className="font-semibold text-slate-800">{propName}</span>
-                                          </div>
-                                          <div className="flex justify-between">
-                                            <span className="text-slate-500">出租房東：</span>
-                                            <span className="font-semibold text-slate-700">{landlordName}</span>
-                                          </div>
-                                          <div className="flex justify-between font-semibold text-rose-700 pt-1 border-t border-slate-200">
-                                            <span>作廢人員：</span>
-                                            <span>{bill.voidedBy || '管理員'}</span>
-                                          </div>
-                                          {bill.voidedAt && (
-                                            <div className="flex justify-between text-slate-500">
-                                              <span>作廢時間：</span>
-                                              <span className="font-mono">{bill.voidedAt}</span>
-                                            </div>
-                                          )}
-                                          <div className="flex justify-between text-slate-500">
-                                            <span>原到期日：</span>
-                                            <span>{bill.dueDate}</span>
-                                          </div>
-                                          {bill.note && (
-                                            <div className="text-slate-500 pt-1 border-t border-slate-200">
-                                              <span>原備註：{bill.note}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      <div className="w-full bg-slate-100 border border-slate-200 text-slate-500 py-2 rounded-xl font-bold flex justify-center items-center text-xs">
-                                        <XCircle size={14} className="mr-1.5 text-slate-400" />
-                                        此帳單已作廢，無需繳納
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       );
                     })()}
