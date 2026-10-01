@@ -64,6 +64,24 @@ async function replyLineMessage(replyToken: string, messages: any[]): Promise<Re
   });
 }
 
+// Helper to fetch user profile from LINE API
+async function getLineUserProfile(userId: string): Promise<{ displayName?: string; pictureUrl?: string } | null> {
+  if (!userId || !LINE_CHANNEL_ACCESS_TOKEN) return null;
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: {
+        Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+      },
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("getLineUserProfile error:", err);
+  }
+  return null;
+}
+
 // Helper to calculate duration in months and remaining days
 function calculateContractDuration(start: string, end: string) {
   if (!start || !end) return { months: 0, days: 0, formatted: "0 個月" };
@@ -879,8 +897,22 @@ function buildBankInfoFlex(landlord: any) {
   };
 }
 
+const LIFF_REGISTRATION_URL = Deno.env.get("LIFF_REGISTRATION_URL") || "";
+const SITE_URL = Deno.env.get("SITE_URL") || Deno.env.get("APP_URL") || "https://liyeh3230-art.github.io/tenant-system";
+
+function getRegisterUrl(lineUserId: string = "", displayName: string = ""): string {
+  if (LIFF_REGISTRATION_URL) {
+    return LIFF_REGISTRATION_URL;
+  }
+  const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\/$/, "");
+  const encodedName = encodeURIComponent(displayName || "");
+  return `${cleanBase}/?mode=line_register&line_uid=${lineUserId}&displayName=${encodedName}`;
+}
+
 // 6. 主功能導覽選單 Flex Message
-function buildMenuFlex(profile: any) {
+function buildMenuFlex(profile: any, lineUserId = "", displayName = "") {
+  const registerUrl = getRegisterUrl(lineUserId, displayName || profile?.name || "");
+
   return {
     type: "flex",
     altText: "🤖 智慧租屋小幫手 · 快速功能選單",
@@ -893,7 +925,7 @@ function buildMenuFlex(profile: any) {
         backgroundColor: "#4F46E5",
         paddingAll: "18px",
         contents: [
-          { type: "text", text: `您好，${profile?.name || '租客會員'}！`, color: "#C7D2FE", size: "xs", weight: "bold" },
+          { type: "text", text: `您好，${profile?.name || displayName || '租客朋友'}！`, color: "#C7D2FE", size: "xs", weight: "bold" },
           { type: "text", text: "智慧租屋服務選單", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
         ]
       },
@@ -903,6 +935,17 @@ function buildMenuFlex(profile: any) {
         paddingAll: "16px",
         spacing: "sm",
         contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#06C755",
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "📝 註冊會員",
+              uri: registerUrl
+            }
+          },
           {
             type: "box",
             layout: "horizontal",
@@ -947,7 +990,7 @@ function buildMenuFlex(profile: any) {
           { type: "separator", margin: "md" },
           {
             type: "text",
-            text: "💡 提示：若已完成轉帳，可直接輸入「末五碼 12345」快速回報！",
+            text: "💡 提示：點擊上方「註冊會員」即可綁定與設定密碼；若已轉帳可輸入「末五碼 12345」或「現金交付」快速回報！",
             size: "xxs",
             color: "#64748B",
             wrap: true,
@@ -955,21 +998,53 @@ function buildMenuFlex(profile: any) {
           }
         ]
       }
+    },
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📝 註冊會員",
+            text: "註冊會員"
+          }
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "⏳ 待繳帳單",
+            text: "待繳帳單"
+          }
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📋 我的租約",
+            text: "租約狀況"
+          }
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "🏦 匯款帳號",
+            text: "匯款帳號"
+          }
+        }
+      ]
     }
   };
 }
 
-const LIFF_REGISTRATION_URL = Deno.env.get("LIFF_REGISTRATION_URL") || "";
-const SITE_URL = Deno.env.get("SITE_URL") || Deno.env.get("APP_URL") || "https://hpphlfmtyxrulirpyejp.supabase.co";
-
 // 7. 未綁定帳號提示 Flex Message (支援方案 B 快速開通與設定密碼)
 function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
-  const encodedName = encodeURIComponent(displayName || "");
-  const registerUrl = LIFF_REGISTRATION_URL || `${SITE_URL}/?mode=line_register&line_uid=${lineUserId}&displayName=${encodedName}`;
+  const registerUrl = getRegisterUrl(lineUserId, displayName);
 
   return {
     type: "flex",
-    altText: "👋 歡迎！請先開通您的租客會員身分",
+    altText: "👋 歡迎！請點選「註冊會員」開通專屬服務",
     contents: {
       type: "bubble",
       size: "mega",
@@ -979,7 +1054,7 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
         backgroundColor: "#06C755",
         paddingAll: "16px",
         contents: [
-          { type: "text", text: "智慧租屋 · 快速會員開通", color: "#E0F2FE", size: "xs", weight: "bold" },
+          { type: "text", text: "智慧租屋 · 會員系統", color: "#E0F2FE", size: "xs", weight: "bold" },
           { type: "text", text: "開通專屬租客會員", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
         ]
       },
@@ -989,16 +1064,16 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
         paddingAll: "16px",
         spacing: "md",
         contents: [
-          { type: "text", text: "您好！歡迎使用智慧租屋 LINE 服務小幫手！", size: "sm", color: "#1E293B", weight: "bold" },
-          { type: "text", text: "為了能即時為您推播租金帳單、合約到期提醒與繳費收據，請點擊下方按鈕完成會員開通（包含設定網站登入密碼）：", size: "xs", color: "#64748B", wrap: true },
+          { type: "text", text: displayName ? `您好，${displayName}！歡迎使用智慧租屋 LINE 小幫手！` : "您好！歡迎使用智慧租屋 LINE 服務小幫手！", size: "sm", color: "#1E293B", weight: "bold" },
+          { type: "text", text: "為了能即時為您推播租金帳單、合約到期提醒與繳費收據，請點擊下方按鈕進行「註冊會員」（包含設定網站登入密碼）：", size: "xs", color: "#64748B", wrap: true },
           {
             type: "button",
             style: "primary",
             color: "#06C755",
-            height: "sm",
+            height: "md",
             action: {
               type: "uri",
-              label: "📝 點此開通會員與設定密碼",
+              label: "註冊會員",
               uri: registerUrl
             }
           },
@@ -1010,11 +1085,31 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
             margin: "sm",
             contents: [
               { type: "text", text: "💡 提示：", size: "xs", color: "#4F46E5", weight: "bold" },
-              { type: "text", text: "完成開通後，您既能在 LINE 即時接收通知與對帳，也能隨時使用【手機號碼 + 密碼】登入電腦或手機網站！", size: "xxs", color: "#64748B", wrap: true }
+              { type: "text", text: "完成註冊後，您既能在 LINE 即時接收通知與對帳，也能隨時使用【手機號碼 + 密碼】登入電腦或手機網站！", size: "xxs", color: "#64748B", wrap: true }
             ]
           }
         ]
       }
+    },
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📝 註冊會員",
+            text: "註冊會員"
+          }
+        },
+        {
+          type: "action",
+          action: {
+            type: "message",
+            label: "📋 功能選單",
+            text: "選單"
+          }
+        }
+      ]
     }
   };
 }
@@ -1169,6 +1264,9 @@ serve(async (req: Request) => {
     // 0. 處理 FOLLOW 事件（使用者加入 LINE BOT 好友或解除封鎖）
     // -------------------------------------------------------------------------
     if (event.type === "follow") {
+      const userProfile = await getLineUserProfile(lineUserId);
+      const displayName = userProfile?.displayName || "租客朋友";
+
       const { data: binding } = await supabase
         .from("line_bindings")
         .select("tenant_id, line_display_name")
@@ -1176,12 +1274,12 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (!binding) {
-        // 未綁定新租客加入好友 -> 自動推播快速開通會員與設定密碼卡片 (方案 B)
-        await replyLineMessage(replyToken, [buildUnboundGuideFlex(lineUserId, "租客朋友")]);
+        // 未綁定新租客加入好友 -> 自動推播快速註冊會員卡片 (含「註冊會員」按鈕)
+        await replyLineMessage(replyToken, [buildUnboundGuideFlex(lineUserId, displayName)]);
         continue;
       }
 
-      const welcomeName = binding?.line_display_name || "租客朋友";
+      const welcomeName = binding?.line_display_name || displayName;
 
       await replyLineMessage(replyToken, [
         {
@@ -1189,6 +1287,14 @@ serve(async (req: Request) => {
           text: `🎉 歡迎您加入智慧租屋管家系統！\n\n您好，${welcomeName}！您已成功連動 LINE 官方帳號服務。\n\n日後有任何新帳單、代繳費用產生或繳費確認，系統將在此為您進行即時推播通知！\n\n您可隨時點擊下方快捷按鈕查詢當前租屋資訊：`,
           quickReply: {
             items: [
+              {
+                type: "action",
+                action: {
+                  type: "message",
+                  label: "📝 註冊會員",
+                  text: "註冊會員"
+                }
+              },
               {
                 type: "action",
                 action: {
@@ -1276,6 +1382,16 @@ serve(async (req: Request) => {
       if (event.message?.type === "text") {
         const text = event.message.text.trim();
 
+        // 0. 優先處理「註冊 / 開通 / 會員」指令
+        if (text === "註冊" || text === "註冊會員" || text.includes("註冊") || text.includes("開通") || text.includes("我要註冊") || text === "0") {
+          const userProfile = await getLineUserProfile(lineUserId);
+          const displayName = userProfile?.displayName || "租客朋友";
+          await replyLineMessage(replyToken, [
+            buildUnboundGuideFlex(lineUserId, displayName)
+          ]);
+          continue;
+        }
+
         // 1. 帳號手動綁定指令: "綁定 <TOKEN>"
         if (text.startsWith("綁定") || text.toUpperCase().startsWith("BIND")) {
           const parts = text.split(/\s+/);
@@ -1312,7 +1428,11 @@ serve(async (req: Request) => {
         // 2. 獲取租客資料庫上下文
         const context = await getTenantContext(supabase, lineUserId);
         if (!context) {
-          await replyLineMessage(replyToken, [buildUnboundGuideFlex()]);
+          const userProfile = await getLineUserProfile(lineUserId);
+          const displayName = userProfile?.displayName || "租客朋友";
+          await replyLineMessage(replyToken, [
+            buildUnboundGuideFlex(lineUserId, displayName)
+          ]);
           continue;
         }
 
@@ -1490,8 +1610,10 @@ serve(async (req: Request) => {
         }
 
         // 9. 預設回覆：主功能導覽選單
+        const userProfile = await getLineUserProfile(lineUserId);
+        const displayName = userProfile?.displayName || context?.profile?.name || "租客會員";
         await replyLineMessage(replyToken, [
-          buildMenuFlex(context.profile)
+          buildMenuFlex(context.profile, lineUserId, displayName)
         ]);
       }
     }
