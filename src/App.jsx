@@ -1481,7 +1481,7 @@ export default function App() {
         );
 
         if (hasSameProviderConflict) {
-          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name || '用戶'}」綁定其他 ${providerTitle} 帳號！一個手機門號僅能綁定一組 ${providerTitle} 帳號。`, 'error');
+          showToast(`⚠️ 手機號碼「${cleanPhone}」已綁定其他 ${providerTitle} 帳號！一個手機門號僅能綁定一組 ${providerTitle} 帳號。`, 'error');
           setLineFirstLoginLoading(false);
           return;
         }
@@ -1505,7 +1505,7 @@ export default function App() {
         // 情境 B：該手機號碼為帳密註冊，必須輸入既有密碼進行鑑權方能綁定
         if (!lineFirstLoginPassword) {
           setLineBindingConflictUser(conflictProfile);
-          showToast(`⚠️ 手機號碼「${cleanPhone}」已由既有會員「${conflictProfile.name}」註冊！若此為您本人的帳號，請輸入該帳號原登入密碼以完成 ${providerTitle} 歸戶；若非您的帳號，請修改手機號碼。`, 'warning');
+          showToast(`⚠️ 手機號碼「${cleanPhone}」已被註冊！若此為您本人的帳號，請輸入該帳號原登入密碼以完成 ${providerTitle} 歸戶；若非您的帳號，請修改手機號碼。`, 'warning');
           setLineFirstLoginLoading(false);
           return;
         }
@@ -1601,7 +1601,7 @@ export default function App() {
         setLineBindingConflictUser(null);
         setLineFirstLoginPassword('');
         setLineFirstLoginNewPassword('');
-        showToast(`🎉 ${providerTitle} 帳號已成功歸戶綁定至既有會員「${conflictProfile.name}」！`, 'success');
+        showToast(`🎉 ${providerTitle} 帳號已成功完成歸戶綁定！`, 'success');
         fetchSupabaseData();
         return;
       }
@@ -11298,7 +11298,7 @@ export default function App() {
                       <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 space-y-3 animate-in fade-in duration-200">
                         <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
                           <AlertCircle size={18} className="text-amber-600 flex-shrink-0" />
-                          <span>此號碼已註冊：既有會員【{lineBindingConflictUser.name}】</span>
+                          <span>此號碼已註冊為既有會員</span>
                         </div>
                         <p className="text-xs text-slate-600 leading-relaxed">
                           手機號碼 <strong>{lineFirstLoginPhone}</strong> 已存在會員帳號。若此為您本人原先註冊之帳號，請輸入該帳號的<strong>登入密碼</strong>完成身分核實，系統將自動為您綁定 {socialLoginProvider === 'facebook' ? 'Facebook' : 'LINE'}，並<strong>完整保留您原有的身分、合約與所有資料</strong>：
