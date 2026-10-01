@@ -122,18 +122,38 @@ function calculateContractDuration(start: string, end: string) {
 function parseLandlordBank(landlord: any) {
   let bankName = landlord?.bank_name || "";
   let bankAccount = landlord?.bank_account || "";
-  if ((!bankName || !bankAccount) && landlord?.company_name) {
+  let landlordName = landlord?.account_name || landlord?.name || "房東";
+  let landlordPhone = landlord?.phone || "未提供電話";
+  let note = landlord?.note || "";
+
+  if (landlord?.company_name) {
     try {
-      const parsed = JSON.parse(landlord.company_name);
-      if (parsed.bankName) bankName = parsed.bankName;
-      if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+      const parsed = typeof landlord.company_name === 'string' ? JSON.parse(landlord.company_name) : landlord.company_name;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.note) note = parsed.note;
+      }
+    } catch {}
+  }
+  if ((!bankName || !bankAccount) && landlord?.bank_info) {
+    try {
+      const parsed = typeof landlord.bank_info === 'string' ? JSON.parse(landlord.bank_info) : landlord.bank_info;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.note) note = parsed.note;
+      }
     } catch {}
   }
   return {
     bankName: bankName || "未填寫銀行名稱",
     bankAccount: bankAccount || "未填寫銀行帳號",
-    landlordName: landlord?.name || "房東",
-    landlordPhone: landlord?.phone || "未提供電話"
+    landlordName: landlordName,
+    landlordPhone: landlordPhone,
+    note: note
   };
 }
 
@@ -859,6 +879,16 @@ function buildBankInfoFlex(landlord: any) {
               { type: "text", text: `${bank.landlordName} (${bank.landlordPhone})`, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
             ]
           },
+          ...(bank.note ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                { type: "text", text: "備註說明", size: "xs", color: "#64748B", flex: 3 },
+                { type: "text", text: bank.note, size: "xs", color: "#0F172A", wrap: true, flex: 7 }
+              ]
+            }
+          ] : []),
           { type: "separator", margin: "md" },
           {
             type: "box",
@@ -1176,6 +1206,26 @@ async function getTenantContext(supabase: any, lineUserId: string) {
         .maybeSingle();
       landlord = l;
     }
+  }
+
+  // 若 activeLease 無 landlord_id，嘗試從物業查詢
+  if (!landlord && property?.landlord_id) {
+    const { data: l } = await supabase
+      .from("landlords")
+      .select("*")
+      .eq("id", property.landlord_id)
+      .maybeSingle();
+    landlord = l;
+  }
+
+  // 兜底方案：若仍查無房東，取得系統預設首位房東資料，確保匯款帳號不為空
+  if (!landlord) {
+    const { data: allLnds } = await supabase
+      .from("landlords")
+      .select("*")
+      .is("deleted_at", null)
+      .limit(1);
+    landlord = allLnds?.[0] || null;
   }
 
   return {

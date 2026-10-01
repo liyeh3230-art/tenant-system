@@ -34,18 +34,38 @@ function getCategoryMeta(billType: string) {
 function parseLandlordBank(landlord: any) {
   let bankName = landlord?.bank_name || "";
   let bankAccount = landlord?.bank_account || "";
-  if ((!bankName || !bankAccount) && landlord?.company_name) {
+  let landlordName = landlord?.account_name || landlord?.name || "房東";
+  let landlordPhone = landlord?.phone || "";
+  let note = landlord?.note || "";
+
+  if (landlord?.company_name) {
     try {
-      const parsed = JSON.parse(landlord.company_name);
-      if (parsed.bankName) bankName = parsed.bankName;
-      if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+      const parsed = typeof landlord.company_name === 'string' ? JSON.parse(landlord.company_name) : landlord.company_name;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.note) note = parsed.note;
+      }
+    } catch {}
+  }
+  if ((!bankName || !bankAccount) && landlord?.bank_info) {
+    try {
+      const parsed = typeof landlord.bank_info === 'string' ? JSON.parse(landlord.bank_info) : landlord.bank_info;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.note) note = parsed.note;
+      }
     } catch {}
   }
   return {
     bankName: bankName || "請洽詢房東",
     bankAccount: bankAccount || "請洽詢房東",
-    landlordName: landlord?.name || "房東",
-    landlordPhone: landlord?.phone || ""
+    landlordName: landlordName,
+    landlordPhone: landlordPhone,
+    note: note
   };
 }
 
@@ -96,7 +116,7 @@ function buildNewBillFlex(params: {
         { type: "text", text: `${cat.icon} ${titleStr}`, size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
       ]
     },
-    // 應繳金額突出區塊
+    // 應繳金額突出區塊 (針對行動裝置重新排版，保證金額與幣別永不被截斷)
     {
       type: "box",
       layout: "vertical",
@@ -113,39 +133,72 @@ function buildNewBillFlex(params: {
           contents: [
             {
               type: "text",
-              text: isDirectlyPaid ? "已繳金額" : "應繳金額",
+              text: isDirectlyPaid ? "● 已收訖結清" : "● 本期應繳金額",
               size: "xs",
               color: isDirectlyPaid ? "#047857" : "#B45309",
-              weight: "bold"
+              weight: "bold",
+              flex: 5
             },
             {
               type: "text",
-              text: `NT$ ${amountStr}`,
-              size: "xxl",
-              color: isDirectlyPaid ? "#065F46" : "#92400E",
+              text: isDirectlyPaid ? (payment.paid_date || dueDateStr) : `${dueDateStr} 前`,
+              size: "xs",
+              color: isDirectlyPaid ? "#059669" : "#B45309",
+              align: "end",
               weight: "bold",
-              align: "end"
+              flex: 5
             }
           ]
         },
         {
           type: "box",
-          layout: "horizontal",
-          justifyContent: "space-between",
+          layout: "baseline",
+          spacing: "xs",
           margin: "sm",
           contents: [
             {
               type: "text",
-              text: isDirectlyPaid ? "入帳日期" : "繳費期限",
+              text: "NT$",
+              size: "sm",
+              color: isDirectlyPaid ? "#065F46" : "#92400E",
+              weight: "bold",
+              flex: 0
+            },
+            {
+              type: "text",
+              text: amountStr,
+              size: "xxl",
+              color: isDirectlyPaid ? "#065F46" : "#92400E",
+              weight: "bold",
+              wrap: true,
+              flex: 1
+            }
+          ]
+        },
+        {
+          type: "separator",
+          margin: "sm",
+          color: isDirectlyPaid ? "#A7F3D0" : "#FDE68A"
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          justifyContent: "space-between",
+          margin: "xs",
+          contents: [
+            {
+              type: "text",
+              text: "繳費狀態",
               size: "xxs",
               color: isDirectlyPaid ? "#059669" : "#B45309"
             },
             {
               type: "text",
-              text: isDirectlyPaid ? (payment.paid_date || dueDateStr) : `${dueDateStr} 前`,
+              text: isDirectlyPaid ? "已入帳結清" : "待繳納",
               size: "xxs",
               color: isDirectlyPaid ? "#065F46" : "#92400E",
-              weight: "bold"
+              weight: "bold",
+              align: "end"
             }
           ]
         }
@@ -469,6 +522,15 @@ serve(async (req: Request) => {
         .eq("id", landlordId)
         .maybeSingle();
       landlord = lnd;
+    }
+
+    if (!landlord) {
+      const { data: allLnds } = await supabase
+        .from("landlords")
+        .select("*")
+        .is("deleted_at", null)
+        .limit(1);
+      landlord = allLnds?.[0] || null;
     }
 
     // 4. Construct Flex Message

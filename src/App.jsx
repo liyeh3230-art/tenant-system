@@ -369,14 +369,26 @@ export default function App() {
           resolvedId
         ].filter(Boolean)));
 
-        const rawBank = matchedProfile?.bank_info || matchedLandlord?.bank_info;
-        if (rawBank) {
-          const parsed = typeof rawBank === 'string' ? JSON.parse(rawBank || '{}') : rawBank;
+        let parsedBank = null;
+        if (matchedLandlord?.company_name) {
+          try {
+            const parsedComp = typeof matchedLandlord.company_name === 'string' ? JSON.parse(matchedLandlord.company_name) : matchedLandlord.company_name;
+            if (parsedComp && (parsedComp.bankName || parsedComp.bankAccount || parsedComp.accountName)) {
+              parsedBank = parsedComp;
+            }
+          } catch {}
+        }
+        if (!parsedBank && (matchedProfile?.bank_info || matchedLandlord?.bank_info)) {
+          const raw = matchedProfile?.bank_info || matchedLandlord?.bank_info;
+          parsedBank = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+        }
+
+        if (parsedBank) {
           setLandlordBankInfo({
-            bankName: parsed.bankName || '',
-            bankAccount: parsed.bankAccount || '',
-            accountName: parsed.accountName || '',
-            note: parsed.note || ''
+            bankName: parsedBank.bankName || '',
+            bankAccount: parsedBank.bankAccount || '',
+            accountName: parsedBank.accountName || parsedBank.landlordName || '',
+            note: parsedBank.note || parsedBank.notes || ''
           });
         } else {
           setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
@@ -709,7 +721,16 @@ export default function App() {
               }
             });
 
-            const targetBank = combinedLandlords[0]?.bankInfo;
+            const targetLandlord = combinedLandlords[0];
+            let targetBank = targetLandlord?.bankInfo;
+            if (!targetBank && targetLandlord?.company_name) {
+              try {
+                const parsedComp = typeof targetLandlord.company_name === 'string' ? JSON.parse(targetLandlord.company_name) : targetLandlord.company_name;
+                if (parsedComp && (parsedComp.bankName || parsedComp.bankAccount || parsedComp.accountName)) {
+                  targetBank = parsedComp;
+                }
+              } catch {}
+            }
             if (targetBank) {
               const parsed = typeof targetBank === 'string' ? JSON.parse(targetBank || '{}') : targetBank;
               setLandlordBankInfo({
@@ -4220,21 +4241,59 @@ export default function App() {
       note: tempBankNote.trim()
     };
     try {
-      if (isSupabaseConfigured && currentLandlordId) {
-        await supabase.from('profiles').update({
-          bank_info: updatedBank,
-          updated_at: new Date().toISOString()
-        }).eq('id', currentLandlordId);
+      if (isSupabaseConfigured) {
+        const targetId = currentLandlordId || currentUser?.id || landlords[0]?.id;
+        if (targetId) {
+          // 1. 讀取現有 landlords.company_name 中的元資料
+          let existingMeta = {};
+          const { data: curLnd } = await supabase
+            .from('landlords')
+            .select('company_name')
+            .eq('id', targetId)
+            .maybeSingle();
 
-        await supabase.from('landlords').update({
-          bank_info: updatedBank,
-          updated_at: new Date().toISOString()
-        }).eq('id', currentLandlordId);
+          if (curLnd?.company_name) {
+            try {
+              existingMeta = typeof curLnd.company_name === 'string'
+                ? JSON.parse(curLnd.company_name)
+                : curLnd.company_name;
+            } catch {
+              existingMeta = { companyName: curLnd.company_name };
+            }
+          }
+
+          const updatedMeta = {
+            ...existingMeta,
+            bankName: updatedBank.bankName,
+            bankAccount: updatedBank.bankAccount,
+            accountName: updatedBank.accountName,
+            note: updatedBank.note,
+            updatedAt: new Date().toISOString()
+          };
+
+          const jsonStr = JSON.stringify(updatedMeta);
+
+          // 2. 更新 landlords 表的 company_name (LINE Bot 與系統皆從此讀取)
+          const { error: updateLndErr } = await supabase
+            .from('landlords')
+            .update({
+              company_name: jsonStr,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', targetId);
+
+          if (updateLndErr) {
+            console.error('Update landlords error:', updateLndErr);
+            throw new Error(updateLndErr.message || '更新房東資料庫失敗');
+          }
+        }
       }
       setLandlordBankInfo(updatedBank);
       setActiveModal(null);
-      showToast('收款帳戶資訊已成功保存！', 'success');
+      showToast('🎉 收款帳戶資訊已成功保存至資料庫並同步至 LINE！', 'success');
+      fetchSupabaseData();
     } catch (err) {
+      console.error('Save landlord bank info failed:', err);
       showToast(`保存失敗: ${err.message}`, 'error');
     }
   };
