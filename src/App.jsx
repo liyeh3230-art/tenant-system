@@ -1255,6 +1255,7 @@ export default function App() {
   const [lineBindingConflictUser, setLineBindingConflictUser] = useState(null);
   const [lineFirstLoginPassword, setLineFirstLoginPassword] = useState('');
   const [lineFirstLoginNewPassword, setLineFirstLoginNewPassword] = useState('');
+  const [lineFirstLoginConfirmPassword, setLineFirstLoginConfirmPassword] = useState('');
 
   useEffect(() => {
     const processSocialOAuth = async () => {
@@ -1263,6 +1264,49 @@ export default function App() {
         let provider = 'line';
 
         const searchParams = new URLSearchParams(window.location.search);
+        const mode = searchParams.get('mode') || searchParams.get('action');
+        const lineUidParam = searchParams.get('line_uid') || searchParams.get('uid');
+        const displayNameParam = searchParams.get('displayName') || searchParams.get('name') || '';
+
+        // 支援直接透過 LINE BOT / LIFF 開啟註冊表單 (方案 B)
+        if (mode === 'line_register' || mode === 'liff_register') {
+          setSocialLoginProvider('line');
+          setLineFirstLoginUser({
+            id: lineUidParam ? `line_${lineUidParam.substring(0, 16)}` : `line_${Date.now()}`,
+            name: displayNameParam,
+            socialProfile: { userId: lineUidParam, displayName: displayNameParam }
+          });
+          setLineFirstLoginName(displayNameParam);
+          setLineFirstLoginPhone('');
+          setLineFirstLoginRole('tenant');
+          setLineBindingConflictUser(null);
+          setLineFirstLoginPassword('');
+          setLineFirstLoginNewPassword('');
+          setLineFirstLoginConfirmPassword('');
+          setActiveModal('lineFirstLogin');
+          showToast('👋 歡迎！請填寫真實姓名、手機並設定網站登入密碼完成開通。', 'info');
+
+          // 若在 LIFF 環境中，嘗試透過 LIFF SDK 讀取使用者 Profile
+          if (typeof window !== 'undefined' && window.liff) {
+            try {
+              if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
+                const liffProfile = await window.liff.getProfile();
+                if (liffProfile) {
+                  setLineFirstLoginUser({
+                    id: `line_${liffProfile.userId.substring(0, 16)}`,
+                    name: liffProfile.displayName,
+                    socialProfile: { userId: liffProfile.userId, displayName: liffProfile.displayName, avatarUrl: liffProfile.pictureUrl }
+                  });
+                  setLineFirstLoginName(liffProfile.displayName || displayNameParam || '');
+                }
+              }
+            } catch (liffErr) {
+              console.warn('LIFF profile check notice:', liffErr);
+            }
+          }
+          return;
+        }
+
         const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
         const hashParams = new URLSearchParams(rawHash);
         const state = searchParams.get('state') || hashParams.get('state');
@@ -1570,6 +1614,11 @@ export default function App() {
         setLineFirstLoginLoading(false);
         return;
       }
+      if (lineFirstLoginNewPassword.trim() !== (lineFirstLoginConfirmPassword || '').trim()) {
+        showToast('兩次輸入的登入密碼不一致，請重新確認！', 'warning');
+        setLineFirstLoginLoading(false);
+        return;
+      }
 
       // 建立 Supabase Auth 帳號密碼，確保新用戶在未來能以手機號碼與此密碼原生登入
       let finalAuthUserId = targetId;
@@ -1669,6 +1718,11 @@ export default function App() {
 
         setActiveModal(null);
         showToast(`🎉 歡迎 ${cleanName}！已設定密碼並成功為您開通房客會員專區！`, 'success');
+        if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+          setTimeout(() => {
+            try { window.liff.closeWindow(); } catch (e) {}
+          }, 1800);
+        }
       } else {
         const idNum = sanitizeText(landlordAppForm.idNumber).trim();
         const addr = sanitizeText(landlordAppForm.contactAddress).trim();
@@ -11286,25 +11340,33 @@ export default function App() {
                     ) : (
                       <>
                         {/* 密碼設定卡片（新手機門號強制必填） */}
-                        <div className="space-y-1.5 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div className="space-y-2 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
                           <div className="flex items-center justify-between">
                             <label className="block text-xs font-bold text-slate-800">
-                              設定登入密碼 (6 位數以上) <span className="text-rose-500">*</span>
+                              設定網站登入密碼 (6 位數以上) <span className="text-rose-500">*</span>
                             </label>
-                            <span className="text-[10px] text-slate-400 font-semibold">必填安全憑證</span>
+                            <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">網站登入專用</span>
                           </div>
-                          <div className="relative">
+                          <div className="space-y-2">
                             <input
                               type="password"
-                              placeholder="請設定至少 6 位數之安全密碼"
+                              placeholder="請設定至少 6 位數之登入密碼"
                               value={lineFirstLoginNewPassword}
                               onChange={(e) => setLineFirstLoginNewPassword(e.target.value)}
                               className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
                               required
                             />
+                            <input
+                              type="password"
+                              placeholder="請再次輸入確認密碼"
+                              value={lineFirstLoginConfirmPassword}
+                              onChange={(e) => setLineFirstLoginConfirmPassword(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 font-semibold"
+                              required
+                            />
                           </div>
                           <p className="text-[11px] text-slate-500 leading-tight">
-                            ⚠️ 因本系統不使用簡訊驗證碼，此密碼將作為您未來使用手機號碼獨立登入，以及綁定其他社群帳號時的最高身分憑證。
+                            💡 此密碼將作為您未來使用【手機號碼 + 此密碼】直接在電腦/手機網頁登入系統的憑證，請務必牢記。
                           </p>
                         </div>
 

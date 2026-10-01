@@ -959,32 +959,49 @@ function buildMenuFlex(profile: any) {
   };
 }
 
-// 7. 未綁定帳號提示 Flex Message
-function buildUnboundGuideFlex() {
+const LIFF_REGISTRATION_URL = Deno.env.get("LIFF_REGISTRATION_URL") || "";
+const SITE_URL = Deno.env.get("SITE_URL") || Deno.env.get("APP_URL") || "https://hpphlfmtyxrulirpyejp.supabase.co";
+
+// 7. 未綁定帳號提示 Flex Message (支援方案 B 快速開通與設定密碼)
+function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
+  const encodedName = encodeURIComponent(displayName || "");
+  const registerUrl = LIFF_REGISTRATION_URL || `${SITE_URL}/?mode=line_register&line_uid=${lineUserId}&displayName=${encodedName}`;
+
   return {
     type: "flex",
-    altText: "⚠️ 您的 LINE 帳號尚未綁定租客身分",
+    altText: "👋 歡迎！請先開通您的租客會員身分",
     contents: {
       type: "bubble",
       size: "mega",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#6366F1",
+        backgroundColor: "#06C755",
         paddingAll: "16px",
         contents: [
-          { type: "text", text: "智慧租屋 · 會員綁定指引", color: "#E0E7FF", size: "xs", weight: "bold" },
-          { type: "text", text: "尚未綁定租客身分", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
+          { type: "text", text: "智慧租屋 · 快速會員開通", color: "#E0F2FE", size: "xs", weight: "bold" },
+          { type: "text", text: "開通專屬租客會員", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
         ]
       },
       body: {
         type: "box",
         layout: "vertical",
         paddingAll: "16px",
-        spacing: "sm",
+        spacing: "md",
         contents: [
-          { type: "text", text: "歡迎使用智慧租屋 LINE 服務小幫手！", size: "sm", color: "#1E293B", weight: "bold" },
-          { type: "text", text: "請透過以下任一方式完成帳號綁定，即可隨時查閱租約與帳單：", size: "xs", color: "#64748B" },
+          { type: "text", text: "您好！歡迎使用智慧租屋 LINE 服務小幫手！", size: "sm", color: "#1E293B", weight: "bold" },
+          { type: "text", text: "為了能即時為您推播租金帳單、合約到期提醒與繳費收據，請點擊下方按鈕完成會員開通（包含設定網站登入密碼）：", size: "xs", color: "#64748B", wrap: true },
+          {
+            type: "button",
+            style: "primary",
+            color: "#06C755",
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "📝 點此開通會員與設定密碼",
+              uri: registerUrl
+            }
+          },
           { type: "separator", margin: "sm" },
           {
             type: "box",
@@ -992,18 +1009,8 @@ function buildUnboundGuideFlex() {
             spacing: "xs",
             margin: "sm",
             contents: [
-              { type: "text", text: "👉 方式 1：登入網站點「LINE 登入」", size: "xs", color: "#4F46E5", weight: "bold" },
-              { type: "text", text: "於租客系統登入頁面點選 LINE 登入，系統將自動無縫完成帳號綁定。", size: "xxs", color: "#64748B" }
-            ]
-          },
-          {
-            type: "box",
-            layout: "vertical",
-            spacing: "xs",
-            margin: "sm",
-            contents: [
-              { type: "text", text: "👉 方式 2：輸入綁定驗證碼", size: "xs", color: "#4F46E5", weight: "bold" },
-              { type: "text", text: "至租客系統個人中心取得 6 碼驗證代碼，並於此輸入「綁定 <代碼>」（例如：綁定 A1B2C3）。", size: "xxs", color: "#64748B" }
+              { type: "text", text: "💡 提示：", size: "xs", color: "#4F46E5", weight: "bold" },
+              { type: "text", text: "完成開通後，您既能在 LINE 即時接收通知與對帳，也能隨時使用【手機號碼 + 密碼】登入電腦或手機網站！", size: "xxs", color: "#64748B", wrap: true }
             ]
           }
         ]
@@ -1167,6 +1174,12 @@ serve(async (req: Request) => {
         .select("tenant_id, line_display_name")
         .eq("line_user_id", lineUserId)
         .maybeSingle();
+
+      if (!binding) {
+        // 未綁定新租客加入好友 -> 自動推播快速開通會員與設定密碼卡片 (方案 B)
+        await replyLineMessage(replyToken, [buildUnboundGuideFlex(lineUserId, "租客朋友")]);
+        continue;
+      }
 
       const welcomeName = binding?.line_display_name || "租客朋友";
 
