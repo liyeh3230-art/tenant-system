@@ -34,7 +34,9 @@ function getCategoryMeta(billType: string) {
 function parseLandlordBank(landlord: any) {
   let bankName = landlord?.bank_name || "";
   let bankAccount = landlord?.bank_account || "";
-  let landlordName = landlord?.account_name || landlord?.name || "房東";
+  // ⚠️ 嚴格區分：landlordName 永遠代表合約出租人法定房東本人，絕不能被受款戶名 (accountName) 覆蓋！
+  let landlordName = landlord?.name || "房東";
+  let accountName = landlord?.name || "房東";
   let landlordPhone = landlord?.phone || "";
   let note = landlord?.note || "";
 
@@ -44,7 +46,7 @@ function parseLandlordBank(landlord: any) {
       if (parsed) {
         if (parsed.bankName) bankName = parsed.bankName;
         if (parsed.bankAccount) bankAccount = parsed.bankAccount;
-        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.accountName) accountName = parsed.accountName; // 僅更新銀行帳戶戶名
         if (parsed.note) note = parsed.note;
       }
     } catch {}
@@ -55,7 +57,7 @@ function parseLandlordBank(landlord: any) {
       if (parsed) {
         if (parsed.bankName) bankName = parsed.bankName;
         if (parsed.bankAccount) bankAccount = parsed.bankAccount;
-        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.accountName) accountName = parsed.accountName; // 僅更新銀行帳戶戶名
         if (parsed.note) note = parsed.note;
       }
     } catch {}
@@ -63,7 +65,8 @@ function parseLandlordBank(landlord: any) {
   return {
     bankName: bankName || "請洽詢房東",
     bankAccount: bankAccount || "請洽詢房東",
-    landlordName: landlordName,
+    accountName: accountName,       // 銀行收款戶名（公司/他人/代理人）
+    landlordName: landlordName,     // 合約出租甲方房東本人
     landlordPhone: landlordPhone,
     note: note
   };
@@ -254,7 +257,15 @@ function buildNewBillFlex(params: {
             layout: "horizontal",
             contents: [
               { type: "text", text: "戶名：", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: bank.landlordName, size: "xs", color: "#1E293B", flex: 7 }
+              { type: "text", text: bank.accountName, size: "xs", color: "#1E293B", weight: "bold", flex: 7 }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "房東：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${bank.landlordName} (${bank.landlordPhone || '未提供電話'})`, size: "xs", color: "#64748B", flex: 7 }
             ]
           }
         ]

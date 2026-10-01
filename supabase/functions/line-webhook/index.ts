@@ -122,7 +122,9 @@ function calculateContractDuration(start: string, end: string) {
 function parseLandlordBank(landlord: any) {
   let bankName = landlord?.bank_name || "";
   let bankAccount = landlord?.bank_account || "";
-  let landlordName = landlord?.account_name || landlord?.name || "房東";
+  // ⚠️ 嚴格區分：landlordName 永遠代表合約出租人法定房東本人，絕不能被銀行受款戶名 (accountName) 覆蓋！
+  let landlordName = landlord?.name || "房東";
+  let accountName = landlord?.name || "房東";
   let landlordPhone = landlord?.phone || "未提供電話";
   let note = landlord?.note || "";
 
@@ -132,7 +134,7 @@ function parseLandlordBank(landlord: any) {
       if (parsed) {
         if (parsed.bankName) bankName = parsed.bankName;
         if (parsed.bankAccount) bankAccount = parsed.bankAccount;
-        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.accountName) accountName = parsed.accountName; // 僅更新銀行帳戶戶名
         if (parsed.note) note = parsed.note;
       }
     } catch {}
@@ -143,7 +145,7 @@ function parseLandlordBank(landlord: any) {
       if (parsed) {
         if (parsed.bankName) bankName = parsed.bankName;
         if (parsed.bankAccount) bankAccount = parsed.bankAccount;
-        if (parsed.accountName) landlordName = parsed.accountName;
+        if (parsed.accountName) accountName = parsed.accountName; // 僅更新銀行帳戶戶名
         if (parsed.note) note = parsed.note;
       }
     } catch {}
@@ -151,7 +153,8 @@ function parseLandlordBank(landlord: any) {
   return {
     bankName: bankName || "未填寫銀行名稱",
     bankAccount: bankAccount || "未填寫銀行帳號",
-    landlordName: landlordName,
+    accountName: accountName,       // 銀行收款戶名（例如：徐立業、XX有限公司）
+    landlordName: landlordName,     // 合約出租甲方（例如：周金在，依法不可變更）
     landlordPhone: landlordPhone,
     note: note
   };
@@ -274,7 +277,7 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
             layout: "horizontal",
             contents: [
               { type: "text", text: "👤 出租甲方", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `${bankInfo.landlordName} (${bankInfo.landlordPhone})`, size: "xs", color: "#334155", weight: "bold", flex: 7 }
+              { type: "text", text: `${landlord?.name || bankInfo.landlordName || '房東'} (${landlord?.phone || bankInfo.landlordPhone || '未提供電話'})`, size: "xs", color: "#334155", weight: "bold", flex: 7 }
             ]
           }
         ]
@@ -1075,8 +1078,16 @@ function buildBankInfoFlex(landlord: any) {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "戶名／房東", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `${bank.landlordName} (${bank.landlordPhone})`, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+              { type: "text", text: "帳戶戶名", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: bank.accountName, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "出租房東", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${bank.landlordName} (${bank.landlordPhone})`, size: "xs", color: "#475569", flex: 7 }
             ]
           },
           ...(bank.note ? [
