@@ -47,6 +47,104 @@ export const formatPaymentMethod = (method) => {
   return String(method).replace(/^bank\b/i, '銀行轉帳');
 };
 
+export const formatFeeItemName = (title, billType, dueDate) => {
+  const typeMap = {
+    rent: '租金',
+    deposit: '押金',
+    electricity: '電費',
+    power: '電費',
+    water: '水費',
+    gas: '瓦斯費',
+    utilities: '水電瓦斯',
+    management: '管理費',
+    parking: '車位費',
+    maintenance: '修繕費',
+    repair: '修繕費',
+    other: '雜支'
+  };
+
+  const bType = String(billType || '').toLowerCase().trim();
+  let baseType = typeMap[bType] || '費用';
+  let raw = (title || '').trim();
+
+  // 若屬綜合水電或雜支，依字樣細分基底
+  if (bType === 'utilities' || bType === 'other') {
+    if (raw.includes('電')) baseType = '電費';
+    else if (raw.includes('水')) baseType = '水費';
+    else if (raw.includes('瓦斯')) baseType = '瓦斯費';
+    else if (raw.includes('管理')) baseType = '管理費';
+    else if (raw.includes('租金')) baseType = '租金';
+    else if (raw.includes('押金')) baseType = '押金';
+    else if (raw.includes('車位')) baseType = '車位費';
+    else if (raw.includes('修繕') || raw.includes('維修')) baseType = '修繕費';
+  }
+
+  // 若已經是統一格式 "項目 (期別/說明)"
+  const alreadyFormatted = raw.match(/^([^\(\)]+)\s*\((.+)\)$/);
+  if (alreadyFormatted) {
+    let normMain = alreadyFormatted[1].trim();
+    const subPart = alreadyFormatted[2].trim();
+    if (normMain === '房屋租金') normMain = '租金';
+    if (normMain === '用電費用') normMain = '電費';
+    if (normMain === '大樓管理費') normMain = '管理費';
+    if (normMain === '押金保證金') normMain = '押金';
+    const subNumMatch = subPart.match(/^([0-9]{1,2})$/);
+    if (subNumMatch) {
+      return `${normMain} (${subNumMatch[1]}月份)`;
+    }
+    return `${normMain} (${subPart})`;
+  }
+
+  // 若以月份數字開頭，例 "10", "10月份", "11電費", "2月"
+  const monthLeadMatch = raw.match(/^([0-9]{1,2})(.*)$/);
+  if (monthLeadMatch) {
+    const num = monthLeadMatch[1];
+    const rest = monthLeadMatch[2].replace(/[\s月(份)?]/g, '');
+    let resolvedBase = baseType;
+    if (rest.includes('電') || bType === 'electricity') resolvedBase = '電費';
+    else if (rest.includes('水') || bType === 'water') resolvedBase = '水費';
+    else if (rest.includes('瓦斯') || bType === 'gas') resolvedBase = '瓦斯費';
+    else if (rest.includes('租') || bType === 'rent') resolvedBase = '租金';
+    else if (rest.includes('管') || bType === 'management') resolvedBase = '管理費';
+    const cleanRest = rest.replace(/(?:電費|水費|瓦斯費|租金|管理費|費用)/g, '').trim();
+    if (cleanRest) {
+      return `${resolvedBase} (${num}月份 · ${cleanRest})`;
+    }
+    return `${resolvedBase} (${num}月份)`;
+  }
+
+  // 若包含月份字樣，例 "10月份租金", "9月份電費", "租金10月份"
+  const combinedMatch = raw.match(/([0-9]{1,2})\s*月(?:份)?/);
+  if (combinedMatch) {
+    const mStr = `${combinedMatch[1]}月份`;
+    const cleanSub = raw.replace(/([0-9]{1,2})\s*月(?:份)?/, '').replace(/[\s\-_/]/g, '');
+    if (!cleanSub || cleanSub === baseType || cleanSub === '租金' || cleanSub === '電費' || cleanSub === '水費' || cleanSub === '瓦斯費' || cleanSub === '管理費' || cleanSub === '房屋租金') {
+      return `${baseType} (${mStr})`;
+    } else {
+      return `${baseType} (${mStr} · ${cleanSub})`;
+    }
+  }
+
+  // 若未填寫，自動依據期限或建立日推導期別月份
+  if (!raw) {
+    if (dueDate && ['rent', 'electricity', 'power', 'water', 'gas', 'utilities', 'management'].includes(bType)) {
+      const d = new Date(dueDate);
+      if (!isNaN(d.getTime())) {
+        const m = d.getMonth() + 1;
+        return `${baseType} (${m}月份)`;
+      }
+    }
+    return baseType;
+  }
+
+  // 若與基底相同直接回傳
+  if (raw === baseType || raw === '押金保證金' || raw === '房屋租金' || raw === '大樓管理費') {
+    return baseType;
+  }
+
+  return `${baseType} (${raw})`;
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -573,7 +671,7 @@ export default function App() {
                 amount: p.amount,
                 status: p.status,
                 billType: p.bill_type || 'rent',
-                title: p.title,
+                title: formatFeeItemName(p.title, p.bill_type, p.due_date || p.paid_date),
                 dueDate: p.due_date,
                 paidDate: p.paid_date,
                 paymentMethod: p.payment_method,
@@ -593,7 +691,7 @@ export default function App() {
                   amount: p.amount,
                   status: p.status,
                   billType: p.bill_type || 'rent',
-                  title: p.title,
+                  title: formatFeeItemName(p.title, p.bill_type, p.due_date || p.paid_date),
                   dueDate: p.due_date,
                   paidDate: p.paid_date,
                   paymentMethod: p.payment_method,
@@ -849,7 +947,7 @@ export default function App() {
                 amount: p.amount,
                 status: p.status,
                 billType: p.bill_type || 'rent',
-                title: p.title,
+                title: formatFeeItemName(p.title, p.bill_type, p.due_date || p.paid_date),
                 dueDate: p.due_date,
                 paidDate: p.paid_date,
                 paymentMethod: p.payment_method,
@@ -869,7 +967,7 @@ export default function App() {
                   amount: p.amount,
                   status: p.status,
                   billType: p.bill_type || 'rent',
-                  title: p.title,
+                  title: formatFeeItemName(p.title, p.bill_type, p.due_date || p.paid_date),
                   dueDate: p.due_date,
                   paidDate: p.paid_date,
                   paymentMethod: p.payment_method,
@@ -957,7 +1055,7 @@ export default function App() {
             amount: p.amount,
             status: p.status,
             billType: p.bill_type || 'rent',
-            title: p.title,
+            title: formatFeeItemName(p.title, p.bill_type, p.due_date || p.paid_date),
             dueDate: p.due_date,
             paidDate: p.paid_date,
             paymentMethod: p.payment_method,
@@ -4222,7 +4320,7 @@ export default function App() {
       status: isDirectlyPaid ? 'paid' : 'pending',
       paidDate: isDirectlyPaid ? (customBillDueDate || new Date().toISOString().split('T')[0]) : null,
       billType: customBillCategory,
-      title: customBillTitle.trim(),
+      title: formatFeeItemName(customBillTitle, customBillCategory, customBillDueDate),
       paymentMethod: isDirectlyPaid ? (methodNames[customBillPaymentMethod] || customBillPaymentMethod) : null,
       creatorRole: 'landlord',
       approvalStatus: 'approved',
@@ -4295,7 +4393,7 @@ export default function App() {
         return [newPayment, ...prev];
       });
       setActiveModal(null);
-      const displayItemName = `${typeLabels[customBillCategory] || '費用項目'}${newPayment.title ? ` (${newPayment.title})` : ''}`;
+      const displayItemName = formatFeeItemName(newPayment.title, customBillCategory, customBillDueDate);
       showToast(`已成功記錄 ${targetLease.tenantName} 的「${displayItemName}」(金額 NT$ ${amt.toLocaleString()}${isDirectlyPaid ? ' · 已入帳' : ' · 待繳款'})！`, 'success');
     } catch (err) {
       showToast(`記錄失敗: ${err.message}`, 'error');
@@ -4458,7 +4556,7 @@ export default function App() {
       cash: '現金交付'
     };
 
-    const displayReportName = `${typeLabels[tenantReportCategory] || '費用項目'}${tenantReportTitle.trim() ? ` (${tenantReportTitle.trim()})` : ''}`;
+    const displayReportName = formatFeeItemName(tenantReportTitle, tenantReportCategory, tenantReportDate);
 
     try {
       if (tenantReportTargetBill) {
@@ -4498,7 +4596,7 @@ export default function App() {
           approvalStatus: 'pending_approval',
           paidDate: tenantReportDate || new Date().toISOString().split('T')[0],
           billType: tenantReportCategory,
-          title: tenantReportTitle.trim() || `${typeLabels[tenantReportCategory] || '費用'} (租客自報)`,
+          title: formatFeeItemName(tenantReportTitle, tenantReportCategory, tenantReportDate),
           paymentMethod: methodNames[tenantReportMethod],
           transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
           creatorRole: 'tenant',
@@ -4574,7 +4672,7 @@ export default function App() {
       });
 
       const cat = getCategoryInfo(target.billType);
-      const itemTitle = `${cat.label}${target.title ? ` (${target.title})` : ''}`;
+      const itemTitle = formatFeeItemName(target.title, target.billType, target.dueDate || target.paidDate);
       showToast(`✅ 已核准「${target.tenantName}」回報的 ${itemTitle} (NT$ ${target.amount.toLocaleString()})，已正式入帳！`, 'success');
     } catch (err) {
       showToast(`核准失敗: ${err.message}`, 'error');
@@ -6410,7 +6508,7 @@ export default function App() {
                                   <div className="flex items-center space-x-2 mb-1">
                                     <span className="font-bold text-slate-800 text-base">{rep.tenantName}</span>
                                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
-                                      {catInfo.icon} {catInfo.label}{rep.title ? ` (${rep.title})` : ''}
+                                      {catInfo.icon} {formatFeeItemName(rep.title, rep.billType, rep.dueDate)}
                                     </span>
                                   </div>
                                   <p className="text-xs text-slate-500">{rep.propertyName} · 回報日期: {rep.dueDate}</p>
@@ -6729,7 +6827,7 @@ export default function App() {
                                       <span className="text-slate-500 font-mono text-xs block">{pay.id.split('_')[0]}</span>
                                       <span className={`inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
                                         <span>{catInfo.icon}</span>
-                                        <span>{catInfo.label}{pay.title ? ` (${pay.title})` : ''}</span>
+                                        <span>{formatFeeItemName(pay.title, pay.billType, pay.dueDate || pay.paidDate)}</span>
                                       </span>
                                       {pay.creatorRole === 'tenant' && (
                                         <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded block w-max font-semibold">
@@ -6883,7 +6981,7 @@ export default function App() {
                                   <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                                     <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
                                       <span>{catInfo.icon}</span>
-                                      <span>{catInfo.label}{pay.title ? ` (${pay.title})` : ''}</span>
+                                      <span>{formatFeeItemName(pay.title, pay.billType, pay.dueDate || pay.paidDate)}</span>
                                     </span>
                                     {pay.creatorRole === 'tenant' && (
                                       <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-semibold border border-amber-200">
@@ -7848,7 +7946,7 @@ export default function App() {
                                               <div className="flex items-center gap-1.5 flex-wrap">
                                                 <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${catInfo.color}`}>
                                                   <span>{catInfo.icon}</span>
-                                                  <span>{catInfo.label}{p.title ? ` (${p.title})` : ''}</span>
+                                                  <span>{formatFeeItemName(p.title, p.billType, p.dueDate || p.paidDate)}</span>
                                                 </span>
                                                 <span className={`font-bold font-mono ${isVoid ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                                                   NT$ {p.amount.toLocaleString()}
@@ -8398,7 +8496,7 @@ export default function App() {
                                                     <span className="text-slate-500 font-mono text-xs block">{bill.id.split('_')[0]}</span>
                                                     <span className={`inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-md border ${catInfo.color}`}>
                                                       <span>{catInfo.icon}</span>
-                                                      <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                                      <span>{formatFeeItemName(bill.title, bill.billType, bill.dueDate || bill.paidDate)}</span>
                                                     </span>
                                                   </div>
                                                 </td>
@@ -8554,7 +8652,7 @@ export default function App() {
                                                 <div className="pt-0.5 flex items-center gap-1.5 flex-wrap">
                                                   <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-2 py-0.5 rounded border ${catInfo.color}`}>
                                                     <span>{catInfo.icon}</span>
-                                                    <span>{catInfo.label}{bill.title ? ` (${bill.title})` : ''}</span>
+                                                    <span>{formatFeeItemName(bill.title, bill.billType, bill.dueDate || bill.paidDate)}</span>
                                                   </span>
                                                   {bill.creatorRole === 'tenant' && (
                                                     <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
@@ -8847,7 +8945,7 @@ export default function App() {
                                               <div className="flex items-center gap-1.5 flex-wrap">
                                                 <span className={`inline-flex items-center space-x-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${catInfo.color}`}>
                                                   <span>{catInfo.icon}</span>
-                                                  <span>{catInfo.label}{p.title ? ` (${p.title})` : ''}</span>
+                                                  <span>{formatFeeItemName(p.title, p.billType, p.dueDate || p.paidDate)}</span>
                                                 </span>
                                                 <span className={`font-bold font-mono ${isVoid ? 'line-through text-slate-400' : 'text-slate-900'}`}>
                                                   NT$ {p.amount.toLocaleString()}
@@ -10711,10 +10809,7 @@ export default function App() {
                         <div className="grid grid-cols-3 border-b border-slate-200 bg-slate-50/70 p-3">
                           <span className="text-slate-500 font-semibold">繳納項目/期別</span>
                           <span className="col-span-2 font-bold text-indigo-700">
-                            {(() => {
-                              const cat = getCategoryInfo(receiptPayment.billType);
-                              return `${cat.label}${receiptPayment.title ? ` (${receiptPayment.title})` : ` (${receiptPayment.dueDate.slice(0, 7)}期)`}`;
-                            })()}
+                            {formatFeeItemName(receiptPayment.title, receiptPayment.billType, receiptPayment.dueDate || receiptPayment.paidDate)}
                           </span>
                         </div>
                         <div className="grid grid-cols-3 border-b border-slate-200 p-3">
@@ -10888,10 +10983,10 @@ export default function App() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">項目名稱 / 備註</label>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">月份 / 其他項目</label>
                       <input
                         type="text"
-                        placeholder="例如：月份 (如：8月份)"
+                        placeholder="例如：10月份 (未填則預設本月份)"
                         value={customBillTitle}
                         onChange={(e) => setCustomBillTitle(e.target.value)}
                         className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500"
@@ -11763,7 +11858,7 @@ export default function App() {
                             >
                               {availableUnpaid.map(b => (
                                 <option key={b.id} value={b.id}>
-                                  📄 待繳帳單：{b.title || getCategoryInfo(b.billType).label} (NT$ {b.amount.toLocaleString()} · 期限 {b.dueDate})
+                                  📄 待繳帳單：{formatFeeItemName(b.title, b.billType, b.dueDate)} (NT$ {b.amount.toLocaleString()} · 期限 {b.dueDate})
                                 </option>
                               ))}
                               <option value="__SELF_REPORT__">
@@ -11844,12 +11939,12 @@ export default function App() {
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
-                          <span>項目名稱 / 期別</span>
+                          <span>月份 / 其他項目</span>
                           {tenantReportTargetBill && <Lock size={11} className="text-slate-400" />}
                         </label>
                         <input
                           type="text"
-                          placeholder="例如：8月份租金"
+                          placeholder="例如：10月份 或 押金"
                           value={tenantReportTitle}
                           onChange={(e) => setTenantReportTitle(e.target.value)}
                           readOnly={!!tenantReportTargetBill}

@@ -79,6 +79,105 @@ function parseLandlordBank(landlord: any) {
   };
 }
 
+// Helper: 統一費用項目呈現格式（例："租金 (10月份)", "電費 (2月份)", "押金"）
+function formatFeeItemName(title?: string | null, billType?: string | null, dueDate?: string | null): string {
+  const typeMap: Record<string, string> = {
+    rent: '租金',
+    deposit: '押金',
+    electricity: '電費',
+    power: '電費',
+    water: '水費',
+    gas: '瓦斯費',
+    utilities: '水電瓦斯',
+    management: '管理費',
+    parking: '車位費',
+    maintenance: '修繕費',
+    repair: '修繕費',
+    other: '雜支'
+  };
+
+  const bType = String(billType || '').toLowerCase().trim();
+  let baseType = typeMap[bType] || '費用';
+  const raw = (title || '').trim();
+
+  // 若屬綜合水電或雜支，依字樣細分基底
+  if (bType === 'utilities' || bType === 'other') {
+    if (raw.includes('電')) baseType = '電費';
+    else if (raw.includes('水')) baseType = '水費';
+    else if (raw.includes('瓦斯')) baseType = '瓦斯費';
+    else if (raw.includes('管理')) baseType = '管理費';
+    else if (raw.includes('租金')) baseType = '租金';
+    else if (raw.includes('押金')) baseType = '押金';
+    else if (raw.includes('車位')) baseType = '車位費';
+    else if (raw.includes('修繕') || raw.includes('維修')) baseType = '修繕費';
+  }
+
+  // 若已經是統一格式 "項目 (期別/說明)"
+  const alreadyFormatted = raw.match(/^([^\(\)]+)\s*\((.+)\)$/);
+  if (alreadyFormatted) {
+    let normMain = alreadyFormatted[1].trim();
+    const subPart = alreadyFormatted[2].trim();
+    if (normMain === '房屋租金') normMain = '租金';
+    if (normMain === '用電費用') normMain = '電費';
+    if (normMain === '大樓管理費') normMain = '管理費';
+    if (normMain === '押金保證金') normMain = '押金';
+    const subNumMatch = subPart.match(/^([0-9]{1,2})$/);
+    if (subNumMatch) {
+      return `${normMain} (${subNumMatch[1]}月份)`;
+    }
+    return `${normMain} (${subPart})`;
+  }
+
+  // 若以月份數字開頭，例 "10", "10月份", "11電費", "2月"
+  const monthLeadMatch = raw.match(/^([0-9]{1,2})(.*)$/);
+  if (monthLeadMatch) {
+    const num = monthLeadMatch[1];
+    const rest = monthLeadMatch[2].replace(/[\s月(份)?]/g, '');
+    let resolvedBase = baseType;
+    if (rest.includes('電') || bType === 'electricity') resolvedBase = '電費';
+    else if (rest.includes('水') || bType === 'water') resolvedBase = '水費';
+    else if (rest.includes('瓦斯') || bType === 'gas') resolvedBase = '瓦斯費';
+    else if (rest.includes('租') || bType === 'rent') resolvedBase = '租金';
+    else if (rest.includes('管') || bType === 'management') resolvedBase = '管理費';
+    const cleanRest = rest.replace(/(?:電費|水費|瓦斯費|租金|管理費|費用)/g, '').trim();
+    if (cleanRest) {
+      return `${resolvedBase} (${num}月份 · ${cleanRest})`;
+    }
+    return `${resolvedBase} (${num}月份)`;
+  }
+
+  // 若包含月份字樣，例 "10月份租金", "9月份電費", "租金10月份"
+  const combinedMatch = raw.match(/([0-9]{1,2})\s*月(?:份)?/);
+  if (combinedMatch) {
+    const mStr = `${combinedMatch[1]}月份`;
+    const cleanSub = raw.replace(/([0-9]{1,2})\s*月(?:份)?/, '').replace(/[\s\-_/]/g, '');
+    if (!cleanSub || cleanSub === baseType || cleanSub === '租金' || cleanSub === '電費' || cleanSub === '水費' || cleanSub === '瓦斯費' || cleanSub === '管理費' || cleanSub === '房屋租金') {
+      return `${baseType} (${mStr})`;
+    } else {
+      return `${baseType} (${mStr} · ${cleanSub})`;
+    }
+  }
+
+  // 若未填寫，自動依據期限推導期別月份
+  if (!raw) {
+    if (dueDate && ['rent', 'electricity', 'power', 'water', 'gas', 'utilities', 'management'].includes(bType)) {
+      const d = new Date(dueDate);
+      if (!isNaN(d.getTime())) {
+        const m = d.getMonth() + 1;
+        return `${baseType} (${m}月份)`;
+      }
+    }
+    return baseType;
+  }
+
+  // 若與基底相同直接回傳
+  if (raw === baseType || raw === '押金保證金' || raw === '房屋租金' || raw === '大樓管理費') {
+    return baseType;
+  }
+
+  return `${baseType} (${raw})`;
+}
+
 // -----------------------------------------------------------------------------
 // LINE Flex Message Builder: New Bill / Utility Notification
 // -----------------------------------------------------------------------------
@@ -94,7 +193,7 @@ function buildNewBillFlex(params: {
   const cat = getCategoryMeta(payment.bill_type || payment.billType || "utilities");
   const bank = parseLandlordBank(landlord);
   const amountStr = Number(payment.amount || 0).toLocaleString();
-  const titleStr = payment.title || cat.label;
+  const titleStr = formatFeeItemName(payment.title, payment.bill_type || payment.billType, payment.due_date || payment.dueDate);
   const dueDateStr = payment.due_date || payment.dueDate || "依約定繳款";
   const propName = property?.name || lease?.property_name || "承租房源";
   const noteStr = payment.note ? String(payment.note).trim() : "";
@@ -581,7 +680,7 @@ serve(async (req: Request) => {
         pushed: true,
         lineUserId,
         tenantName,
-        billTitle: payment.title || "待繳帳單",
+        billTitle: formatFeeItemName(payment.title, payment.bill_type || payment.billType, payment.due_date || payment.dueDate),
         amount: payment.amount,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
