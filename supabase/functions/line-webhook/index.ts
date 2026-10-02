@@ -346,7 +346,7 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
   };
 }
 
-// 2. 已繳金額與收據 Flex Message (支援多頁左右滑動 Carousel 卷軸)
+// 2. 已繳金額與收據 Flex Message (簡潔直覺、一目了然清單排版)
 function buildPaidPaymentsFlex(payments: any[], profile: any) {
   const totalPaid = (payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
@@ -364,8 +364,8 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
           backgroundColor: "#059669",
           paddingAll: "16px",
           contents: [
-            { type: "text", text: "智慧租屋 · 歷史繳費清單", color: "#A7F3D0", size: "xs", weight: "bold" },
-            { type: "text", text: "已繳款項與電子收據", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
+            { type: "text", text: "智慧租屋 · 歷史繳費紀錄", color: "#A7F3D0", size: "xs", weight: "bold" },
+            { type: "text", text: "已繳款項明細", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" }
           ]
         },
         body: {
@@ -404,7 +404,7 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     return timeB - timeA;
   });
 
-  const ITEMS_PER_PAGE = 2; // 每頁 2 筆，空間寬裕大器，避免在行動螢幕擠壓造成文字截斷
+  const ITEMS_PER_PAGE = 5; // 每頁 5 筆，簡約收據直覺清單呈現，一目了然
   const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
 
   const buildPageBubble = (pageIndex: number) => {
@@ -420,47 +420,55 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
       bodyContents.push(
         {
           type: "box",
-          layout: "vertical",
+          layout: "horizontal",
+          justifyContent: "space-between",
+          alignItems: "center",
           backgroundColor: "#ECFDF5",
-          borderColor: "#A7F3D0",
-          borderWidth: "1px",
-          cornerRadius: "12px",
+          cornerRadius: "10px",
           paddingAll: "12px",
           contents: [
-            { type: "text", text: "累計已核銷繳納總額", size: "xxs", color: "#065F46", weight: "bold" },
-            { type: "text", text: `NT$ ${totalPaid.toLocaleString()}`, size: "xl", weight: "bold", color: "#047857", margin: "xs" },
-            { type: "text", text: `共 ${sortedPayments.length} 筆已核銷 · 左右滑動可翻頁檢視`, size: "xxs", color: "#059669", margin: "xs" }
+            {
+              type: "box",
+              layout: "vertical",
+              contents: [
+                { type: "text", text: "累計已核銷總額", size: "xxs", color: "#065F46", weight: "bold" },
+                { type: "text", text: `NT$ ${totalPaid.toLocaleString()}`, size: "xl", weight: "bold", color: "#047857", margin: "xs" }
+              ]
+            },
+            {
+              type: "text",
+              text: `共 ${sortedPayments.length} 筆已結清`,
+              size: "xs",
+              color: "#059669",
+              weight: "bold"
+            }
           ]
         },
         { type: "separator", margin: "md" }
       );
     }
 
-    // 每一筆已繳費用清單（獨立精緻卡片設計，保證費用項目完整呈現，排版視覺階層清晰）
+    // 每一筆已繳費用清單（簡潔俐落清單：費用項目、金額、日期、方式，一目了然，去除多餘框框）
     pageItems.forEach((p, idx) => {
       const cat = getCategoryMeta(p.bill_type || p.billType);
       const rawTitle = (p.title || "").trim();
-      // 確保費用項目名稱必定完整顯示（若無自訂標題則顯示類別全名，如「大樓管理費」、「押金保證金」）
       const itemTitle = rawTitle || cat.label;
       const amtStr = Number(p.amount || 0).toLocaleString();
       const paidDate = p.paid_date || p.due_date || "已結清";
       const methodInfo = p.payment_method === "現金交付"
-        ? "💵 現金交付"
-        : (p.transfer_last5 ? `🏦 轉帳 (末五碼：${p.transfer_last5})` : "✅ 已核銷入帳");
-      const noteStr = p.note ? String(p.note).trim() : "";
-      const propStr = p.property_name ? `${p.property_name} 室` : "";
+        ? "現金交付"
+        : (p.transfer_last5 ? `轉帳(末五碼:${p.transfer_last5})` : "已入帳");
+
+      if (idx > 0) {
+        bodyContents.push({ type: "separator", margin: "md" });
+      }
 
       bodyContents.push({
         type: "box",
         layout: "vertical",
-        backgroundColor: "#FFFFFF",
-        borderColor: "#E2E8F0",
-        borderWidth: "1px",
-        cornerRadius: "14px",
-        paddingAll: "14px",
-        margin: idx > 0 || isFirstPage ? "md" : "none",
+        margin: "md",
         contents: [
-          // 1. 首列：分類彩色標籤 + 核銷結清標章 (左右對齊)
+          // 首列：項目名稱（左側大字粗體） + 已繳金額（右側綠色大字）
           {
             type: "box",
             layout: "horizontal",
@@ -468,152 +476,61 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
             alignItems: "center",
             contents: [
               {
-                type: "box",
-                layout: "horizontal",
-                alignItems: "center",
-                backgroundColor: cat.bg,
-                borderColor: cat.border,
-                borderWidth: "1px",
-                cornerRadius: "6px",
-                paddingStart: "8px",
-                paddingEnd: "8px",
-                paddingTop: "2px",
-                paddingBottom: "2px",
-                flex: 0,
-                contents: [
-                  {
-                    type: "text",
-                    text: `${cat.icon} ${cat.label}`,
-                    size: "xxs",
-                    color: cat.color,
-                    weight: "bold"
-                  }
-                ]
-              },
-              {
-                type: "box",
-                layout: "horizontal",
-                alignItems: "center",
-                backgroundColor: "#ECFDF5",
-                borderColor: "#A7F3D0",
-                borderWidth: "1px",
-                cornerRadius: "6px",
-                paddingStart: "8px",
-                paddingEnd: "8px",
-                paddingTop: "2px",
-                paddingBottom: "2px",
-                flex: 0,
-                contents: [
-                  {
-                    type: "text",
-                    text: "● 已收訖結清",
-                    size: "xxs",
-                    color: "#047857",
-                    weight: "bold"
-                  }
-                ]
-              }
-            ]
-          },
-          // 2. 核心大標題：完整顯示費用項目名稱 (清楚、大字、深色、可完整換行)
-          {
-            type: "box",
-            layout: "vertical",
-            margin: "sm",
-            contents: [
-              {
                 type: "text",
-                text: `📋 費用項目：${itemTitle}`,
+                text: `${cat.icon} ${itemTitle}`,
                 size: "sm",
                 weight: "bold",
-                color: "#0F172A",
+                color: "#1E293B",
+                flex: 7,
                 wrap: true
-              }
-            ]
-          },
-          // 3. 金額突出區塊 (仿待繳帳單高品質設計，大器清晰)
-          {
-            type: "box",
-            layout: "horizontal",
-            justifyContent: "space-between",
-            alignItems: "center",
-            backgroundColor: "#F8FAFC",
-            cornerRadius: "10px",
-            paddingStart: "12px",
-            paddingEnd: "12px",
-            paddingTop: "8px",
-            paddingBottom: "8px",
-            margin: "sm",
-            contents: [
-              {
-                type: "text",
-                text: "實付入帳金額",
-                size: "xs",
-                color: "#64748B",
-                weight: "bold"
               },
               {
                 type: "text",
                 text: `NT$ ${amtStr}`,
-                size: "lg",
+                size: "md",
                 weight: "bold",
-                color: "#059669"
+                color: "#059669",
+                align: "end",
+                flex: 5
               }
             ]
           },
-          // 4. 明細列表 (繳納日期、付款管道、房源、備註、單號)
+          // 次列：繳納日期 · 付款方式
           {
             type: "box",
-            layout: "vertical",
-            margin: "sm",
-            spacing: "xs",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            margin: "xs",
             contents: [
               {
-                type: "box",
-                layout: "horizontal",
-                contents: [
-                  { type: "text", text: "📅 繳納日期", size: "xxs", color: "#64748B", flex: 3 },
-                  { type: "text", text: paidDate, size: "xxs", color: "#1E293B", weight: "bold", flex: 7 }
-                ]
+                type: "text",
+                text: `📅 ${paidDate} · ${methodInfo}`,
+                size: "xxs",
+                color: "#64748B",
+                flex: 8
               },
               {
-                type: "box",
-                layout: "horizontal",
-                contents: [
-                  { type: "text", text: "💳 付款方式", size: "xxs", color: "#64748B", flex: 3 },
-                  { type: "text", text: methodInfo, size: "xxs", color: "#047857", weight: "bold", flex: 7 }
-                ]
-              },
-              ...(propStr ? [
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  contents: [
-                    { type: "text", text: "🏠 承租房源", size: "xxs", color: "#64748B", flex: 3 },
-                    { type: "text", text: propStr, size: "xxs", color: "#1E293B", flex: 7 }
-                  ]
-                }
-              ] : []),
-              ...(noteStr ? [
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  contents: [
-                    { type: "text", text: "📝 備註資訊", size: "xxs", color: "#64748B", flex: 3 },
-                    { type: "text", text: noteStr, size: "xxs", color: "#64748B", wrap: true, flex: 7 }
-                  ]
-                }
-              ] : []),
-              {
-                type: "box",
-                layout: "horizontal",
-                contents: [
-                  { type: "text", text: "🧾 收據序號", size: "xxs", color: "#94A3B8", flex: 3 },
-                  { type: "text", text: p.id || "-", size: "xxs", color: "#94A3B8", flex: 7 }
-                ]
+                type: "text",
+                text: "已結清",
+                size: "xxs",
+                color: "#059669",
+                weight: "bold",
+                align: "end",
+                flex: 4
               }
             ]
-          }
+          },
+          ...(p.note && String(p.note).trim() ? [
+            {
+              type: "text",
+              text: `📝 ${String(p.note).trim()}`,
+              size: "xxs",
+              color: "#94A3B8",
+              margin: "xs",
+              wrap: true
+            }
+          ] : [])
         ]
       });
     });
@@ -662,29 +579,21 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: isFirstPage ? "#059669" : "#0D9488",
+        backgroundColor: "#059669",
         paddingAll: "16px",
         contents: [
           {
             type: "text",
-            text: isFirstPage ? "智慧租屋 · 歷史繳費清單" : "智慧租屋 · 前期繳費存根",
-            color: isFirstPage ? "#A7F3D0" : "#99F6E4",
+            text: "智慧租屋 · 歷史繳費紀錄",
+            color: "#A7F3D0",
             size: "xs",
             weight: "bold"
           },
           {
             type: "text",
-            text: isFirstPage ? "最新已繳核銷款項" : `歷史繳款存根 (頁 ${pageIndex + 1})`,
+            text: totalPages > 1 ? `已繳款項明細 (第 ${pageIndex + 1}/${totalPages} 頁)` : "已繳款項明細",
             color: "#FFFFFF",
-            size: "xl",
-            weight: "bold",
-            margin: "xs"
-          },
-          {
-            type: "text",
-            text: `● 顯示第 ${startIdx + 1} ~ ${startIdx + pageItems.length} 筆 · 共 ${sortedPayments.length} 筆 (頁 ${pageIndex + 1}/${totalPages})`,
-            color: isFirstPage ? "#A7F3D0" : "#CCFBF1",
-            size: "xs",
+            size: "lg",
             weight: "bold",
             margin: "xs"
           }
@@ -705,7 +614,7 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     };
   };
 
-  // 若只有 1 頁（<= 2 筆），以單卡呈現
+  // 若只有 1 頁（<= 5 筆），以單卡呈現
   if (totalPages <= 1) {
     return {
       type: "flex",
