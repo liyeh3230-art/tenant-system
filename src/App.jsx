@@ -9380,29 +9380,6 @@ export default function App() {
                                   )}
                                 </div>
                               </div>
-
-                              {(() => {
-                                const bank = extractLandlordBankInfo(targetLandlord);
-                                return (bank.bankAccount || bank.bankName) ? (
-                                  <div className="pt-2 border-t border-slate-200/60">
-                                    <span className="text-slate-500 block mb-1 whitespace-nowrap">約定收款銀行帳戶：</span>
-                                    <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-200 text-xs font-mono font-bold text-slate-800 gap-2">
-                                      <span className="truncate">{bank.bankName} {bank.bankAccount}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          navigator.clipboard?.writeText(bank.bankAccount.replace(/\D/g, ''));
-                                          showToast('已複製銀行帳號至剪貼簿！', 'success');
-                                        }}
-                                        className="text-indigo-600 hover:text-indigo-800 p-1 cursor-pointer flex-shrink-0"
-                                        title="複製帳號"
-                                      >
-                                        <Copy size={13} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : null;
-                              })()}
                             </div>
                           </div>
 
