@@ -314,7 +314,7 @@ export default function App() {
   // --- 1. 獨立的資料抓取函式 (使用 useCallback 並在 SQL 層面以 .eq()/.in() 進行身分精確過濾) ---
   const fetchSupabaseDataRef = useRef(null);
 
-  const fetchSupabaseData = useCallback(async (overrideRole, overrideLandlordId, overrideTenantPhone) => {
+  const fetchSupabaseData = useCallback(async (overrideRole, overrideLandlordId, overrideTenantPhone, overrideIsSuperadmin) => {
     if (!isSupabaseConfigured) return;
     try {
       const effectiveRole = overrideRole || role;
@@ -887,7 +887,8 @@ export default function App() {
 
       // 🚀 優化 C：若為「總管理員」，且已通過管理員身分驗證，才抓取全平台資料以進行統計
       else if (effectiveRole === 'superadmin') {
-        if (!isSuperadminAuthenticated) {
+        const isAuth = overrideIsSuperadmin !== undefined ? overrideIsSuperadmin : isSuperadminAuthenticated;
+        if (!isAuth) {
           // 嚴密防護：若未經管理員驗證，絕對禁止查詢或載入全站後台資料
           setProperties([]);
           setLeases([]);
@@ -1039,7 +1040,7 @@ export default function App() {
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
     }
-  }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, currentUser?.phone, role]);
+  }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, currentUser?.phone, role, isSuperadminAuthenticated]);
 
   fetchSupabaseDataRef.current = fetchSupabaseData;
 
@@ -1173,6 +1174,7 @@ export default function App() {
               setRole('superadmin');
               setActiveTab('landlords');
               setIsSuperadminAuthenticated(true);
+              fetchSupabaseDataRef.current?.('superadmin', null, null, true);
               return;
             }
 
@@ -1866,7 +1868,7 @@ export default function App() {
           localStorage.setItem('app_auth_session', JSON.stringify(adminSession));
         } catch (e) {}
         showToast('🎉 系統總管理員身分認證成功！', 'success');
-        fetchSupabaseData();
+        fetchSupabaseData('superadmin', null, null, true);
         return;
       }
 
@@ -2684,6 +2686,7 @@ export default function App() {
       setSuperadminLoginPhone('');
       setSuperadminPasswordInput('');
       showToast('🎉 系統管理員驗證通過，歡迎進入平台總管理後台！', 'success');
+      fetchSupabaseData('superadmin', null, null, true);
     } catch (err) {
       showToast('身分驗證異常，請重試', 'error');
     } finally {
