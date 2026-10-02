@@ -145,6 +145,49 @@ export const formatFeeItemName = (title, billType, dueDate) => {
   return `${baseType} (${raw})`;
 };
 
+export const extractLandlordBankInfo = (landlord) => {
+  if (!landlord) return { bankName: '', bankAccount: '', accountName: '', note: '' };
+  let bankName = landlord.bankName || landlord.bank_name || '';
+  let bankAccount = landlord.bankAccount || landlord.bank_account || '';
+  let accountName = landlord.accountName || landlord.name || '';
+  let note = landlord.note || landlord.notes || '';
+
+  if (landlord.company_name) {
+    try {
+      const parsed = typeof landlord.company_name === 'string'
+        ? JSON.parse(landlord.company_name)
+        : landlord.company_name;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) accountName = parsed.accountName;
+        if (parsed.note || parsed.notes) note = parsed.note || parsed.notes;
+      }
+    } catch {}
+  }
+
+  if ((!bankName || !bankAccount) && landlord.bank_info) {
+    try {
+      const parsed = typeof landlord.bank_info === 'string'
+        ? JSON.parse(landlord.bank_info)
+        : landlord.bank_info;
+      if (parsed) {
+        if (parsed.bankName) bankName = parsed.bankName;
+        if (parsed.bankAccount) bankAccount = parsed.bankAccount;
+        if (parsed.accountName) accountName = parsed.accountName;
+        if (parsed.note || parsed.notes) note = parsed.note || parsed.notes;
+      }
+    } catch {}
+  }
+
+  return {
+    bankName: bankName || '',
+    bankAccount: bankAccount || '',
+    accountName: accountName || '',
+    note: note || ''
+  };
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -495,30 +538,8 @@ export default function App() {
           resolvedId
         ].filter(Boolean)));
 
-        let parsedBank = null;
-        if (matchedLandlord?.company_name) {
-          try {
-            const parsedComp = typeof matchedLandlord.company_name === 'string' ? JSON.parse(matchedLandlord.company_name) : matchedLandlord.company_name;
-            if (parsedComp && (parsedComp.bankName || parsedComp.bankAccount || parsedComp.accountName)) {
-              parsedBank = parsedComp;
-            }
-          } catch {}
-        }
-        if (!parsedBank && (matchedProfile?.bank_info || matchedLandlord?.bank_info)) {
-          const raw = matchedProfile?.bank_info || matchedLandlord?.bank_info;
-          parsedBank = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
-        }
-
-        if (parsedBank) {
-          setLandlordBankInfo({
-            bankName: parsedBank.bankName || '',
-            bankAccount: parsedBank.bankAccount || '',
-            accountName: parsedBank.accountName || parsedBank.landlordName || '',
-            note: parsedBank.note || parsedBank.notes || ''
-          });
-        } else {
-          setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
-        }
+        const parsedBank = extractLandlordBankInfo(matchedLandlord);
+        setLandlordBankInfo(parsedBank);
 
         setLandlords([{
           id: resolvedId || 'LND_CURRENT',
@@ -584,6 +605,7 @@ export default function App() {
           const activeLeases = leaseData.filter(l => l.status === 'active').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             coPhone: l.co_phone,
@@ -601,6 +623,7 @@ export default function App() {
           const histLeases = leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             startDate: l.start_date,
@@ -802,19 +825,20 @@ export default function App() {
           // 抓取該租客房東的完整資訊與收款帳戶
           const lndIds = Array.from(new Set([
             ...leaseData.map(l => l.landlord_id),
-            ...(propIds.length > 0 ? (properties.map(p => p.landlordId)) : [])
+            ...(propIds.length > 0 && Array.isArray(properties) ? properties.map(p => p.landlordId) : [])
           ].filter(Boolean)));
 
           let combinedLandlords = [];
           if (lndIds.length > 0) {
-            const { data: lndProfs } = await supabase.from('profiles').select('id, name, phone, bank_info').in('id', lndIds);
+            const { data: lndProfs } = await supabase.from('profiles').select('id, name, phone').in('id', lndIds);
             const { data: lndTable } = await supabase
               .from('landlords')
-              .select('id, name, phone, company_name, bank_name, bank_account, status, ad_listing_enabled, bank_info')
+              .select('*')
               .in('id', lndIds);
 
             combinedLandlords = (lndTable || []).map(l => {
               const matchedProf = (lndProfs || []).find(p => p.id === l.id);
+              const bInfo = extractLandlordBankInfo(l);
               return {
                 id: l.id,
                 name: l.name || matchedProf?.name || '房東',
@@ -822,12 +846,12 @@ export default function App() {
                 company_name: l.company_name || '',
                 id_number: '',
                 contact_address: '',
-                bank_name: l.bank_name || '',
-                bank_account: l.bank_account || '',
-                application_notes: l.application_notes || '',
+                bank_name: bInfo.bankName,
+                bank_account: bInfo.bankAccount,
+                application_notes: '',
                 status: l.status || 'approved',
                 adListingEnabled: l.ad_listing_enabled || false,
-                bankInfo: l.bank_info || matchedProf?.bank_info
+                bankInfo: bInfo
               };
             });
 
@@ -845,32 +869,15 @@ export default function App() {
                   application_notes: '',
                   status: 'approved',
                   adListingEnabled: false,
-                  bankInfo: p.bank_info
+                  bankInfo: { bankName: '', bankAccount: '', accountName: '', note: '' }
                 });
               }
             });
 
-            const targetLandlord = combinedLandlords[0];
-            let targetBank = targetLandlord?.bankInfo;
-            if (!targetBank && targetLandlord?.company_name) {
-              try {
-                const parsedComp = typeof targetLandlord.company_name === 'string' ? JSON.parse(targetLandlord.company_name) : targetLandlord.company_name;
-                if (parsedComp && (parsedComp.bankName || parsedComp.bankAccount || parsedComp.accountName)) {
-                  targetBank = parsedComp;
-                }
-              } catch {}
-            }
-            if (targetBank) {
-              const parsed = typeof targetBank === 'string' ? JSON.parse(targetBank || '{}') : targetBank;
-              setLandlordBankInfo({
-                bankName: parsed.bankName || '',
-                bankAccount: parsed.bankAccount || '',
-                accountName: parsed.accountName || '',
-                note: parsed.note || ''
-              });
-            } else {
-              setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
-            }
+            const currentLease = activeLeases[0];
+            const targetLandlord = combinedLandlords.find(l => l.id === currentLease?.landlordId) || combinedLandlords[0];
+            const parsedBank = extractLandlordBankInfo(targetLandlord);
+            setLandlordBankInfo(parsedBank);
           } else {
             setLandlordBankInfo({ bankName: '', bankAccount: '', accountName: '', note: '' });
           }
@@ -1019,6 +1026,7 @@ export default function App() {
           setLeases(leaseData.filter(l => l.status === 'active').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             coPhone: l.co_phone,
@@ -1034,6 +1042,7 @@ export default function App() {
           setHistoricalLeases(leaseData.filter(l => l.status === 'terminated').map(l => ({
             id: l.id,
             propertyId: l.property_id,
+            landlordId: l.landlord_id,
             tenantName: l.tenant_name,
             phone: l.phone,
             startDate: l.start_date,
@@ -1092,6 +1101,7 @@ export default function App() {
         (profileData || []).filter(p => p.role === 'landlord').forEach(p => {
           lndIdSet.add(p.id);
           const lndInfo = lndMap[p.id] || {};
+          const bInfo = extractLandlordBankInfo(lndInfo);
           lnds.push({
             id: p.id,
             name: p.name || lndInfo.name || '房東',
@@ -1099,16 +1109,18 @@ export default function App() {
             company_name: lndInfo.company_name || '',
             id_number: lndInfo.id_number || '',
             contact_address: lndInfo.contact_address || '',
-            bank_name: lndInfo.bank_name || '',
-            bank_account: lndInfo.bank_account || '',
+            bank_name: bInfo.bankName || lndInfo.bank_name || '',
+            bank_account: bInfo.bankAccount || lndInfo.bank_account || '',
             status: lndInfo.status || 'pending',
-            adListingEnabled: lndInfo.ad_listing_enabled ?? false
+            adListingEnabled: lndInfo.ad_listing_enabled ?? false,
+            bankInfo: bInfo
           });
         });
 
         (landlordTableData || []).forEach(l => {
           if (l && l.id && !lndIdSet.has(l.id)) {
             lndIdSet.add(l.id);
+            const bInfo = extractLandlordBankInfo(l);
             lnds.push({
               id: l.id,
               name: l.name || '房東',
@@ -1116,10 +1128,11 @@ export default function App() {
               company_name: l.company_name || '',
               id_number: l.id_number || '',
               contact_address: l.contact_address || '',
-              bank_name: l.bank_name || '',
-              bank_account: l.bank_account || '',
+              bank_name: bInfo.bankName || l.bank_name || '',
+              bank_account: bInfo.bankAccount || l.bank_account || '',
               status: l.status || 'pending',
-              adListingEnabled: l.ad_listing_enabled ?? false
+              adListingEnabled: l.ad_listing_enabled ?? false,
+              bankInfo: bInfo
             });
           }
         });
@@ -1128,17 +1141,41 @@ export default function App() {
         (propData || []).forEach(p => {
           if (p.landlord_id && !lndIdSet.has(p.landlord_id)) {
             lndIdSet.add(p.landlord_id);
+            const lndInfo = lndMap[p.landlord_id] || (profileData || []).find(prof => prof.id === p.landlord_id);
+            const bInfo = extractLandlordBankInfo(lndInfo);
             lnds.push({
               id: p.landlord_id,
-              name: '房東',
-              phone: '',
-              company_name: '',
-              id_number: '',
-              contact_address: '',
-              bank_name: '',
-              bank_account: '',
-              status: 'approved',
-              adListingEnabled: false
+              name: lndInfo?.name || '房東',
+              phone: lndInfo?.phone || '',
+              company_name: lndInfo?.company_name || '',
+              id_number: lndInfo?.id_number || '',
+              contact_address: lndInfo?.contact_address || '',
+              bank_name: bInfo.bankName || '',
+              bank_account: bInfo.bankAccount || '',
+              status: lndInfo?.status || 'approved',
+              adListingEnabled: lndInfo?.ad_listing_enabled ?? false,
+              bankInfo: bInfo
+            });
+          }
+        });
+
+        (leaseData || []).forEach(l => {
+          if (l.landlord_id && !lndIdSet.has(l.landlord_id)) {
+            lndIdSet.add(l.landlord_id);
+            const lndInfo = lndMap[l.landlord_id] || (profileData || []).find(prof => prof.id === l.landlord_id);
+            const bInfo = extractLandlordBankInfo(lndInfo);
+            lnds.push({
+              id: l.landlord_id,
+              name: lndInfo?.name || '房東',
+              phone: lndInfo?.phone || '',
+              company_name: lndInfo?.company_name || '',
+              id_number: lndInfo?.id_number || '',
+              contact_address: lndInfo?.contact_address || '',
+              bank_name: bInfo.bankName || '',
+              bank_account: bInfo.bankAccount || '',
+              status: lndInfo?.status || 'approved',
+              adListingEnabled: lndInfo?.ad_listing_enabled ?? false,
+              bankInfo: bInfo
             });
           }
         });
@@ -3933,6 +3970,7 @@ export default function App() {
     const newLease = {
       id: nextLeaseId,
       propertyId: leasePropId,
+      landlordId: currentLandlordId,
       tenantName: leaseTenantName.trim(),
       phone: leasePhone.trim(),
       coPhone: (showCoTenant && leaseCoPhone.trim()) ? leaseCoPhone.trim() : null,
@@ -4039,6 +4077,7 @@ export default function App() {
 
     const updatedLeaseData = {
       propertyId: leasePropId,
+      landlordId: editingLease.landlordId || currentLandlordId,
       tenantName: leaseTenantName.trim(),
       phone: leasePhone.trim(),
       coTenantName: (showCoTenant && leaseCoTenantName.trim()) ? leaseCoTenantName.trim() : null,
@@ -4482,10 +4521,27 @@ export default function App() {
   const currentTenantProperty = properties.find(p => p.id === currentTenantLease?.propertyId);
   const currentTenantPayments = payments.filter(p => p.leaseId === currentTenantLease?.id);
 
+  useEffect(() => {
+    if (role === 'tenant' && currentTenantLease) {
+      const lnd = landlords.find(l => l.id === currentTenantLease.landlordId) || landlords[0];
+      if (lnd) {
+        setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      }
+    }
+  }, [role, currentTenantLeaseId, currentTenantLease, landlords]);
+
   const handleOpenTenantReportPayment = (targetBill = null) => {
     if (!currentTenantLease) {
       showToast('目前尚無生效之租約可回報！', 'warning');
       return;
+    }
+
+    const activeLease = (targetBill && leases.find(l => l.id === targetBill.leaseId)) || currentTenantLease;
+    if (activeLease) {
+      const lnd = landlords.find(l => l.id === activeLease.landlordId) || landlords[0];
+      if (lnd) {
+        setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      }
     }
 
     const availableUnpaid = currentTenantPayments.filter(
@@ -4781,6 +4837,13 @@ export default function App() {
     setTenantPayingBill(bill);
     setTenantPayChannel('bank');
     setTenantPayTransferLast5('');
+    const activeLease = (bill && leases.find(l => l.id === bill.leaseId)) || currentTenantLease;
+    if (activeLease) {
+      const lnd = landlords.find(l => l.id === activeLease.landlordId) || landlords[0];
+      if (lnd) {
+        setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      }
+    }
     setActiveModal('tenantPay');
   };
 
@@ -9002,7 +9065,9 @@ export default function App() {
                 );
               }
 
-              const targetLandlord = landlords.find(l => l.id === (currentTenantProperty?.landlordId || currentTenantLease?.landlordId));
+              const targetLandlord = landlords.find(l => l.id === (currentTenantLease?.landlordId || currentTenantProperty?.landlordId))
+                || landlords.find(l => l.phone === currentLandlordPhone)
+                || (landlords.length === 1 ? landlords[0] : null);
               const contractMonths = calculateMonths(currentTenantLease.startDate, currentTenantLease.endDate);
               const contractDuration = calculateContractDuration(currentTenantLease.startDate, currentTenantLease.endDate);
               const monthlyRent = getLeaseMonthlyRent(currentTenantLease);
@@ -9316,25 +9381,28 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {targetLandlord?.bank_name && targetLandlord?.bank_account && (
-                                <div className="pt-2 border-t border-slate-200/60">
-                                  <span className="text-slate-500 block mb-1 whitespace-nowrap">約定收款銀行帳戶：</span>
-                                  <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-200 text-xs font-mono font-bold text-slate-800 gap-2">
-                                    <span className="truncate">{targetLandlord.bank_name} {targetLandlord.bank_account}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard?.writeText(targetLandlord.bank_account.replace(/\D/g, ''));
-                                        showToast('已複製銀行帳號至剪貼簿！', 'success');
-                                      }}
-                                      className="text-indigo-600 hover:text-indigo-800 p-1 cursor-pointer flex-shrink-0"
-                                      title="複製帳號"
-                                    >
-                                      <Copy size={13} />
-                                    </button>
+                              {(() => {
+                                const bank = extractLandlordBankInfo(targetLandlord);
+                                return (bank.bankAccount || bank.bankName) ? (
+                                  <div className="pt-2 border-t border-slate-200/60">
+                                    <span className="text-slate-500 block mb-1 whitespace-nowrap">約定收款銀行帳戶：</span>
+                                    <div className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-200 text-xs font-mono font-bold text-slate-800 gap-2">
+                                      <span className="truncate">{bank.bankName} {bank.bankAccount}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard?.writeText(bank.bankAccount.replace(/\D/g, ''));
+                                          showToast('已複製銀行帳號至剪貼簿！', 'success');
+                                        }}
+                                        className="text-indigo-600 hover:text-indigo-800 p-1 cursor-pointer flex-shrink-0"
+                                        title="複製帳號"
+                                      >
+                                        <Copy size={13} />
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                ) : null;
+                              })()}
                             </div>
                           </div>
 
@@ -12012,59 +12080,68 @@ export default function App() {
                   {/* Channel 1: Bank Transfer Details */}
                   {tenantReportMethod === 'bank' && (
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                      {(landlordBankInfo?.bankAccount || landlordBankInfo?.bankName) ? (
-                        <div className="space-y-1.5 text-xs text-slate-700">
-                          {landlordBankInfo.bankName && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">收款銀行：</span>
-                              <span className="font-bold text-slate-800">{landlordBankInfo.bankName}</span>
-                            </div>
-                          )}
-                          {landlordBankInfo.bankAccount && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-500">收款帳號：</span>
-                              <div className="flex items-center space-x-1.5">
-                                <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs">
-                                  {landlordBankInfo.bankAccount}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(landlordBankInfo.bankAccount.replace(/\D/g, ''));
-                                    showToast('已複製銀行帳號至剪貼簿！', 'success');
-                                  }}
-                                  className="text-indigo-600 hover:text-indigo-800 p-1"
-                                  title="複製帳號"
-                                >
-                                  <Copy size={14} />
-                                </button>
+                      {(() => {
+                        const targetLnd = landlords.find(l => l.id === currentTenantLease?.landlordId) || landlords[0];
+                        const fallbackBank = extractLandlordBankInfo(targetLnd);
+                        const displayBank = (landlordBankInfo?.bankAccount || landlordBankInfo?.bankName)
+                          ? landlordBankInfo
+                          : fallbackBank;
+                        const hasBank = !!(displayBank?.bankAccount || displayBank?.bankName);
+
+                        return hasBank ? (
+                          <div className="space-y-1.5 text-xs text-slate-700">
+                            {displayBank.bankName && (
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">收款銀行：</span>
+                                <span className="font-bold text-slate-800">{displayBank.bankName}</span>
                               </div>
-                            </div>
-                          )}
-                          {landlordBankInfo.accountName && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">戶名：</span>
-                              <span className="font-semibold text-slate-800">{landlordBankInfo.accountName}</span>
-                            </div>
-                          )}
-                          {landlordBankInfo.note && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-500">轉帳備註：</span>
-                              <span className="text-slate-600">{landlordBankInfo.note}</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200/70 text-xs text-amber-900 space-y-1">
-                          <div className="flex items-center gap-1.5 font-bold text-amber-800">
-                            <AlertCircle size={14} />
-                            <span>房東目前尚未設定收款帳戶資訊</span>
+                            )}
+                            {displayBank.bankAccount && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-slate-500">收款帳號：</span>
+                                <div className="flex items-center space-x-1.5">
+                                  <span className="font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 text-xs">
+                                    {displayBank.bankAccount}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(displayBank.bankAccount.replace(/\D/g, ''));
+                                      showToast('已複製銀行帳號至剪貼簿！', 'success');
+                                    }}
+                                    className="text-indigo-600 hover:text-indigo-800 p-1 cursor-pointer"
+                                    title="複製帳號"
+                                  >
+                                    <Copy size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {displayBank.accountName && (
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">戶名：</span>
+                                <span className="font-semibold text-slate-800">{displayBank.accountName}</span>
+                              </div>
+                            )}
+                            {displayBank.note && (
+                              <div className="flex justify-between">
+                                <span className="text-slate-500">轉帳備註：</span>
+                                <span className="text-slate-600">{displayBank.note}</span>
+                              </div>
+                            )}
                           </div>
-                          <p className="text-[11px] text-amber-700 leading-relaxed">
-                            若您已與房東確認線下轉帳帳號並完成匯款，請直接於下方填寫您的「匯款帳號末五碼」以供核帳。
-                          </p>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200/70 text-xs text-amber-900 space-y-1">
+                            <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                              <AlertCircle size={14} />
+                              <span>房東目前尚未設定收款帳戶資訊</span>
+                            </div>
+                            <p className="text-[11px] text-amber-700 leading-relaxed">
+                              若您已與房東確認線下轉帳帳號並完成匯款，請直接於下方填寫您的「匯款帳號末五碼」以供核帳。
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       <div className="pt-2 border-t border-slate-200">
                         <label className="block text-xs font-bold text-slate-700 mb-1">
