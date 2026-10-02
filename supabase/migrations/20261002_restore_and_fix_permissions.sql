@@ -60,7 +60,7 @@ CREATE POLICY "allow_select_addresses" ON public.landlord_addresses FOR SELECT U
 CREATE POLICY "allow_select_line_bindings" ON public.line_bindings FOR SELECT USING (true);
 CREATE POLICY "allow_select_line_binding_tokens" ON public.line_binding_tokens FOR SELECT USING (true);
 
--- C. 寫入策略 (INSERT / UPDATE / DELETE)：允許合法維護操作
+-- C. 寫入策略 (INSERT / UPDATE / DELETE)：允許已驗證操作與前端合法維護
 CREATE POLICY "allow_modify_profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_modify_landlords" ON public.landlords FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_modify_properties" ON public.properties FOR ALL USING (true) WITH CHECK (true);
@@ -149,7 +149,7 @@ INSERT INTO public.payments ("id", "lease_id", "tenant_name", "property_name", "
   ('PAY1790651754056_155', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '12', '2026-09-29', '2026-09-29', '現金交付', NULL, '', '2026-09-29T03:15:54.093744+00:00', '2026-09-29T07:55:53.575+00:00', NULL),
   ('BILL1790649491444_409', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '9', '2026-10-29', '2026-09-29', '銀行轉帳', '90006', '', '2026-09-29T02:38:11.817865+00:00', '2026-09-29T07:57:36.02+00:00', NULL),
   ('BILL1790685573035_99', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '10', '2026-10-29', '2026-09-29', NULL, '70987', '', '2026-09-29T12:39:32.704393+00:00', '2026-09-29T12:40:50.294+00:00', NULL),
-  ('BILL1790685749577_997', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '12', '2026-10-29', '2026-09-29', '銀行轉帳', NULL, '', '2026-09-29T12:42:29.125335+00:00', '2026-09-29T12:42:29.125335+00:00', NULL),
+  ('BILL1790685749577_997', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '12', '2026-10-29', '2026-10-29', '銀行轉帳', NULL, '', '2026-09-29T12:42:29.125335+00:00', '2026-09-29T12:42:29.125335+00:00', NULL),
   ('BILL1790685820582_550', 'L69154116', '徐徐徐', '106', 8750, 'rejected', 'rent', '12', '2026-10-29', '2026-09-29', NULL, '12346', '', '2026-09-29T12:43:40.177579+00:00', '2026-09-29T12:47:20.311+00:00', NULL),
   ('BILL1790685744072_888', 'L69154116', '徐徐徐', '106', 8750, 'paid', 'rent', '11', '2026-10-29', '2026-09-29', NULL, '12345', '', '2026-09-29T12:42:23.667477+00:00', '2026-09-29T12:47:22.556+00:00', NULL),
   ('PAY1790788967941_21', 'L69154116', '徐徐徐', '106', 8750, 'rejected', 'rent', '租金 (租客自報)', '2026-09-30', '2026-09-30', '現金交付', NULL, '', '2026-09-30T17:22:47.787017+00:00', '2026-09-30T19:07:49.234+00:00', NULL),
