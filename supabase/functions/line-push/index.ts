@@ -24,7 +24,7 @@ function getCategoryMeta(billType: string) {
   const meta: Record<string, { label: string; icon: string; color: string; bg: string }> = {
     rent: { label: "房屋租金", icon: "🏠", color: "#4F46E5", bg: "#EEF2FF" },
     deposit: { label: "押金保證金", icon: "🔒", color: "#0D9488", bg: "#F0FDFA" },
-    utilities: { label: "水電瓦斯代繳", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
+    utilities: { label: "水電瓦斯費", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
     electricity: { label: "用電費用", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
     power: { label: "用電費用", icon: "⚡", color: "#D97706", bg: "#FFFBEB" },
     water: { label: "自來水費", icon: "💧", color: "#0284C7", bg: "#F0F9FF" },
@@ -32,7 +32,7 @@ function getCategoryMeta(billType: string) {
     management: { label: "大樓管理費", icon: "🏢", color: "#2563EB", bg: "#EFF6FF" },
     parking: { label: "車位租金", icon: "🅿️", color: "#7C3AED", bg: "#F5F3FF" },
     maintenance: { label: "修繕雜費", icon: "🔧", color: "#B45309", bg: "#FEF3C7" },
-    other: { label: "其他代繳雜支", icon: "📋", color: "#7C3AED", bg: "#F5F3FF" },
+    other: { label: "其他雜項費用", icon: "📋", color: "#7C3AED", bg: "#F5F3FF" },
   };
   return meta[type] || meta.other;
 }
@@ -101,7 +101,7 @@ function buildNewBillFlex(params: {
 
   const headerBgColor = isDirectlyPaid ? "#059669" : "#D97706";
   const headerSubText = isDirectlyPaid ? "🧾 智慧租屋 · 費用入帳收據憑證" : "🔔 智慧租屋 · 待處理帳單提醒";
-  const headerTitle = isDirectlyPaid ? "代繳費用已入帳結清" : "待處理帳單通知";
+  const headerTitle = isDirectlyPaid ? "款項已入帳結清" : "待繳帳單通知";
   const statusBadge = isDirectlyPaid ? "● 已收訖入帳" : "● 待租客繳納";
   const statusColor = isDirectlyPaid ? "#A7F3D0" : "#FEF08A";
 
@@ -581,7 +581,7 @@ serve(async (req: Request) => {
         pushed: true,
         lineUserId,
         tenantName,
-        billTitle: payment.title || "代繳帳單",
+        billTitle: payment.title || "待繳帳單",
         amount: payment.amount,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

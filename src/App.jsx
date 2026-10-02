@@ -8215,7 +8215,7 @@ export default function App() {
                               <div>
                                 <h3 className="text-base sm:text-lg font-bold text-slate-800">繳納狀態與電子收據明細</h3>
                                 <p className="text-xs sm:text-sm text-slate-500 font-medium">
-                                  查看各項費用之繳納狀態（代繳納、待審核、已付款、已駁回、已作廢存查）與開立之電子繳費收據
+                                  查看各項費用之繳納狀態（待繳納、待審核、已付款、已駁回、已作廢存查）與開立之電子繳費收據
                                 </p>
                               </div>
 
@@ -8239,7 +8239,7 @@ export default function App() {
                                       : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
                                   }`}
                                 >
-                                  代繳納 ({unpaidBills.length})
+                                  待繳納 ({unpaidBills.length})
                                 </button>
                                 <button
                                   onClick={() => setFilterTenantPaymentStatus('pending_approval')}
@@ -8334,7 +8334,7 @@ export default function App() {
                                         ? 'bg-rose-50 text-rose-700 border-rose-300'
                                         : 'bg-blue-50 text-blue-700 border-blue-200'
                                     }`}>
-                                      代繳納{status === 'overdue' ? ' (已逾期)' : ''}
+                                      待繳納{status === 'overdue' ? ' (已逾期)' : ''}
                                     </span>
                                   );
                                 }

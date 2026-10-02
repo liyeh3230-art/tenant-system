@@ -185,7 +185,7 @@ function getCategoryMeta(billType: string | undefined | null) {
     case "repair":
       return { key: "maintenance", label: "修繕雜費", icon: "🔧", color: "#B45309", bg: "#FEF3C7", border: "#FDE68A" };
     default:
-      return { key: "other", label: "代繳雜支", icon: "📋", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" };
+      return { key: "other", label: "待繳雜支", icon: "📋", color: "#475569", bg: "#F1F5F9", border: "#CBD5E1" };
   }
 }
 
@@ -394,17 +394,17 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     };
   }
 
-  // 排序：最新新增或最新繳納的款項排在最前面
+  // 排序：最新繳納或最新建立的款項排在最前面
   const sortedPayments = [...payments].sort((a, b) => {
-    const timeA = new Date(a.created_at || a.paid_date || 0).getTime();
-    const timeB = new Date(b.created_at || b.paid_date || 0).getTime();
-    if (timeA !== timeB) return timeB - timeA;
-    const dateA = a.paid_date || a.due_date || "";
-    const dateB = b.paid_date || b.due_date || "";
-    return dateB.localeCompare(dateA);
+    const dateA = a.paid_date || a.due_date || a.created_at || "";
+    const dateB = b.paid_date || b.due_date || b.created_at || "";
+    if (dateA !== dateB) return dateB.localeCompare(dateA);
+    const timeA = new Date(a.created_at || 0).getTime();
+    const timeB = new Date(b.created_at || 0).getTime();
+    return timeB - timeA;
   });
 
-  const ITEMS_PER_PAGE = 3;
+  const ITEMS_PER_PAGE = 2; // 每頁 2 筆，空間寬裕大器，避免在行動螢幕擠壓造成文字截斷
   const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
 
   const buildPageBubble = (pageIndex: number) => {
@@ -436,27 +436,31 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
       );
     }
 
-    // 每一筆已繳費用清單（獨立卡片設計，清楚標示分類徽章、金額、自訂標題與核銷資訊）
+    // 每一筆已繳費用清單（獨立精緻卡片設計，保證費用項目完整呈現，排版視覺階層清晰）
     pageItems.forEach((p, idx) => {
       const cat = getCategoryMeta(p.bill_type || p.billType);
-      const title = getPaymentTitle(p);
+      const rawTitle = (p.title || "").trim();
+      // 確保費用項目名稱必定完整顯示（若無自訂標題則顯示類別全名，如「大樓管理費」、「押金保證金」）
+      const itemTitle = rawTitle || cat.label;
       const amtStr = Number(p.amount || 0).toLocaleString();
       const paidDate = p.paid_date || p.due_date || "已結清";
-      const methodInfo = p.payment_method === "現金交付" ? "💵 現金交付" : (p.transfer_last5 ? `末五碼：${p.transfer_last5}` : "✅ 已核銷入帳");
-      const hasCustomTitle = Boolean(p.title && p.title.trim() && p.title.trim() !== cat.label);
+      const methodInfo = p.payment_method === "現金交付"
+        ? "💵 現金交付"
+        : (p.transfer_last5 ? `🏦 轉帳 (末五碼：${p.transfer_last5})` : "✅ 已核銷入帳");
       const noteStr = p.note ? String(p.note).trim() : "";
+      const propStr = p.property_name ? `${p.property_name} 室` : "";
 
       bodyContents.push({
         type: "box",
         layout: "vertical",
-        backgroundColor: "#F8FAFC",
+        backgroundColor: "#FFFFFF",
         borderColor: "#E2E8F0",
         borderWidth: "1px",
-        cornerRadius: "12px",
-        paddingAll: "12px",
+        cornerRadius: "14px",
+        paddingAll: "14px",
         margin: idx > 0 || isFirstPage ? "md" : "none",
         contents: [
-          // 1. 首列：分類彩色徽章標籤 (Pill Badge) + 金額 (左右對齊)
+          // 1. 首列：分類彩色標籤 + 核銷結清標章 (左右對齊)
           {
             type: "box",
             layout: "horizontal",
@@ -487,68 +491,129 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
                 ]
               },
               {
-                type: "text",
-                text: `NT$ ${amtStr}`,
-                size: "md",
-                weight: "bold",
-                color: "#059669",
-                align: "end",
-                flex: 1
+                type: "box",
+                layout: "horizontal",
+                alignItems: "center",
+                backgroundColor: "#ECFDF5",
+                borderColor: "#A7F3D0",
+                borderWidth: "1px",
+                cornerRadius: "6px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                flex: 0,
+                contents: [
+                  {
+                    type: "text",
+                    text: "● 已收訖結清",
+                    size: "xxs",
+                    color: "#047857",
+                    weight: "bold"
+                  }
+                ]
               }
             ]
           },
-          // 2. 自訂標題（若有填寫自訂名稱且非預設分類名，例如「10月份租金」、「A棟公共電費」）
-          ...(hasCustomTitle ? [
-            {
-              type: "box",
-              layout: "horizontal",
-              margin: "xs",
-              contents: [
-                {
-                  type: "text",
-                  text: `📌 ${p.title.trim()}`,
-                  size: "xs",
-                  weight: "bold",
-                  color: "#1E293B",
-                  wrap: true
-                }
-              ]
-            }
-          ] : []),
-          // 3. 繳納日期與入帳資訊
+          // 2. 核心大標題：完整顯示費用項目名稱 (清楚、大字、深色、可完整換行)
+          {
+            type: "box",
+            layout: "vertical",
+            margin: "sm",
+            contents: [
+              {
+                type: "text",
+                text: `📋 費用項目：${itemTitle}`,
+                size: "sm",
+                weight: "bold",
+                color: "#0F172A",
+                wrap: true
+              }
+            ]
+          },
+          // 3. 金額突出區塊 (仿待繳帳單高品質設計，大器清晰)
           {
             type: "box",
             layout: "horizontal",
             justifyContent: "space-between",
             alignItems: "center",
-            margin: "xs",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "10px",
+            paddingStart: "12px",
+            paddingEnd: "12px",
+            paddingTop: "8px",
+            paddingBottom: "8px",
+            margin: "sm",
             contents: [
               {
                 type: "text",
-                text: `📅 繳納日：${paidDate}`,
-                size: "xxs",
-                color: "#64748B"
+                text: "實付入帳金額",
+                size: "xs",
+                color: "#64748B",
+                weight: "bold"
               },
               {
                 type: "text",
-                text: methodInfo,
-                size: "xxs",
-                color: "#059669",
-                weight: "bold"
+                text: `NT$ ${amtStr}`,
+                size: "lg",
+                weight: "bold",
+                color: "#059669"
               }
             ]
           },
-          // 4. 若有備註資訊，顯示備註
-          ...(noteStr ? [
-            {
-              type: "text",
-              text: `📝 備註：${noteStr}`,
-              size: "xxs",
-              color: "#64748B",
-              wrap: true,
-              margin: "xs"
-            }
-          ] : [])
+          // 4. 明細列表 (繳納日期、付款管道、房源、備註、單號)
+          {
+            type: "box",
+            layout: "vertical",
+            margin: "sm",
+            spacing: "xs",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "📅 繳納日期", size: "xxs", color: "#64748B", flex: 3 },
+                  { type: "text", text: paidDate, size: "xxs", color: "#1E293B", weight: "bold", flex: 7 }
+                ]
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "💳 付款方式", size: "xxs", color: "#64748B", flex: 3 },
+                  { type: "text", text: methodInfo, size: "xxs", color: "#047857", weight: "bold", flex: 7 }
+                ]
+              },
+              ...(propStr ? [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  contents: [
+                    { type: "text", text: "🏠 承租房源", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: propStr, size: "xxs", color: "#1E293B", flex: 7 }
+                  ]
+                }
+              ] : []),
+              ...(noteStr ? [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  contents: [
+                    { type: "text", text: "📝 備註資訊", size: "xxs", color: "#64748B", flex: 3 },
+                    { type: "text", text: noteStr, size: "xxs", color: "#64748B", wrap: true, flex: 7 }
+                  ]
+                }
+              ] : []),
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "🧾 收據序號", size: "xxs", color: "#94A3B8", flex: 3 },
+                  { type: "text", text: p.id || "-", size: "xxs", color: "#94A3B8", flex: 7 }
+                ]
+              }
+            ]
+          }
         ]
       });
     });
@@ -586,7 +651,7 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
           type: "button",
           style: "secondary",
           height: "sm",
-          action: { type: "message", label: "📝 回報繳款", text: "回報繳費" }
+          action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
         }
       ]
     });
@@ -640,7 +705,7 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     };
   };
 
-  // 若只有 1 頁（<= 4 筆），以單卡呈現
+  // 若只有 1 頁（<= 2 筆），以單卡呈現
   if (totalPages <= 1) {
     return {
       type: "flex",
@@ -1638,7 +1703,7 @@ serve(async (req: Request) => {
       await replyLineMessage(replyToken, [
         {
           type: "text",
-          text: `🎉 歡迎您加入智慧租屋管家系統！\n\n您好，${welcomeName}！您已成功連動 LINE 官方帳號服務。\n\n日後有任何新帳單、代繳費用產生或繳費確認，系統將在此為您進行即時推播通知！\n\n您可隨時點擊下方快捷按鈕查詢當前租屋資訊：`,
+          text: `🎉 歡迎您加入智慧租屋管家系統！\n\n您好，${welcomeName}！您已成功連動 LINE 官方帳號服務。\n\n日後有任何新帳單、待繳費用產生或繳費確認，系統將在此為您進行即時推播通知！\n\n您可隨時點擊下方快捷按鈕查詢當前租屋資訊：`,
           quickReply: {
             items: [
               {
@@ -1889,16 +1954,21 @@ serve(async (req: Request) => {
         // 5. 指令分支：已繳金額／歷史收據
         if (text.includes("已繳") || text.includes("收據") || text.includes("繳款紀錄") || text === "3") {
           let paidPayments: any[] = [];
+          let query = supabase
+            .from("payments")
+            .select("*")
+            .eq("status", "paid")
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false });
+
           if (leaseIds.length > 0) {
-            const { data: pData } = await supabase
-              .from("payments")
-              .select("*")
-              .in("lease_id", leaseIds)
-              .eq("status", "paid")
-              .is("deleted_at", null)
-              .order("created_at", { ascending: false });
-            paidPayments = pData || [];
+            query = query.in("lease_id", leaseIds);
+          } else if (context.profile?.name) {
+            query = query.eq("tenant_name", context.profile.name);
           }
+
+          const { data: pData } = await query;
+          paidPayments = pData || [];
 
           await replyLineMessage(replyToken, [
             buildPaidPaymentsFlex(paidPayments, context.profile)
