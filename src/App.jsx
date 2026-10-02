@@ -1025,9 +1025,42 @@ export default function App() {
             });
           }
         });
+
+        // 確保若房源或合約中有房東 ID 也能完整統計
+        (propData || []).forEach(p => {
+          if (p.landlord_id && !lndIdSet.has(p.landlord_id)) {
+            lndIdSet.add(p.landlord_id);
+            lnds.push({
+              id: p.landlord_id,
+              name: '房東',
+              phone: '',
+              company_name: '',
+              id_number: '',
+              contact_address: '',
+              bank_name: '',
+              bank_account: '',
+              status: 'approved',
+              adListingEnabled: false
+            });
+          }
+        });
+
         setLandlords(lnds);
 
         const tenantMap = new Map();
+        // 1. 同步合約中現有承租人與同住人
+        (leaseData || []).forEach(l => {
+          const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
+          if (cleanP && l.tenant_name) {
+            tenantMap.set(cleanP, { id: `lease_${l.id}`, name: l.tenant_name, phone: l.phone, fromLease: true });
+          }
+          const cleanCoP = (l.co_phone || '').replace(/[^0-9]/g, '');
+          if (cleanCoP && l.co_tenant_name) {
+            tenantMap.set(cleanCoP, { id: `co_${l.id}`, name: l.co_tenant_name, phone: l.co_phone, fromLease: true });
+          }
+        });
+
+        // 2. 同步 profiles 註冊租客 (以正式註冊資料優先覆蓋)
         (profileData || []).filter(p => p.role === 'tenant').forEach(p => {
           const cleanP = (p.phone || '').replace(/[^0-9]/g, '');
           if (cleanP) {
