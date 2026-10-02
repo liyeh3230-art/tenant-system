@@ -75,17 +75,19 @@ CREATE POLICY "allow_modify_tokens" ON public.line_binding_tokens FOR ALL USING 
 -- 步驟 3：自動對齊現存會員 (從 auth.users 同步現存帳號至 profiles 與 landlords)
 -- ----------------------------------------------------------------------------
 
--- 同步現有註冊會員至 profiles 表
+-- 同步現有註冊會員至 profiles 表 (使用 p.id::text = u.id::text 避免 uuid 與 text 型態不相容)
 INSERT INTO public.profiles (id, role, name, phone, created_at, updated_at)
 SELECT 
-  u.id,
+  u.id::text,
   COALESCE(u.raw_user_meta_data->>'role', u.raw_user_meta_data->>'requested_role', 'tenant')::text,
   COALESCE(u.raw_user_meta_data->>'name', '會員'),
   COALESCE(u.raw_user_meta_data->>'phone', u.phone, ''),
   u.created_at,
   COALESCE(u.updated_at, u.created_at)
 FROM auth.users u
-WHERE u.id NOT IN (SELECT id FROM public.profiles)
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.profiles p WHERE p.id::text = u.id::text
+)
 ON CONFLICT (id) DO UPDATE SET
   phone = EXCLUDED.phone,
   name = EXCLUDED.name,
@@ -94,7 +96,7 @@ ON CONFLICT (id) DO UPDATE SET
 -- 若現存會員中有房東身分，同步確保 landlords 表有對應紀錄
 INSERT INTO public.landlords (id, name, phone, status, ad_listing_enabled, created_at, updated_at)
 SELECT 
-  u.id,
+  u.id::text,
   COALESCE(u.raw_user_meta_data->>'name', '房東'),
   COALESCE(u.raw_user_meta_data->>'phone', u.phone, ''),
   COALESCE(u.raw_user_meta_data->>'status', 'pending'),
@@ -103,7 +105,9 @@ SELECT
   COALESCE(u.updated_at, u.created_at)
 FROM auth.users u
 WHERE (u.raw_user_meta_data->>'requested_role' = 'landlord' OR u.raw_user_meta_data->>'role' = 'landlord')
-  AND u.id NOT IN (SELECT id FROM public.landlords)
+  AND NOT EXISTS (
+    SELECT 1 FROM public.landlords l WHERE l.id::text = u.id::text
+  )
 ON CONFLICT (id) DO UPDATE SET
   phone = EXCLUDED.phone,
   name = EXCLUDED.name;
