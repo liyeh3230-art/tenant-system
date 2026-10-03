@@ -115,7 +115,8 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
   const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\\/$/, "");
   const phone = userCtx?.cleanPhone || "";
   const name = userCtx?.userName || "";
-  const queryParams = \`mode=apply_landlord&phone=\${encodeURIComponent(phone)}&name=\${encodeURIComponent(name)}\`;
+  const lineUid = userCtx?.lineUserId || "";
+  const queryParams = \`mode=apply_landlord&phone=\${encodeURIComponent(phone)}&name=\${encodeURIComponent(name)}&uid=\${encodeURIComponent(lineUid)}&_t=\${Date.now()}\`;
 
   // 優先使用 LIFF 內嵌彈窗網址 (若有配置 LIFF_LANDLORD_APPLICATION_URL)
   let applyUrl = \`\${cleanBase}/?\${queryParams}\`;

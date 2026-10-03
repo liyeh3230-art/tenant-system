@@ -438,6 +438,7 @@ export default function App() {
     open: false,
     data: null,
   });
+  const [currentLandlordStatus, setCurrentLandlordStatus] = useState(null);
 
   // Mobile Responsiveness
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1556,57 +1557,23 @@ export default function App() {
           return;
         }
 
-        // 支援直接透過 LINE BOT / LIFF 連結開啟「申請成為房東」認證表單
+        // 支援直接透過 LINE BOT / LIFF 連結開啟「申請成為房東」認證表單或跳轉目前狀態
         if (mode === 'apply_landlord' || mode === 'landlord_application') {
-          const phoneParam = searchParams.get('phone') || '';
-          const nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
+          let phoneParam = searchParams.get('phone') || '';
+          let nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
+          let lineUidParam = searchParams.get('line_uid') || searchParams.get('uid') || '';
 
-          if (phoneParam) {
-            setCurrentTenantPhone(phoneParam);
-          }
-          if (nameParam) {
-            setCurrentTenantName(nameParam);
-          }
-
-          setOnboardingUser({
-            id: currentUser?.id || myLandlordAccount?.id || (phoneParam ? `usr_${phoneParam}` : `usr_${Date.now()}`),
-            phone: phoneParam || activeUserPhone || currentTenantPhone || '',
-            name: nameParam || currentTenantName || currentUser?.user_metadata?.name || '會員',
-          });
-
-          setActiveModal('landlordApplication');
-          showToast('👋 歡迎申請開通房東權限！請填寫以下查核資料並送出審核。', 'info');
-
-          // 若在 LIFF 環境中，若未帶 name/phone 則嘗試透過 LIFF SDK 讀取使用者 Profile 與資料庫綁定
+          // 1. 若在 LIFF 環境中，若未帶 name/phone/lineUid 則嘗試透過 LIFF SDK 讀取使用者 Profile
           if (typeof window !== 'undefined' && window.liff) {
             try {
               if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
                 const liffProfile = await window.liff.getProfile();
                 if (liffProfile) {
                   if (!nameParam && liffProfile.displayName) {
-                    setCurrentTenantName(liffProfile.displayName);
-                    setOnboardingUser(prev => prev ? { ...prev, name: liffProfile.displayName } : prev);
+                    nameParam = liffProfile.displayName;
                   }
-                  if (!phoneParam && liffProfile.userId) {
-                    try {
-                      const { data: binding } = await supabase
-                        .from('line_bindings')
-                        .select('phone, name, line_display_name')
-                        .eq('line_user_id', liffProfile.userId)
-                        .maybeSingle();
-                      if (binding && binding.phone) {
-                        setCurrentTenantPhone(binding.phone);
-                        if (binding.name) setCurrentTenantName(binding.name);
-                        setOnboardingUser(prev => prev ? {
-                          ...prev,
-                          phone: binding.phone,
-                          name: binding.name || prev.name,
-                          id: `usr_${binding.phone}`
-                        } : prev);
-                      }
-                    } catch (e) {
-                      console.warn('Failed to query binding:', e);
-                    }
+                  if (!lineUidParam && liffProfile.userId) {
+                    lineUidParam = liffProfile.userId;
                   }
                 }
               }
@@ -1614,6 +1581,120 @@ export default function App() {
               console.warn('LIFF landlord profile notice:', liffErr);
             }
           }
+
+          // 2. 若電話未指定但有 LINE UID，嘗試由 line_bindings 關聯 profiles 反查電話與姓名
+          if (!phoneParam && lineUidParam) {
+            try {
+              const { data: binding } = await supabase
+                .from('line_bindings')
+                .select('tenant_id, line_display_name')
+                .eq('line_user_id', lineUidParam)
+                .maybeSingle();
+              if (binding?.tenant_id) {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('phone, name')
+                  .eq('id', binding.tenant_id)
+                  .maybeSingle();
+                if (profile?.phone) {
+                  phoneParam = profile.phone;
+                  if (!nameParam && profile.name) nameParam = profile.name;
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to query binding by lineUid:', e);
+            }
+          }
+
+          const targetPhone = phoneParam || currentTenantPhone || '';
+          const targetName = nameParam || currentTenantName || currentUser?.user_metadata?.name || '會員';
+
+          if (targetPhone) {
+            setCurrentTenantPhone(targetPhone);
+          }
+          if (targetName) {
+            setCurrentTenantName(targetName);
+          }
+
+          setOnboardingUser({
+            id: currentUser?.id || myLandlordAccount?.id || (targetPhone ? `usr_${targetPhone}` : `usr_${Date.now()}`),
+            phone: targetPhone,
+            name: targetName,
+          });
+
+          // 3. 核心：主動向 Supabase 查詢該電話之房東申請狀態 (即時跳轉對應狀態頁面)
+          const cleanP = String(targetPhone).replace(/[^0-9]/g, '');
+          let existingLandlord = null;
+          if (cleanP) {
+            try {
+              const { data: lnd } = await supabase
+                .from('landlords')
+                .select('*')
+                .eq('phone', cleanP)
+                .maybeSingle();
+              existingLandlord = lnd;
+            } catch (lErr) {
+              console.warn('Check landlord status error:', lErr);
+            }
+          }
+
+          if (existingLandlord) {
+            setCurrentLandlordStatus(existingLandlord.status);
+
+            let appDetails = null;
+            try {
+              if (existingLandlord.company_name && existingLandlord.company_name.startsWith('{')) {
+                appDetails = JSON.parse(existingLandlord.company_name);
+              }
+            } catch (e) {}
+
+            setLandlordAppForm({
+              companyName: appDetails?.companyName || (!existingLandlord.company_name?.startsWith('{') ? existingLandlord.company_name : '') || '',
+              idNumber: appDetails?.idNumber || existingLandlord.id_number || '',
+              contactAddress: appDetails?.contactAddress || existingLandlord.contact_address || '',
+              bankName: appDetails?.bankName || existingLandlord.bank_name || '',
+              bankAccount: appDetails?.bankAccount || existingLandlord.bank_account || '',
+              notes: appDetails?.notes || existingLandlord.application_notes || '',
+            });
+
+            // 狀態 1：審核中 (Pending) -> 直接跳轉「審核中狀態說明頁面」
+            if (existingLandlord.status === 'pending') {
+              setPendingLandlordNotice({
+                open: true,
+                data: {
+                  ...existingLandlord,
+                  appDetails,
+                }
+              });
+              setActiveModal('pendingLandlordAlert');
+              showToast('⏳ 您的房東身分申請已送出，目前正由管理員審核中！', 'info');
+              return;
+            }
+
+            // 狀態 2：被駁回 (Rejected) -> 直接跳轉「修改房東認證資料 (重新送審)」
+            if (existingLandlord.status === 'rejected') {
+              setActiveModal('landlordApplication');
+              showToast('⚠️ 您先前的房東申請未通過，請修改有誤資料後重新送審。', 'warning');
+              return;
+            }
+
+            // 狀態 3：已核准 (Approved) -> 直接進入房東後台
+            if (existingLandlord.status === 'approved') {
+              setRole('admin');
+              setActiveTab('overview');
+              showToast('🎉 您的房東身分已核准開通！已為您切換至房東經營後台。', 'success');
+              if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                setTimeout(() => {
+                  try { window.liff.closeWindow(); } catch (e) {}
+                }, 2000);
+              }
+              return;
+            }
+          }
+
+          // 尚未申請過 -> 開啟全新申請表單
+          setActiveModal('landlordApplication');
+          showToast('👋 歡迎申請開通房東權限！請填寫以下查核資料並送出審核。', 'info');
           return;
         }
 
@@ -2274,9 +2355,9 @@ export default function App() {
     return idMatch || phoneMatch || nameMatch;
   });
 
-  const isApprovedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'approved');
-  const isPendingLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'pending');
-  const isRejectedLandlord = Boolean(myLandlordAccount && myLandlordAccount.status === 'rejected');
+  const isApprovedLandlord = Boolean((myLandlordAccount && myLandlordAccount.status === 'approved') || currentLandlordStatus === 'approved');
+  const isPendingLandlord = Boolean((myLandlordAccount && myLandlordAccount.status === 'pending') || currentLandlordStatus === 'pending');
+  const isRejectedLandlord = Boolean((myLandlordAccount && myLandlordAccount.status === 'rejected') || currentLandlordStatus === 'rejected');
 
   const handleOpenLandlordApplication = (isResubmit = false) => {
     if (isPendingLandlord) {
@@ -9618,7 +9699,7 @@ export default function App() {
                 {activeModal === 'tenantPay' && '回報已繳費用'}
               </h3>
               <button onClick={() => {
-                if (activeModal === 'landlordApplication' && typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                if ((activeModal === 'landlordApplication' || activeModal === 'pendingLandlordAlert') && typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
                   try { window.liff.closeWindow(); return; } catch (e) {}
                 }
                 setActiveModal(null);
@@ -11340,13 +11421,65 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* 申請提交資料摘要 */}
+                  {(pendingLandlordNotice?.data || myLandlordAccount) && (
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 text-left text-xs space-y-2">
+                      <div className="font-bold text-amber-950 flex items-center justify-between pb-1.5 border-b border-amber-200/60">
+                        <span className="flex items-center gap-1.5">
+                          <ShieldCheck size={15} className="text-amber-600" />
+                          <span>已提交之房東查核資料</span>
+                        </span>
+                        <span className="text-[10px] bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-full font-bold">
+                          審核中
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                        <div>
+                          <span className="text-slate-400">申請姓名：</span>
+                          <span className="font-semibold text-slate-800">
+                            {pendingLandlordNotice?.data?.name || myLandlordAccount?.name || currentTenantName}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">聯絡電話：</span>
+                          <span className="font-semibold text-slate-800">
+                            {pendingLandlordNotice?.data?.phone || myLandlordAccount?.phone || currentTenantPhone}
+                          </span>
+                        </div>
+                        {(pendingLandlordNotice?.data?.appDetails?.contactAddress || myLandlordAccount?.contact_address || landlordAppForm.contactAddress) && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">租賃地址：</span>
+                            <span className="font-semibold text-slate-800">
+                              {pendingLandlordNotice?.data?.appDetails?.contactAddress || myLandlordAccount?.contact_address || landlordAppForm.contactAddress}
+                            </span>
+                          </div>
+                        )}
+                        {(pendingLandlordNotice?.data?.appDetails?.companyName || landlordAppForm.companyName) && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">公司抬頭：</span>
+                            <span className="font-semibold text-slate-800">
+                              {pendingLandlordNotice?.data?.appDetails?.companyName || landlordAppForm.companyName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="pt-2">
                     <button
                       type="button"
-                      onClick={() => setActiveModal(null)}
+                      onClick={() => {
+                        if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                          try { window.liff.closeWindow(); return; } catch (e) {}
+                        }
+                        setActiveModal(null);
+                      }}
                       className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-sm rounded-xl shadow-md shadow-indigo-100 transition-all cursor-pointer"
                     >
-                      我知道了，返回租客中心
+                      {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
+                        ? '我知道了，關閉視窗返回 LINE'
+                        : '我知道了，返回租客中心'}
                     </button>
                   </div>
                 </div>
