@@ -1979,19 +1979,19 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
     ? "資料需要修正，可點選下方查看原因並重新送審"
     : "享有智慧物業管理 · 一鍵對帳 · 即時催繳";
 
-  const statusText = isPending
-    ? "審核處理中 (暫無法重複填寫)"
-    : isRejected
-    ? "審核未通過 (可修改重新送審)"
-    : "租客 (未具備房東管理權限)";
-  const statusColor = isPending ? "#D97706" : isRejected ? "#E11D48" : "#64748B";
+  let statusText = "租客 (未申請房東身分)";
+  let statusColor = "#64748B";
 
-  const btnText = isPending
-    ? "⏳ 查看目前審核狀態與資料"
-    : isRejected
-    ? "❌ 查看駁回原因並重新送審"
-    : "🚀 填寫房東申請表 (LINE 內快速送審)";
-  const btnColor = isPending ? "#D97706" : isRejected ? "#E11D48" : "#4F46E5";
+  if (isPending) {
+    statusText = "租客 (房東審核狀態：審核中)";
+    statusColor = "#D97706";
+  } else if (isRejected) {
+    statusText = "租客 (房東審核狀態：未通過)";
+    statusColor = "#E11D48";
+  }
+
+  const btnText = "填寫房東申請表";
+  const btnColor = "#4F46E5";
 
   return {
     type: "flex",
@@ -2047,7 +2047,7 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
                 layout: "horizontal",
                 contents: [
                   { type: "text", text: "🛡️ 目前身分", size: "xs", color: "#64748B", flex: 3 },
-                  { type: "text", text: statusText, size: "xs", color: statusColor, weight: "bold", flex: 7 }
+                  { type: "text", text: statusText, size: "xs", color: statusColor, weight: "bold", flex: 7, wrap: true }
                 ]
               }
             ]

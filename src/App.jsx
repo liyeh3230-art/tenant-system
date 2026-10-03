@@ -11502,6 +11502,12 @@ export default function App() {
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                        <div className="col-span-2 pb-1.5 mb-0.5 border-b border-slate-200/60 flex items-center justify-between">
+                          <span className="text-slate-400">目前身分：</span>
+                          <span className={`font-bold ${isRejectedLandlord ? 'text-rose-700' : 'text-amber-700'}`}>
+                            {isRejectedLandlord ? '租客 (房東審核狀態：未通過)' : '租客 (房東審核狀態：審核中)'}
+                          </span>
+                        </div>
                         <div>
                           <span className="text-slate-400">申請姓名：</span>
                           <span className="font-semibold text-slate-800">
