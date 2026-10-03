@@ -3157,26 +3157,52 @@ export default function App() {
     }
   };
 
-  const handleRejectLandlord = async (landlordId, landlordName) => {
+  const handleRejectLandlord = async (landlordId, landlordName, landlordPhone) => {
     const confirmed = await showConfirmDialog(`確定要拒絕並退回房東「${landlordName}」的申請嗎？\n\n💡 說明：退回後該會員將完整保留原「租客身分」，租客中心各項功能不受影響，但無法使用房東管理後台。`);
     if (confirmed) {
       try {
         const nowIso = new Date().toISOString();
-        const { error: rpcErr } = await supabase.rpc('reject_landlord_account', { p_landlord_id: landlordId });
-        if (rpcErr) {
-          await supabase
-            .from('landlords')
-            .update({ status: 'rejected', updated_at: nowIso })
-            .eq('id', landlordId);
-        }
-        // 確保該會員的 profiles.role 保持/恢復為 tenant
-        await supabase
-          .from('profiles')
-          .update({ role: 'tenant', updated_at: nowIso })
-          .eq('id', landlordId);
+        const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
 
-        setLandlords(landlords.filter(l => l.id !== landlordId));
-        showToast(`已退回「${landlordName}」的房東申請，該會員已恢復為正常租客身分。`, 'info');
+        // 1. 更新 landlords 表為 rejected
+        let lndQuery = supabase.from('landlords').update({ status: 'rejected', updated_at: nowIso });
+        if (landlordId && cleanPhone) {
+          lndQuery = lndQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+        } else if (cleanPhone) {
+          lndQuery = lndQuery.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+        } else if (landlordId) {
+          lndQuery = lndQuery.eq('id', landlordId);
+        }
+        await lndQuery;
+
+        // 2. 確保 profiles 表角色為 tenant
+        let profQuery = supabase.from('profiles').update({ role: 'tenant', updated_at: nowIso });
+        if (landlordId && cleanPhone) {
+          profQuery = profQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+        } else if (cleanPhone) {
+          profQuery = profQuery.eq('phone', cleanPhone);
+        } else if (landlordId) {
+          profQuery = profQuery.eq('id', landlordId);
+        }
+        await profQuery;
+
+        // 3. 更新 line_bindings (若先前處於房東模式 active:landlord，調整為租客 active:tenant)
+        if (cleanPhone || landlordId) {
+          const { data: profs } = await supabase.from('profiles').select('id').or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone || 'none'}`);
+          const pIds = (profs || []).map(p => p.id);
+          if (pIds.length > 0) {
+            await supabase.from('line_bindings')
+              .update({ status: 'active:tenant', updated_at: nowIso })
+              .in('tenant_id', pIds)
+              .eq('status', 'active:landlord');
+          }
+        }
+
+        setLandlords(prev => prev.map(l => {
+          const matches = (landlordId && l.id === landlordId) || (cleanPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanPhone);
+          return matches ? { ...l, status: 'rejected' } : l;
+        }));
+        showToast(`已退回「${landlordName}」的房東申請，該會員已恢復為正常租客身分。您可於「已退回申請」隨時查閱。`, 'info');
         fetchSupabaseData();
       } catch (err) {
         showToast(`操作失敗: ${err.message}`, 'error');
@@ -3245,6 +3271,50 @@ export default function App() {
     } catch (err) {
       console.error('Revoke landlord error:', err);
       showToast(`撤銷房東身分失敗: ${err.message || '操作異常'}`, 'error');
+    }
+  };
+
+  const handleDeleteRejectedLandlordRecord = async (landlordId, landlordName, landlordPhone) => {
+    const confirmed = await showConfirmDialog(
+      `確定要清除「${landlordName}」的這筆房東申請紀錄嗎？\n\n` +
+      `💡 說明：\n` +
+      `1. 此操作僅清除該筆已退回的房東申請資料，使其回到純租客（未申請）狀態。\n` +
+      `2. 該會員的「租客身分、租約、帳單繳費明細與 LINE 官方帳號綁定」將 100% 完整保留，不受任何影響。\n` +
+      `3. 若日後該會員需要，仍可隨時重新填寫申請表送審。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
+
+      // 1. 僅刪除 landlords 表中的紀錄 (嚴格絕不刪除 profiles 與 line_bindings)
+      let lndQuery = supabase.from('landlords').delete();
+      if (landlordId && cleanPhone) {
+        lndQuery = lndQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        lndQuery = lndQuery.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (landlordId) {
+        lndQuery = lndQuery.eq('id', landlordId);
+      }
+      const { error: lndErr } = await lndQuery;
+      if (lndErr) console.warn('Delete rejected landlord record notice:', lndErr);
+
+      // 2. 確保 profiles 表角色為 tenant (維持其租客身分正常運作)
+      if (cleanPhone || landlordId) {
+        await supabase
+          .from('profiles')
+          .update({ role: 'tenant', updated_at: new Date().toISOString() })
+          .or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone || 'none'}`);
+      }
+
+      // 3. 更新本地狀態 (僅從房東申請名冊中移除)
+      setLandlords(prev => prev.filter(l => l.id !== landlordId && (!cleanPhone || String(l.phone || '').replace(/[^0-9]/g, '') !== cleanPhone)));
+
+      showToast(`已成功清除「${landlordName}」的房東申請紀錄！該會員已恢復為純租客（未申請）狀態，租客各項資料與 LINE 綁定均完整保留。`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Delete rejected landlord record error:', err);
+      showToast(`清除申請紀錄失敗: ${err.message || '操作異常'}`, 'error');
     }
   };
 
@@ -6486,7 +6556,7 @@ export default function App() {
                                           核准啟用
                                         </button>
                                         <button
-                                          onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
+                                          onClick={() => handleRejectLandlord(lnd.id, lnd.name, lnd.phone)}
                                           className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors focus:outline-none cursor-pointer"
                                         >
                                           退回申請
@@ -6535,7 +6605,7 @@ export default function App() {
                                       核准啟用
                                     </button>
                                     <button
-                                      onClick={() => handleRejectLandlord(lnd.id, lnd.name)}
+                                      onClick={() => handleRejectLandlord(lnd.id, lnd.name, lnd.phone)}
                                       className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
                                     >
                                       退回申請
@@ -6600,11 +6670,12 @@ export default function App() {
                                           重新核准
                                         </button>
                                         <button
-                                          onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
-                                          className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
+                                          onClick={() => handleDeleteRejectedLandlordRecord(lnd.id, lnd.name, lnd.phone)}
+                                          className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none cursor-pointer"
+                                          title="僅清除房東申請紀錄，保留租客會員身分與資料"
                                         >
                                           <Trash2 size={13} className="mr-0.5" />
-                                          <span>刪除紀錄</span>
+                                          <span>清除申請紀錄</span>
                                         </button>
                                       </td>
                                     </tr>
@@ -6638,10 +6709,10 @@ export default function App() {
                                     重新核准
                                   </button>
                                   <button
-                                    onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
+                                    onClick={() => handleDeleteRejectedLandlordRecord(lnd.id, lnd.name, lnd.phone)}
                                     className="flex-1 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
                                   >
-                                    刪除紀錄
+                                    清除申請紀錄
                                   </button>
                                 </div>
                               </div>
