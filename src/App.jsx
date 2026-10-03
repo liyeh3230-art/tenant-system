@@ -3384,9 +3384,9 @@ export default function App() {
 
   const handleSuperadminDeleteLandlord = async (landlordId, landlordName, landlordPhone) => {
     const confirmed = await showConfirmDialog(
-      `確定要「徹底註銷」房東「${landlordName}」嗎？\n\n` +
-      `⚠️ 嚴重警告：此操作為不可逆的徹底銷毀！\n` +
-      `這將會一併移除該使用者的登入帳號、LINE 官方帳號綁定、租客會員身分，以及名下所有房源、合約與帳單！\n\n` +
+      `確定要「註銷帳戶」房東「${landlordName}」嗎？\n\n` +
+      `⚠️ 嚴重警告：此操作為不可逆的徹底註銷！\n` +
+      `這將會一併移除該使用者的登入帳號、LINE 官方帳號綁定、會員身分，以及名下所有房源、合約與帳單！\n\n` +
       `💡 若您只是要收回其房東管理權限，請改用「撤銷身分 (降為租客)」。`
     );
     if (!confirmed) return;
@@ -3394,21 +3394,29 @@ export default function App() {
     try {
       const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
 
+      // 0. 找出有效 UUID 以供 RPC 使用
+      let targetUuid = '00000000-0000-0000-0000-000000000000';
+      if (landlordId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(landlordId)) {
+        targetUuid = landlordId;
+      } else if (cleanPhone) {
+        const { data: profs } = await supabase.from('profiles').select('id').eq('phone', cleanPhone);
+        const validP = (profs || []).find(p => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.id));
+        if (validP) targetUuid = validP.id;
+      }
+
       // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
       try {
         await supabase.rpc('delete_user_by_admin', { 
-          target_user_id: String(landlordId || ''), 
+          target_user_id: targetUuid, 
           target_phone: cleanPhone 
         });
       } catch (rpcErr) {
         console.warn('RPC delete_user_by_admin notice:', rpcErr);
       }
 
-      // 1. 查詢該房東名下所有房源
+      // 1. 查詢該房東名下所有房源並清理關聯帳單、合約與房源
       const { data: props } = await supabase.from('properties').select('id').eq('landlord_id', landlordId);
       const propIds = (props || []).map(p => p.id);
-
-      // 2. 刪除關聯帳單、合約與房源
       if (propIds.length > 0) {
         const { data: lData } = await supabase.from('leases').select('id').in('property_id', propIds);
         const leaseIds = (lData || []).map(l => l.id);
@@ -3419,77 +3427,230 @@ export default function App() {
         await supabase.from('properties').delete().eq('landlord_id', landlordId);
       }
 
-      // 3. 刪除房東地址庫與 LINE 綁定
-      await supabase.from('landlord_addresses').delete().eq('landlord_id', landlordId);
-      if (landlordId) {
-        await supabase.from('line_bindings').delete().or(`tenant_id.eq.${landlordId},line_user_id.eq.${landlordId}`);
-        await supabase.from('line_binding_tokens').delete().eq('tenant_id', landlordId);
+      // 1b. 若該房東同時身為租客，一併清理該租客名下之合約與帳單
+      if (cleanPhone) {
+        const { data: tLeases } = await supabase.from('leases').select('id').eq('phone', cleanPhone);
+        const tLeaseIds = (tLeases || []).map(l => l.id);
+        if (tLeaseIds.length > 0) {
+          await supabase.from('payments').delete().in('lease_id', tLeaseIds);
+          await supabase.from('leases').delete().in('id', tLeaseIds);
+        }
       }
 
-      // 4. 刪除 landlords 表與 profiles 表
-      await supabase.from('landlords').delete().or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone}`);
-      if (cleanPhone) {
-        await supabase.from('profiles').delete().or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone}`);
-      } else {
-        await supabase.from('profiles').delete().eq('id', landlordId);
+      // 2. 刪除房東地址庫與 LINE 綁定
+      await supabase.from('landlord_addresses').delete().eq('landlord_id', landlordId);
+      if (landlordId || cleanPhone) {
+        let bDel = supabase.from('line_bindings').delete();
+        if (landlordId && cleanPhone) {
+          bDel = bDel.or(`tenant_id.eq.${landlordId},line_user_id.eq.${landlordId},tenant_id.eq.usr_${cleanPhone}`);
+        } else if (cleanPhone) {
+          bDel = bDel.or(`tenant_id.eq.usr_${cleanPhone}`);
+        } else {
+          bDel = bDel.or(`tenant_id.eq.${landlordId},line_user_id.eq.${landlordId}`);
+        }
+        await bDel;
+        await supabase.from('line_binding_tokens').delete().or(`tenant_id.eq.${landlordId || 'none'},tenant_id.eq.usr_${cleanPhone || 'none'}`);
       }
+
+      // 3. 刪除 landlords 表、tenants 表與 profiles 表
+      let lndDel = supabase.from('landlords').delete();
+      if (landlordId && cleanPhone) {
+        lndDel = lndDel.or(`id.eq.${landlordId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        lndDel = lndDel.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else {
+        lndDel = lndDel.eq('id', landlordId);
+      }
+      await lndDel;
+
+      if (landlordId) {
+        await supabase.from('tenants').delete().eq('id', landlordId);
+      }
+      if (cleanPhone) {
+        await supabase.from('tenants').delete().eq('phone', cleanPhone);
+      }
+
+      let profDel = supabase.from('profiles').delete();
+      if (landlordId && cleanPhone) {
+        profDel = profDel.or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+      } else if (cleanPhone) {
+        profDel = profDel.eq('phone', cleanPhone);
+      } else {
+        profDel = profDel.eq('id', landlordId);
+      }
+      await profDel;
+
+      // 4. 重置 LINE Rich Menu (解除綁定專屬選單)
+      try {
+        await supabase.functions.invoke('line-push', {
+          body: {
+            action: 'revoke_landlord',
+            landlordId,
+            phone: cleanPhone
+          }
+        });
+      } catch (pushErr) {}
 
       // 5. 更新本地狀態
-      setLandlords(prev => prev.filter(l => l.id !== landlordId));
+      setLandlords(prev => prev.filter(l => l.id !== landlordId && (!cleanPhone || String(l.phone || '').replace(/[^0-9]/g, '') !== cleanPhone)));
+      setRegisteredTenants(prev => prev.filter(rt => (!cleanPhone || String(rt.phone || '').replace(/[^0-9]/g, '') !== cleanPhone) && rt.id !== landlordId));
       setProperties(prev => prev.filter(p => p.landlordId !== landlordId));
       setLandlordAddresses(prev => prev.filter(a => a.landlordId !== landlordId));
+      if (cleanPhone) {
+        setLeases(prev => prev.filter(l => String(l.phone || '').replace(/[^0-9]/g, '') !== cleanPhone));
+      }
 
-      showToast(`已成功徹底刪除房東「${landlordName}」及其所有資料！`, 'success');
+      showToast(`已成功註銷房東「${landlordName}」之帳戶與所有相關資料！`, 'success');
       fetchSupabaseData();
     } catch (err) {
       console.error('Delete landlord error:', err);
-      showToast(`刪除房東失敗: ${err.message || '資料庫操作異常'}`, 'error');
+      showToast(`註銷帳戶失敗: ${err.message || '資料庫操作異常'}`, 'error');
     }
   };
 
   const handleSuperadminDeleteTenant = async (tenantPhone, tenantName, tenantId) => {
-    const confirmed = await showConfirmDialog(`確定要徹底註銷租客「${tenantName}」(${tenantPhone}) 的會員帳戶嗎？`);
+    const confirmed = await showConfirmDialog(
+      `確定要「註銷帳戶」租客「${tenantName}」(${tenantPhone}) 嗎？\n\n` +
+      `⚠️ 嚴重警告：此操作為不可逆的徹底註銷！\n` +
+      `這將會一併移除該會員的登入帳號、LINE 官方帳號綁定、會員身分，以及名下所有合約與繳費帳單！`
+    );
     if (!confirmed) return;
 
     try {
       const cleanPhone = String(tenantPhone || '').replace(/[^0-9]/g, '');
 
+      // 0. 找出有效 UUID 以供 RPC 使用
+      let targetUuid = '00000000-0000-0000-0000-000000000000';
+      if (tenantId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) {
+        targetUuid = tenantId;
+      } else if (cleanPhone) {
+        const { data: profs } = await supabase.from('profiles').select('id').eq('phone', cleanPhone);
+        const validP = (profs || []).find(p => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.id));
+        if (validP) targetUuid = validP.id;
+      }
+
       // 0. 呼叫管理員級 RPC 徹底清理 auth.users 與所有關聯
       try {
         await supabase.rpc('delete_user_by_admin', { 
-          target_user_id: String(tenantId || ''), 
+          target_user_id: targetUuid, 
           target_phone: cleanPhone 
         });
       } catch (rpcErr) {
         console.warn('RPC delete_user_by_admin notice:', rpcErr);
       }
 
-      // 1. 刪除 LINE 綁定表記錄
-      if (tenantId) {
-        await supabase.from('line_bindings').delete().or(`tenant_id.eq.${tenantId},line_user_id.eq.${tenantId}`);
-        await supabase.from('line_binding_tokens').delete().eq('tenant_id', tenantId);
-      }
-
-      // 2. 刪除 tenants 表
-      if (tenantId) {
-        await supabase.from('tenants').delete().eq('id', tenantId);
-      }
-
-      // 3. 刪除 profiles 表
+      // 1. 若該租客也具房東身分，查詢房源並清理關聯帳單、合約、房源與地址庫
+      let landlordIds = [];
+      if (tenantId) landlordIds.push(tenantId);
       if (cleanPhone) {
-        await supabase.from('profiles').delete().or(`id.eq.${tenantId || 'none'},phone.eq.${cleanPhone}`);
-      } else if (tenantId) {
-        await supabase.from('profiles').delete().eq('id', tenantId);
+        const { data: lData } = await supabase.from('landlords').select('id').or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+        (lData || []).forEach(l => { if (l.id && !landlordIds.includes(l.id)) landlordIds.push(l.id); });
       }
 
-      // 4. 更新本地狀態
-      setRegisteredTenants(prev => prev.filter(rt => rt.phone !== tenantPhone && rt.id !== tenantId));
+      if (landlordIds.length > 0) {
+        const { data: props } = await supabase.from('properties').select('id').in('landlord_id', landlordIds);
+        const propIds = (props || []).map(p => p.id);
+        if (propIds.length > 0) {
+          const { data: lData } = await supabase.from('leases').select('id').in('property_id', propIds);
+          const propLeaseIds = (lData || []).map(l => l.id);
+          if (propLeaseIds.length > 0) {
+            await supabase.from('payments').delete().in('lease_id', propLeaseIds);
+            await supabase.from('leases').delete().in('id', propLeaseIds);
+          }
+          await supabase.from('properties').delete().in('landlord_id', landlordIds);
+        }
+        await supabase.from('landlord_addresses').delete().in('landlord_id', landlordIds);
+      }
 
-      showToast(`已成功註銷並刪除租客「${tenantName}」之會員帳號！`, 'success');
+      // 2. 查詢該租客名下所有合約 (以租客電話或 tenant_id) 並清理帳單與合約
+      let leaseQuery = supabase.from('leases').select('id');
+      if (cleanPhone && tenantId) {
+        leaseQuery = leaseQuery.or(`phone.eq.${cleanPhone},tenant_id.eq.${tenantId}`);
+      } else if (cleanPhone) {
+        leaseQuery = leaseQuery.eq('phone', cleanPhone);
+      } else if (tenantId) {
+        leaseQuery = leaseQuery.eq('tenant_id', tenantId);
+      }
+      const { data: tenantLeases } = await leaseQuery;
+      const leaseIds = (tenantLeases || []).map(l => l.id);
+      if (leaseIds.length > 0) {
+        await supabase.from('payments').delete().in('lease_id', leaseIds);
+        await supabase.from('leases').delete().in('id', leaseIds);
+      }
+
+      // 3. 刪除 LINE 綁定表記錄
+      let bDel = supabase.from('line_bindings').delete();
+      if (tenantId && cleanPhone) {
+        bDel = bDel.or(`tenant_id.eq.${tenantId},line_user_id.eq.${tenantId},tenant_id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        bDel = bDel.or(`tenant_id.eq.usr_${cleanPhone}`);
+      } else if (tenantId) {
+        bDel = bDel.or(`tenant_id.eq.${tenantId},line_user_id.eq.${tenantId}`);
+      }
+      await bDel;
+      await supabase.from('line_binding_tokens').delete().or(`tenant_id.eq.${tenantId || 'none'},tenant_id.eq.usr_${cleanPhone || 'none'}`);
+
+      // 4. 刪除 tenants 表
+      let tntDel = supabase.from('tenants').delete();
+      if (tenantId && cleanPhone) {
+        tntDel = tntDel.or(`id.eq.${tenantId},phone.eq.${cleanPhone}`);
+      } else if (cleanPhone) {
+        tntDel = tntDel.eq('phone', cleanPhone);
+      } else if (tenantId) {
+        tntDel = tntDel.eq('id', tenantId);
+      }
+      await tntDel;
+
+      // 5. 刪除 landlords 表（若該租客有申請過或具房東紀錄）
+      let lndDel = supabase.from('landlords').delete();
+      if (tenantId && cleanPhone) {
+        lndDel = lndDel.or(`id.eq.${tenantId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        lndDel = lndDel.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (tenantId) {
+        lndDel = lndDel.eq('id', tenantId);
+      }
+      await lndDel;
+
+      // 6. 刪除 profiles 表
+      let profDel = supabase.from('profiles').delete();
+      if (tenantId && cleanPhone) {
+        profDel = profDel.or(`id.eq.${tenantId},phone.eq.${cleanPhone}`);
+      } else if (cleanPhone) {
+        profDel = profDel.eq('phone', cleanPhone);
+      } else if (tenantId) {
+        profDel = profDel.eq('id', tenantId);
+      }
+      await profDel;
+
+      // 7. 重置 LINE Rich Menu (解除綁定專屬選單)
+      try {
+        await supabase.functions.invoke('line-push', {
+          body: {
+            action: 'revoke_landlord',
+            landlordId: tenantId,
+            phone: cleanPhone
+          }
+        });
+      } catch (pushErr) {}
+
+      // 8. 更新本地狀態
+      setRegisteredTenants(prev => prev.filter(rt => (!cleanPhone || String(rt.phone || '').replace(/[^0-9]/g, '') !== cleanPhone) && rt.id !== tenantId));
+      setLandlords(prev => prev.filter(l => l.id !== tenantId && (!cleanPhone || String(l.phone || '').replace(/[^0-9]/g, '') !== cleanPhone)));
+      if (landlordIds.length > 0) {
+        setProperties(prev => prev.filter(p => !landlordIds.includes(p.landlordId)));
+        setLandlordAddresses(prev => prev.filter(a => !landlordIds.includes(a.landlordId)));
+      }
+      if (leaseIds.length > 0) {
+        setLeases(prev => prev.filter(l => !leaseIds.includes(l.id)));
+        setPayments(prev => prev.filter(p => !leaseIds.includes(p.leaseId)));
+      }
+
+      showToast(`已成功註銷租客「${tenantName}」之會員帳戶與所有相關資料！`, 'success');
       fetchSupabaseData();
     } catch (err) {
       console.error('Delete tenant error:', err);
-      showToast(`註銷租客失敗: ${err.message || '資料庫操作異常'}`, 'error');
+      showToast(`註銷帳戶失敗: ${err.message || '資料庫操作異常'}`, 'error');
     }
   };
 
@@ -6488,10 +6649,10 @@ export default function App() {
                                       <button
                                         onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
                                         className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none cursor-pointer"
-                                        title="徹底註銷整個帳號（連同租客身分一併清除）"
+                                        title="註銷帳戶（連同租客身分一併清除）"
                                       >
                                         <Trash2 size={13} className="mr-0.5" />
-                                        <span>徹底刪除</span>
+                                        <span>註銷帳戶</span>
                                       </button>
                                     </td>
                                   </tr>
@@ -6556,10 +6717,10 @@ export default function App() {
                                   <button
                                     onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
                                     className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center cursor-pointer"
-                                    title="徹底註銷整個帳號"
+                                    title="註銷帳戶（連同租客身分一併清除）"
                                   >
                                     <Trash2 size={13} className="mr-0.5" />
-                                    <span>徹底刪除</span>
+                                    <span>註銷帳戶</span>
                                   </button>
                                 </div>
                               </div>
@@ -6814,7 +6975,8 @@ export default function App() {
                                 <td className="py-3.5 px-4 text-right">
                                   <button
                                     onClick={() => handleSuperadminDeleteTenant(t.phone, t.name, t.id)}
-                                    className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
+                                    className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none cursor-pointer"
+                                    title="註銷帳戶（連同租客與房東身分、合約與帳單一併清除）"
                                   >
                                     <Trash2 size={13} className="mr-0.5" />
                                     <span>註銷帳戶</span>
