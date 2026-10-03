@@ -111,11 +111,11 @@ function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = fal
 // -----------------------------------------------------------------------------
 
 // 1. 申請成為房東專屬導引卡片 (含一鍵跳出申請表單，支援 LIFF 內嵌彈窗與動態狀態識別)
-function buildLandlordApplicationGuideFlex(userCtx: any) {
+function buildLandlordApplicationGuideFlex(userCtx: any, fallbackLineUserId: string = "") {
   const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\\/$/, "");
   const phone = userCtx?.cleanPhone || "";
   const name = userCtx?.userName || "";
-  const lineUid = userCtx?.lineUserId || "";
+  const lineUid = userCtx?.lineUserId || fallbackLineUserId || "";
   const appStatus = userCtx?.landlordApplicationStatus || "";
   const queryParams = \`mode=apply_landlord&phone=\${encodeURIComponent(phone)}&name=\${encodeURIComponent(name)}&uid=\${encodeURIComponent(lineUid)}&_t=\${Date.now()}\`;
 
@@ -152,14 +152,14 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
 
   if (isPending) {
     statusText = "租客 (房東審核狀態：審核中)";
-    statusColor = "#D97706";
+    statusColor = "#D97706"; // 琥珀黃警示色
   } else if (isRejected) {
     statusText = "租客 (房東審核狀態：未通過)";
-    statusColor = "#E11D48";
+    statusColor = "#B91C1C"; // 深紅色醒目色
   }
 
   const btnText = "填寫房東申請表";
-  const btnColor = "#4F46E5";
+  const btnColor = isPending ? "#D97706" : isRejected ? "#B91C1C" : "#4F46E5";
 
   return {
     type: "flex",
@@ -956,15 +956,15 @@ async function getUserContext(supabase: any, lineUserId: string) {
   if (!isLandlord && (cleanPhone || profile?.id)) {
     let appQuery = supabase
       .from("landlords")
-      .select("status, company_name, id_number, contact_address, created_at")
+      .select("status, company_name, created_at")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(1);
 
     if (profile?.id && cleanPhone) {
-      appQuery = appQuery.or(`id.eq.${profile.id},phone.eq.${cleanPhone}`);
+      appQuery = appQuery.or(\`id.eq.\${profile.id},phone.eq.\${cleanPhone},id.eq.usr_\${cleanPhone}\`);
     } else if (cleanPhone) {
-      appQuery = appQuery.eq("phone", cleanPhone);
+      appQuery = appQuery.or(\`phone.eq.\${cleanPhone},id.eq.usr_\${cleanPhone}\`);
     } else if (profile?.id) {
       appQuery = appQuery.eq("id", profile.id);
     }
@@ -984,7 +984,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     .order("created_at", { ascending: false });
 
   if (cleanPhone) {
-    leaseQuery = leaseQuery.or(`phone.eq.${cleanPhone},co_phone.eq.${cleanPhone}`);
+    leaseQuery = leaseQuery.or(\`phone.eq.\${cleanPhone},co_phone.eq.\${cleanPhone}\`);
   }
 
   const { data: tenantLeases } = await leaseQuery;
@@ -1074,6 +1074,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
   }
 
   return {
+    lineUserId,
     binding,
     profile,
     userName,
@@ -1226,7 +1227,7 @@ serve(async (req: Request) => {
         }
 
         await replyLineMessage(replyToken, [
-          buildLandlordApplicationGuideFlex(userCtx)
+          buildLandlordApplicationGuideFlex(userCtx, lineUserId)
         ]);
         continue;
       }
@@ -1241,7 +1242,7 @@ serve(async (req: Request) => {
           if (!userCtx?.isLandlord) {
             await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              buildLandlordApplicationGuideFlex(userCtx)
+              buildLandlordApplicationGuideFlex(userCtx, lineUserId)
             ]);
             continue;
           }
@@ -1644,7 +1645,7 @@ serve(async (req: Request) => {
           }
 
           await replyLineMessage(replyToken, [
-            buildLandlordApplicationGuideFlex(userCtx)
+            buildLandlordApplicationGuideFlex(userCtx, lineUserId)
           ]);
           continue;
         }
@@ -1659,7 +1660,7 @@ serve(async (req: Request) => {
           if (!userCtx.isLandlord) {
             await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              buildLandlordApplicationGuideFlex(userCtx)
+              buildLandlordApplicationGuideFlex(userCtx, lineUserId)
             ]);
             continue;
           }

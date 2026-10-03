@@ -1625,7 +1625,6 @@ function buildBankInfoFlex(landlord: any) {
 }
 
 const LIFF_REGISTRATION_URL = Deno.env.get("LIFF_REGISTRATION_URL") || "";
-const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 const SITE_URL = Deno.env.get("SITE_URL") || Deno.env.get("APP_URL") || "https://liyeh3230-art.github.io/tenant-system";
 
 function getRegisterUrl(lineUserId: string = "", displayName: string = ""): string {
@@ -1853,6 +1852,7 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 const TENANT_STANDARD_RICH_MENU_ID = "richmenu-0b16475f35c9b7a311146b7d290615d6"; // 純租客專屬選單（第 6 格：直接開啟 LIFF 申請成為房東）
 const TENANT_DUAL_RICH_MENU_ID = "richmenu-807a761a05e49395cbc09886f5cda6e7";     // 雙身分租客選單（第 6 格：切換為房東）
 const LANDLORD_RICH_MENU_ID = "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0";        // 房東經營選單（第 6 格：切換為租客）
+const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 
 // Helper to push message to a specific LINE User ID
 async function pushLineMessage(to: string, messages: any[]): Promise<Response> {
@@ -1943,11 +1943,11 @@ function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = fal
 // -----------------------------------------------------------------------------
 
 // 1. 申請成為房東專屬導引卡片 (含一鍵跳出申請表單，支援 LIFF 內嵌彈窗與動態狀態識別)
-function buildLandlordApplicationGuideFlex(userCtx: any) {
+function buildLandlordApplicationGuideFlex(userCtx: any, fallbackLineUserId: string = "") {
   const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\/$/, "");
   const phone = userCtx?.cleanPhone || "";
   const name = userCtx?.userName || "";
-  const lineUid = userCtx?.lineUserId || "";
+  const lineUid = userCtx?.lineUserId || fallbackLineUserId || "";
   const appStatus = userCtx?.landlordApplicationStatus || "";
   const queryParams = `mode=apply_landlord&phone=${encodeURIComponent(phone)}&name=${encodeURIComponent(name)}&uid=${encodeURIComponent(lineUid)}&_t=${Date.now()}`;
 
@@ -1984,14 +1984,14 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
 
   if (isPending) {
     statusText = "租客 (房東審核狀態：審核中)";
-    statusColor = "#D97706";
+    statusColor = "#D97706"; // 琥珀黃警示色
   } else if (isRejected) {
     statusText = "租客 (房東審核狀態：未通過)";
-    statusColor = "#E11D48";
+    statusColor = "#B91C1C"; // 深紅色醒目色
   }
 
   const btnText = "填寫房東申請表";
-  const btnColor = "#4F46E5";
+  const btnColor = isPending ? "#D97706" : isRejected ? "#B91C1C" : "#4F46E5";
 
   return {
     type: "flex",
@@ -2788,15 +2788,15 @@ async function getUserContext(supabase: any, lineUserId: string) {
   if (!isLandlord && (cleanPhone || profile?.id)) {
     let appQuery = supabase
       .from("landlords")
-      .select("status, company_name, id_number, contact_address, created_at")
+      .select("status, company_name, created_at")
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(1);
 
     if (profile?.id && cleanPhone) {
-      appQuery = appQuery.or(`id.eq.${profile.id},phone.eq.${cleanPhone}`);
+      appQuery = appQuery.or(`id.eq.${profile.id},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
     } else if (cleanPhone) {
-      appQuery = appQuery.eq("phone", cleanPhone);
+      appQuery = appQuery.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
     } else if (profile?.id) {
       appQuery = appQuery.eq("id", profile.id);
     }
@@ -2906,6 +2906,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
   }
 
   return {
+    lineUserId,
     binding,
     profile,
     userName,
@@ -3058,7 +3059,7 @@ serve(async (req: Request) => {
         }
 
         await replyLineMessage(replyToken, [
-          buildLandlordApplicationGuideFlex(userCtx)
+          buildLandlordApplicationGuideFlex(userCtx, lineUserId)
         ]);
         continue;
       }
@@ -3073,7 +3074,7 @@ serve(async (req: Request) => {
           if (!userCtx?.isLandlord) {
             await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              buildLandlordApplicationGuideFlex(userCtx)
+              buildLandlordApplicationGuideFlex(userCtx, lineUserId)
             ]);
             continue;
           }
@@ -3476,7 +3477,7 @@ serve(async (req: Request) => {
           }
 
           await replyLineMessage(replyToken, [
-            buildLandlordApplicationGuideFlex(userCtx)
+            buildLandlordApplicationGuideFlex(userCtx, lineUserId)
           ]);
           continue;
         }
@@ -3491,7 +3492,7 @@ serve(async (req: Request) => {
           if (!userCtx.isLandlord) {
             await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              buildLandlordApplicationGuideFlex(userCtx)
+              buildLandlordApplicationGuideFlex(userCtx, lineUserId)
             ]);
             continue;
           }
