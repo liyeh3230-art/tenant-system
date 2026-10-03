@@ -1849,7 +1849,7 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 // -----------------------------------------------------------------------------
 // DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS (3-TIER ARCHITECTURE)
 // -----------------------------------------------------------------------------
-const TENANT_STANDARD_RICH_MENU_ID = "richmenu-0b16475f35c9b7a311146b7d290615d6"; // 純租客專屬選單（第 6 格：直接開啟 LIFF 申請成為房東）
+const TENANT_STANDARD_RICH_MENU_ID = "richmenu-cfddd338cb4c727d0ac9c86274615a2a"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
 const TENANT_DUAL_RICH_MENU_ID = "richmenu-807a761a05e49395cbc09886f5cda6e7";     // 雙身分租客選單（第 6 格：切換為房東）
 const LANDLORD_RICH_MENU_ID = "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0";        // 房東經營選單（第 6 格：切換為租客）
 const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
@@ -3463,7 +3463,7 @@ serve(async (req: Request) => {
         const isLandlordRole = userCtx.currentRole === "landlord";
 
         // 1. 申請成為房東指令
-        const isApplyLandlord = /^(申請成為房東|申請房東|我要當房東|成為房東|我要申請房東|開通房東)$/i.test(text.replace(/\s+/g, ''));
+        const isApplyLandlord = /^(?:📝|✍️)?\s*(申請成為房東|申請房東|我要當房東|成為房東|我要申請房東|開通房東)$/i.test(text.replace(/[\s\uFE0F]/g, ''));
         if (isApplyLandlord) {
           if (userCtx.isLandlord) {
             await replyLineMessage(replyToken, [
