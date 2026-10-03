@@ -1491,20 +1491,31 @@ export default function App() {
   const [lineFirstLoginNewPassword, setLineFirstLoginNewPassword] = useState('');
   const [lineFirstLoginConfirmPassword, setLineFirstLoginConfirmPassword] = useState('');
 
-  // --- LINE Front-end Framework (LIFF) 初始化 ---
-  useEffect(() => {
-    const initLiff = async () => {
-      const liffId = import.meta.env.VITE_LIFF_LANDLORD_ID || import.meta.env.VITE_LIFF_ID || '';
-      if (typeof window !== 'undefined' && window.liff && liffId) {
-        try {
-          await window.liff.init({ liffId });
-          console.log('LIFF initialized successfully');
-        } catch (err) {
-          console.warn('LIFF init notice:', err);
+  // --- LINE Front-end Framework (LIFF) 初始化 Helper ---
+  const initLiffSDK = async () => {
+    const liffId = import.meta.env.VITE_LIFF_LANDLORD_ID || import.meta.env.VITE_LIFF_ID || '2011231660-Jgip7AQv';
+    if (typeof window !== 'undefined' && window.liff && liffId) {
+      try {
+        if (!window.__liff_init_promise) {
+          window.__liff_init_promise = window.liff.init({ liffId }).then(() => {
+            console.log('LIFF initialized successfully');
+            return true;
+          }).catch(err => {
+            console.warn('LIFF init notice:', err);
+            return false;
+          });
         }
+        await window.__liff_init_promise;
+        return true;
+      } catch (err) {
+        console.warn('LIFF init notice:', err);
       }
-    };
-    initLiff();
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    initLiffSDK();
   }, []);
 
   useEffect(() => {
@@ -1563,9 +1574,10 @@ export default function App() {
           let nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
           let lineUidParam = searchParams.get('line_uid') || searchParams.get('uid') || '';
 
-          // 1. 若在 LIFF 環境中，若未帶 name/phone/lineUid 則嘗試透過 LIFF SDK 讀取使用者 Profile
+          // 1. 若在 LIFF 環境中，確保 LIFF 初始化完成並讀取使用者 Profile
           if (typeof window !== 'undefined' && window.liff) {
             try {
+              await initLiffSDK();
               if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
                 const liffProfile = await window.liff.getProfile();
                 if (liffProfile) {
@@ -1582,7 +1594,19 @@ export default function App() {
             }
           }
 
-          // 2. 若電話未指定但有 LINE UID，嘗試由 line_bindings 關聯 profiles 反查電話與姓名
+          // 2. 嘗試從 localStorage 中的 app_auth_session 補齊電話與姓名
+          if (!phoneParam) {
+            try {
+              const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed?.phone) phoneParam = parsed.phone;
+                if (!nameParam && parsed?.name) nameParam = parsed.name;
+              }
+            } catch (e) {}
+          }
+
+          // 3. 若電話未指定但有 LINE UID，嘗試由 line_bindings 關聯 profiles 反查電話與姓名
           if (!phoneParam && lineUidParam) {
             try {
               const { data: binding } = await supabase
@@ -1606,7 +1630,7 @@ export default function App() {
             }
           }
 
-          const targetPhone = phoneParam || currentTenantPhone || '';
+          const targetPhone = phoneParam || currentTenantPhone || activeUserPhone || '';
           const targetName = nameParam || currentTenantName || currentUser?.user_metadata?.name || '會員';
 
           if (targetPhone) {
@@ -1622,7 +1646,7 @@ export default function App() {
             name: targetName,
           });
 
-          // 3. 核心：主動向 Supabase 查詢該電話之房東申請狀態 (即時跳轉對應狀態頁面)
+          // 4. 核心：主動向 Supabase 查詢該電話之房東申請狀態 (即時跳轉對應狀態頁面)
           const cleanP = String(targetPhone).replace(/[^0-9]/g, '');
           let existingLandlord = null;
           if (cleanP) {
@@ -1631,11 +1655,27 @@ export default function App() {
                 .from('landlords')
                 .select('*')
                 .eq('phone', cleanP)
+                .is('deleted_at', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
                 .maybeSingle();
               existingLandlord = lnd;
             } catch (lErr) {
               console.warn('Check landlord status error:', lErr);
             }
+          }
+
+          if (!existingLandlord && (currentUser?.id || myLandlordAccount?.id)) {
+            const checkId = currentUser?.id || myLandlordAccount?.id;
+            try {
+              const { data: lndById } = await supabase
+                .from('landlords')
+                .select('*')
+                .eq('id', checkId)
+                .is('deleted_at', null)
+                .maybeSingle();
+              if (lndById) existingLandlord = lndById;
+            } catch (e) {}
           }
 
           if (existingLandlord) {
@@ -1659,27 +1699,23 @@ export default function App() {
 
             // 狀態 1：審核中 (Pending) -> 直接跳轉「審核中狀態說明頁面」
             if (existingLandlord.status === 'pending') {
-              setPendingLandlordNotice({
-                open: true,
-                data: {
-                  ...existingLandlord,
-                  appDetails,
-                }
-              });
+              setPendingLandlordNotice({ open: false, data: null });
               setActiveModal('pendingLandlordAlert');
               showToast('⏳ 您的房東身分申請已送出，目前正由管理員審核中！', 'info');
               return;
             }
 
-            // 狀態 2：被駁回 (Rejected) -> 直接跳轉「修改房東認證資料 (重新送審)」
+            // 狀態 2：被駁回 (Rejected) -> 直接跳轉「被駁回審核狀態說明頁面」
             if (existingLandlord.status === 'rejected') {
-              setActiveModal('landlordApplication');
-              showToast('⚠️ 您先前的房東申請未通過，請修改有誤資料後重新送審。', 'warning');
+              setPendingLandlordNotice({ open: false, data: null });
+              setActiveModal('pendingLandlordAlert');
+              showToast('❌ 您先前的房東申請未通過，請查看駁回說明並可點選修改重新送審。', 'warning');
               return;
             }
 
             // 狀態 3：已核准 (Approved) -> 直接進入房東後台
             if (existingLandlord.status === 'approved') {
+              setPendingLandlordNotice({ open: false, data: null });
               setRole('admin');
               setActiveTab('overview');
               showToast('🎉 您的房東身分已核准開通！已為您切換至房東經營後台。', 'success');
@@ -1693,6 +1729,8 @@ export default function App() {
           }
 
           // 尚未申請過 -> 開啟全新申請表單
+          setCurrentLandlordStatus(null);
+          setPendingLandlordNotice({ open: false, data: null });
           setActiveModal('landlordApplication');
           showToast('👋 歡迎申請開通房東權限！請填寫以下查核資料並送出審核。', 'info');
           return;
@@ -9685,7 +9723,7 @@ export default function App() {
                 {activeModal === 'lineLogin' && 'LINE 帳號快速登入'}
                 {activeModal === 'lineFirstLogin' && '🎉 首次 LINE 登入 - 請完善會員資料'}
                 {activeModal === 'landlordApplication' && (isRejectedLandlord ? '🏢 修改房東審核資料 (重新送審)' : '🏢 填寫房東身分審核資料')}
-                {activeModal === 'pendingLandlordAlert' && '⏳ 房東身分審核狀態說明'}
+                {activeModal === 'pendingLandlordAlert' && (isRejectedLandlord ? '❌ 房東身分審核狀態：未通過' : '⏳ 房東身分審核狀態說明')}
                 {activeModal === 'lineBinding' && 'LINE 官方帳號安全綁定'}
                 {activeModal === 'addLease' && '新增租約紀錄'}
                 {activeModal === 'editLease' && '編輯租約紀錄'}
@@ -11374,91 +11412,137 @@ export default function App() {
                 </div>
               )}
 
-              {/* Pending Landlord Notice Modal */}
+              {/* Pending & Rejected Landlord Notice Modal */}
               {activeModal === 'pendingLandlordAlert' && (
                 <div className="space-y-5 text-center py-2 sm:py-4">
-                  <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mx-auto shadow-md shadow-amber-100 ring-8 ring-amber-50">
-                    <Clock size={36} className="animate-pulse" />
-                  </div>
+                  {isRejectedLandlord ? (
+                    <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-3xl flex items-center justify-center mx-auto shadow-md shadow-rose-100 ring-8 ring-rose-50">
+                      <XCircle size={36} />
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mx-auto shadow-md shadow-amber-100 ring-8 ring-amber-50">
+                      <Clock size={36} className="animate-pulse" />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                      <span>審核處理中 (Pending Approval)</span>
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-800">
-                      您的房東身分申請已送出，正在審核中
-                    </h3>
-                    <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
-                      您已於日前提出房東權限開通申請，目前平台總管理員正在查核您的身分資料。
-                    </p>
+                    {isRejectedLandlord ? (
+                      <>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-800 rounded-full text-xs font-bold border border-rose-300">
+                          <span>❌ 審核未通過 (Application Rejected)</span>
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-900">
+                          很抱歉，您的房東身分審核未獲通過
+                        </h3>
+                        <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                          可能因身分證字號／統編有誤、租賃地址不完整或資料需要補充。您可點選下方按鈕直接修改原資料並重新送審。
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                          <span>審核處理中 (Pending Approval)</span>
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-800">
+                          您的房東身分申請已送出，正在審核中
+                        </h3>
+                        <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+                          您已於日前提出房東權限開通申請，目前平台總管理員正在查核您的身分資料。
+                        </p>
+                      </>
+                    )}
                   </div>
 
-                  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-left space-y-2.5 text-xs text-slate-600">
-                    <div className="flex items-start gap-2.5">
-                      <span className="p-1 bg-amber-100 text-amber-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
-                        <Clock size={14} />
-                      </span>
-                      <span><strong>暫無法重複送出：</strong>在管理員完成審核前，系統為保護您的資料一致性，暫不開放重複填寫或再次提交。</span>
+                  {!isRejectedLandlord && (
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-left space-y-2.5 text-xs text-slate-600">
+                      <div className="flex items-start gap-2.5">
+                        <span className="p-1 bg-amber-100 text-amber-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                          <Clock size={14} />
+                        </span>
+                        <span><strong>暫無法重複送出：</strong>在管理員完成審核前，系統為保護您的資料一致性，暫不開放重複填寫或再次提交。</span>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <span className="p-1 bg-emerald-100 text-emerald-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                          <CheckCircle size={14} />
+                        </span>
+                        <span><strong>審核通過時：</strong>管理員核准後，系統將自動為您啟用房東後台與刊登功能。</span>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <span className="p-1 bg-rose-100 text-rose-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                          <RefreshCw size={14} />
+                        </span>
+                        <span><strong>若審核未通過：</strong>若資料有誤被管理員駁回，您將可再次點選「重新送審」並自動載入原資料修改。</span>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <span className="p-1 bg-indigo-100 text-indigo-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
+                          <Home size={14} />
+                        </span>
+                        <span><strong>租客權益不受影響：</strong>審核期間您可以正常使用租客專區的所有功能與合約查閱。</span>
+                      </div>
                     </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="p-1 bg-emerald-100 text-emerald-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
-                        <CheckCircle size={14} />
-                      </span>
-                      <span><strong>審核通過時：</strong>管理員核准後，系統將自動為您啟用房東後台與刊登功能。</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="p-1 bg-rose-100 text-rose-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
-                        <RefreshCw size={14} />
-                      </span>
-                      <span><strong>若審核未通過：</strong>若資料有誤被管理員駁回，您將可再次點選「重新送審」並自動載入原資料修改。</span>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <span className="p-1 bg-indigo-100 text-indigo-700 rounded-lg flex-shrink-0 mt-0.5 shadow-2xs">
-                        <Home size={14} />
-                      </span>
-                      <span><strong>租客權益不受影響：</strong>審核期間您可以正常使用租客專區的所有功能與合約查閱。</span>
-                    </div>
-                  </div>
+                  )}
 
                   {/* 申請提交資料摘要 */}
-                  {(pendingLandlordNotice?.data || myLandlordAccount) && (
-                    <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 text-left text-xs space-y-2">
-                      <div className="font-bold text-amber-950 flex items-center justify-between pb-1.5 border-b border-amber-200/60">
+                  {(landlordAppForm?.contactAddress || pendingLandlordNotice?.data || myLandlordAccount || currentTenantName || currentTenantPhone) && (
+                    <div className={`p-4 rounded-2xl border text-left text-xs space-y-2 ${
+                      isRejectedLandlord ? 'bg-rose-50/70 border-rose-200' : 'bg-amber-50/70 border-amber-200'
+                    }`}>
+                      <div className={`font-bold flex items-center justify-between pb-1.5 border-b ${
+                        isRejectedLandlord ? 'text-rose-950 border-rose-200/60' : 'text-amber-950 border-amber-200/60'
+                      }`}>
                         <span className="flex items-center gap-1.5">
-                          <ShieldCheck size={15} className="text-amber-600" />
+                          {isRejectedLandlord ? <AlertCircle size={15} className="text-rose-600" /> : <ShieldCheck size={15} className="text-amber-600" />}
                           <span>已提交之房東查核資料</span>
                         </span>
-                        <span className="text-[10px] bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-full font-bold">
-                          審核中
+                        <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold ${
+                          isRejectedLandlord ? 'bg-rose-200 text-rose-900' : 'bg-amber-200 text-amber-900'
+                        }`}>
+                          {isRejectedLandlord ? '審核未通過' : '審核中'}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
                         <div>
                           <span className="text-slate-400">申請姓名：</span>
                           <span className="font-semibold text-slate-800">
-                            {pendingLandlordNotice?.data?.name || myLandlordAccount?.name || currentTenantName}
+                            {pendingLandlordNotice?.data?.name || myLandlordAccount?.name || currentTenantName || onboardingUser?.name}
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-400">聯絡電話：</span>
                           <span className="font-semibold text-slate-800">
-                            {pendingLandlordNotice?.data?.phone || myLandlordAccount?.phone || currentTenantPhone}
+                            {pendingLandlordNotice?.data?.phone || myLandlordAccount?.phone || currentTenantPhone || onboardingUser?.phone}
                           </span>
                         </div>
-                        {(pendingLandlordNotice?.data?.appDetails?.contactAddress || myLandlordAccount?.contact_address || landlordAppForm.contactAddress) && (
+                        {(landlordAppForm.idNumber || pendingLandlordNotice?.data?.id_number || myLandlordAccount?.id_number) && (
                           <div className="col-span-2">
-                            <span className="text-slate-400">租賃地址：</span>
-                            <span className="font-semibold text-slate-800">
-                              {pendingLandlordNotice?.data?.appDetails?.contactAddress || myLandlordAccount?.contact_address || landlordAppForm.contactAddress}
+                            <span className="text-slate-400">身分證/統編：</span>
+                            <span className="font-mono text-slate-800 font-semibold">
+                              {landlordAppForm.idNumber || pendingLandlordNotice?.data?.id_number || myLandlordAccount?.id_number}
                             </span>
                           </div>
                         )}
-                        {(pendingLandlordNotice?.data?.appDetails?.companyName || landlordAppForm.companyName) && (
+                        {(landlordAppForm.contactAddress || pendingLandlordNotice?.data?.contact_address || myLandlordAccount?.contact_address) && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">租賃地址：</span>
+                            <span className="font-semibold text-slate-800">
+                              {landlordAppForm.contactAddress || pendingLandlordNotice?.data?.contact_address || myLandlordAccount?.contact_address}
+                            </span>
+                          </div>
+                        )}
+                        {(landlordAppForm.companyName || pendingLandlordNotice?.data?.company_name || myLandlordAccount?.company_name) && !String(landlordAppForm.companyName || pendingLandlordNotice?.data?.company_name || myLandlordAccount?.company_name).startsWith('{') && (
                           <div className="col-span-2">
                             <span className="text-slate-400">公司抬頭：</span>
                             <span className="font-semibold text-slate-800">
-                              {pendingLandlordNotice?.data?.appDetails?.companyName || landlordAppForm.companyName}
+                              {landlordAppForm.companyName || pendingLandlordNotice?.data?.company_name || myLandlordAccount?.company_name}
+                            </span>
+                          </div>
+                        )}
+                        {landlordAppForm.notes && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">補充備註：</span>
+                            <span className="text-slate-700">
+                              {landlordAppForm.notes}
                             </span>
                           </div>
                         )}
@@ -11466,21 +11550,50 @@ export default function App() {
                     </div>
                   )}
 
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
-                          try { window.liff.closeWindow(); return; } catch (e) {}
-                        }
-                        setActiveModal(null);
-                      }}
-                      className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-sm rounded-xl shadow-md shadow-indigo-100 transition-all cursor-pointer"
-                    >
-                      {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
-                        ? '我知道了，關閉視窗返回 LINE'
-                        : '我知道了，返回租客中心'}
-                    </button>
+                  <div className="pt-2 space-y-2">
+                    {isRejectedLandlord ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveModal('landlordApplication');
+                          }}
+                          className="w-full py-3 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-700 hover:to-indigo-700 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <RefreshCw size={16} />
+                          <span>修改認證資料並重新送審</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                              try { window.liff.closeWindow(); return; } catch (e) {}
+                            }
+                            setActiveModal(null);
+                          }}
+                          className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                        >
+                          {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
+                            ? '關閉視窗返回 LINE'
+                            : '返回首頁'}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                            try { window.liff.closeWindow(); return; } catch (e) {}
+                          }
+                          setActiveModal(null);
+                        }}
+                        className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-sm rounded-xl shadow-md shadow-indigo-100 transition-all cursor-pointer"
+                      >
+                        {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
+                          ? '我知道了，關閉視窗返回 LINE'
+                          : '我知道了，返回租客中心'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -12446,7 +12559,7 @@ export default function App() {
                   </span>
                   <h3 className="text-xl font-bold text-slate-900">很抱歉，您的房東身分審核未獲通過</h3>
                   <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
-                    可能因身分證字號／統編有誤、通訊地址不完整或資料需要補充。您可以重新修正資料後再次送審，或先切換為房客身分立即使用系統。
+                    可能因身分證字號／統編有誤、租賃地址不完整或資料需要補充。您可以重新修正資料後再次送審，或先切換為房客身分立即使用系統。
                   </p>
                 </>
               ) : (
@@ -12480,7 +12593,7 @@ export default function App() {
                 )}
                 {pendingLandlordNotice.data.contactAddress && (
                   <div className="flex justify-between">
-                    <span className="text-slate-400">通訊地址：</span>
+                    <span className="text-slate-400">租賃地址：</span>
                     <span className="font-medium text-slate-800 text-right truncate max-w-[200px]">{pendingLandlordNotice.data.contactAddress}</span>
                   </div>
                 )}
@@ -12569,12 +12682,17 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                      try { window.liff.closeWindow(); return; } catch (e) {}
+                    }
                     setPendingLandlordNotice({ open: false, data: null });
                     setRole('portal');
                   }}
                   className="w-full py-2 text-slate-400 hover:text-slate-600 text-xs font-semibold cursor-pointer"
                 >
-                  返回首頁
+                  {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
+                    ? '關閉視窗返回 LINE'
+                    : '返回首頁'}
                 </button>
               </div>
             ) : (
@@ -12582,12 +12700,17 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                      try { window.liff.closeWindow(); return; } catch (e) {}
+                    }
                     setPendingLandlordNotice({ open: false, data: null });
                     setRole('portal');
                   }}
                   className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  我知道了，返回首頁
+                  {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient())
+                    ? '我知道了，關閉視窗返回 LINE'
+                    : '我知道了，返回首頁'}
                 </button>
               </div>
             )}

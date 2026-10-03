@@ -110,12 +110,13 @@ function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = fal
 // LANDLORD FLEX MESSAGE BUILDERS
 // -----------------------------------------------------------------------------
 
-// 1. 申請成為房東專屬導引卡片 (含一鍵跳出申請表單，支援 LIFF 內嵌彈窗)
+// 1. 申請成為房東專屬導引卡片 (含一鍵跳出申請表單，支援 LIFF 內嵌彈窗與動態狀態識別)
 function buildLandlordApplicationGuideFlex(userCtx: any) {
   const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\\/$/, "");
   const phone = userCtx?.cleanPhone || "";
   const name = userCtx?.userName || "";
   const lineUid = userCtx?.lineUserId || "";
+  const appStatus = userCtx?.landlordApplicationStatus || "";
   const queryParams = \`mode=apply_landlord&phone=\${encodeURIComponent(phone)}&name=\${encodeURIComponent(name)}&uid=\${encodeURIComponent(lineUid)}&_t=\${Date.now()}\`;
 
   // 優先使用 LIFF 內嵌彈窗網址 (若有配置 LIFF_LANDLORD_APPLICATION_URL)
@@ -126,21 +127,55 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
       : \`\${LIFF_LANDLORD_APPLICATION_URL}?\${queryParams}\`;
   }
 
+  const isPending = appStatus === "pending";
+  const isRejected = appStatus === "rejected";
+
+  const headerBg = isPending ? "#78350F" : isRejected ? "#881337" : "#1E1B4B";
+  const headerSubtitle = isPending
+    ? "⏳ 房東申請審核中 (Pending)"
+    : isRejected
+    ? "❌ 房東申請未通過 (Rejected)"
+    : "智慧租屋 · 房東權限開通申請";
+  const headerTitle = isPending
+    ? "⏳ 房東申請審核中"
+    : isRejected
+    ? "❌ 房東申請未通過"
+    : "📝 申請成為房東";
+  const headerDesc = isPending
+    ? "管理員正在查核身分，可點選下方查看進度"
+    : isRejected
+    ? "資料需要修正，可點選下方查看原因並重新送審"
+    : "享有智慧物業管理 · 一鍵對帳 · 即時催繳";
+
+  const statusText = isPending
+    ? "審核處理中 (暫無法重複填寫)"
+    : isRejected
+    ? "審核未通過 (可修改重新送審)"
+    : "租客 (未具備房東管理權限)";
+  const statusColor = isPending ? "#D97706" : isRejected ? "#E11D48" : "#64748B";
+
+  const btnText = isPending
+    ? "⏳ 查看目前審核狀態與資料"
+    : isRejected
+    ? "❌ 查看駁回原因並重新送審"
+    : "🚀 填寫房東申請表 (LINE 內快速送審)";
+  const btnColor = isPending ? "#D97706" : isRejected ? "#E11D48" : "#4F46E5";
+
   return {
     type: "flex",
-    altText: "📝 申請成為房東 · 線上填表開通物業管理權限",
+    altText: isPending ? "⏳ 房東申請審核中 · 查看進度" : isRejected ? "❌ 房東申請未通過 · 重新送審" : "📝 申請成為房東 · 線上填表開通物業管理權限",
     contents: {
       type: "bubble",
       size: "mega",
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#1E1B4B", // Deep Indigo 950
+        backgroundColor: headerBg,
         paddingAll: "18px",
         contents: [
-          { type: "text", text: "智慧租屋 · 房東權限開通申請", color: "#FDE68A", size: "xs", weight: "bold" },
-          { type: "text", text: "📝 申請成為房東", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" },
-          { type: "text", text: "享有智慧物業管理 · 一鍵對帳 · 即時催繳", color: "#C7D2FE", size: "xs", margin: "xs" }
+          { type: "text", text: headerSubtitle, color: "#FDE68A", size: "xs", weight: "bold" },
+          { type: "text", text: headerTitle, color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" },
+          { type: "text", text: headerDesc, color: "#C7D2FE", size: "xs", margin: "xs" }
         ]
       },
       body: {
@@ -180,7 +215,7 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
                 layout: "horizontal",
                 contents: [
                   { type: "text", text: "🛡️ 目前身分", size: "xs", color: "#64748B", flex: 3 },
-                  { type: "text", text: "租客 (未具備房東管理權限)", size: "xs", color: "#D97706", weight: "bold", flex: 7 }
+                  { type: "text", text: statusText, size: "xs", color: statusColor, weight: "bold", flex: 7 }
                 ]
               }
             ]
@@ -199,7 +234,11 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
           { type: "separator", margin: "xs" },
           {
             type: "text",
-            text: "點擊下方按鈕即可直接於 LINE 內嵌彈窗填寫認證資料（姓名與手機已為您自動代入），管理員核准後 LINE BOT 將自動為您切換為房東 6 宮格管理後台！",
+            text: isPending
+              ? "您的申請已送出並由管理員查核中，點選下方按鈕即可於彈窗查看已提交資料與狀態說明。"
+              : isRejected
+              ? "您先前的申請未通過，點選下方按鈕即可查看原因並載入原資料直接修改重新送審。"
+              : "點擊下方按鈕即可直接於 LINE 內嵌彈窗填寫認證資料（姓名與手機已為您自動代入），管理員核准後 LINE BOT 將自動為您切換為房東 6 宮格管理後台！",
             size: "xxs",
             color: "#64748B",
             wrap: true
@@ -207,11 +246,11 @@ function buildLandlordApplicationGuideFlex(userCtx: any) {
           {
             type: "button",
             style: "primary",
-            color: "#4F46E5", // Indigo
+            color: btnColor,
             height: "md",
             action: {
               type: "uri",
-              label: "🚀 填寫房東申請表 (LINE 內快速送審)",
+              label: btnText,
               uri: applyUrl
             }
           }
@@ -912,6 +951,30 @@ async function getUserContext(supabase: any, lineUserId: string) {
     (landlordRecord.phone && String(landlordRecord.phone).replace(/[^0-9]/g, "") === cleanPhone)
   );
 
+  // 3.5 查詢是否有審核中 (pending) 或被駁回 (rejected) 之房東身分申請
+  let landlordApplicationStatus: string | null = null;
+  if (!isLandlord && (cleanPhone || profile?.id)) {
+    let appQuery = supabase
+      .from("landlords")
+      .select("status, company_name, id_number, contact_address, created_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (profile?.id && cleanPhone) {
+      appQuery = appQuery.or(`id.eq.${profile.id},phone.eq.${cleanPhone}`);
+    } else if (cleanPhone) {
+      appQuery = appQuery.eq("phone", cleanPhone);
+    } else if (profile?.id) {
+      appQuery = appQuery.eq("id", profile.id);
+    }
+
+    const { data: apps } = await appQuery;
+    if (apps && apps.length > 0) {
+      landlordApplicationStatus = apps[0].status;
+    }
+  }
+
   // 4. 判斷租客資格與進行中租約 (Tenant Eligibility)
   let leaseQuery = supabase
     .from("leases")
@@ -921,7 +984,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     .order("created_at", { ascending: false });
 
   if (cleanPhone) {
-    leaseQuery = leaseQuery.or(\`phone.eq.\${cleanPhone},co_phone.eq.\${cleanPhone}\`);
+    leaseQuery = leaseQuery.or(`phone.eq.${cleanPhone},co_phone.eq.${cleanPhone}`);
   }
 
   const { data: tenantLeases } = await leaseQuery;
@@ -1016,6 +1079,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     userName,
     cleanPhone,
     isLandlord,
+    landlordApplicationStatus,
     isTenant,
     isDualRole,
     currentRole,
