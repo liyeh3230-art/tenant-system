@@ -321,7 +321,10 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
   const coTenantName = (rawCoName === "null" || rawCoName === "undefined" || rawCoName === "無" || rawCoName === "無同住人") ? "" : rawCoName;
   const rawCoPhone = String(lease.co_phone || lease.coPhone || "").trim();
   const coTenantPhone = (rawCoPhone === "null" || rawCoPhone === "undefined" || rawCoPhone === "無") ? "" : rawCoPhone;
-  const hasCoTenant = !!coTenantName;
+  const hasCoTenant = !!coTenantName || !!coTenantPhone;
+  const coTenantDisplay = (coTenantName && coTenantPhone)
+    ? `${coTenantName} (${coTenantPhone})`
+    : (coTenantName || coTenantPhone);
 
   return {
     type: "flex",
@@ -419,16 +422,18 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
           {
             type: "box",
             layout: "horizontal",
+            alignItems: "flex-start",
             contents: [
-              { type: "text", text: "👤 出租甲方", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: "👤 出租甲方", size: "xs", color: "#64748B", flex: 4, wrap: true },
               { type: "text", text: `${landlord?.name || bankInfo.landlordName || '房東'} (${landlord?.phone || bankInfo.landlordPhone || '未提供電話'})`, size: "xs", color: "#334155", weight: "bold", wrap: true, flex: 7 }
             ]
           },
           {
             type: "box",
             layout: "horizontal",
+            alignItems: "flex-start",
             contents: [
-              { type: "text", text: "👤 承租乙方", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: "👤 承租乙方", size: "xs", color: "#64748B", flex: 4, wrap: true },
               { type: "text", text: `${tenantName} (${tenantPhone})`, size: "xs", color: "#334155", weight: "bold", wrap: true, flex: 7 }
             ]
           },
@@ -436,9 +441,10 @@ function buildLeaseFlex(lease: any, property: any, landlord: any, profile: any) 
             {
               type: "box",
               layout: "horizontal",
+              alignItems: "flex-start",
               contents: [
-                { type: "text", text: "👥 同住承租人", size: "xs", color: "#64748B", flex: 3 },
-                { type: "text", text: `${coTenantName}${coTenantPhone ? ` (${coTenantPhone})` : ''}`, size: "xs", color: "#334155", weight: "bold", wrap: true, flex: 7 }
+                { type: "text", text: "👥 同住承租人", size: "xs", color: "#64748B", flex: 4, wrap: true },
+                { type: "text", text: coTenantDisplay, size: "xs", color: "#334155", weight: "bold", wrap: true, flex: 7 }
               ]
             }
           ] : [])
@@ -976,7 +982,11 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
             contents: [
               {
                 type: "text",
-                text: `🔍 已回報末五碼 [${p.transfer_last5 || '已報'}]，房東核對入帳中`,
+                text: (p.payment_method === '現金交付' || String(p.payment_method || '').includes('現金'))
+                  ? "🔍 已回報 [現金交付]，房東核對入帳中"
+                  : (p.transfer_last5
+                    ? `🔍 已回報末五碼 [${p.transfer_last5}]，房東核對入帳中`
+                    : "🔍 已回報，房東核對入帳中"),
                 size: "xxs",
                 color: "#2563EB",
                 weight: "bold",
