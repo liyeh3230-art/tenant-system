@@ -5,7 +5,7 @@ import {
   Search, User, LayoutDashboard, Wallet,
   Calendar, Phone, DollarSign, X, Check, Clipboard, Edit3, Trash2, Menu, FileEdit, XCircle, History, Image, Share2, Lock, FileCheck,
   Printer, Download, QrCode, Send, ArrowUpRight, RefreshCw, SlidersHorizontal, ChevronRight, Percent, TrendingUp, Receipt, Copy, Sparkles, Filter, Layers, ChevronDown, ChevronUp,
-  Upload, Star, ArrowLeft, ArrowRight, ShieldCheck, GripVertical, KeyRound, MessageSquare, Shield, Eye, EyeOff
+  Upload, Star, ArrowLeft, ArrowRight, ShieldCheck, GripVertical, KeyRound, MessageSquare, Shield, Eye, EyeOff, UserX
 } from 'lucide-react';
 import {
   sanitizeText,
@@ -3174,8 +3174,77 @@ export default function App() {
     }
   };
 
+  const handleRevokeLandlord = async (landlordId, landlordName, landlordPhone) => {
+    const confirmed = await showConfirmDialog(
+      `確定要撤銷房東「${landlordName}」的身分嗎？\n\n` +
+      `💡 說明：\n` +
+      `1. 此操作將收回其房東管理權限與 LINE 房東選單。\n` +
+      `2. 狀態將轉為「已退回 (未通過)」，可在「已退回申請」分頁隨時重新核准。\n` +
+      `3. 該會員的「租客身分、租約、帳單繳費紀錄與 LINE 綁定」將完整保留，完全不受影響。`
+    );
+    if (!confirmed) return;
+
+    try {
+      const nowIso = new Date().toISOString();
+      const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
+
+      // 1. 更新 landlords 表為 rejected
+      let lndQuery = supabase.from('landlords').update({ status: 'rejected', updated_at: nowIso });
+      if (landlordId && cleanPhone) {
+        lndQuery = lndQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        lndQuery = lndQuery.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (landlordId) {
+        lndQuery = lndQuery.eq('id', landlordId);
+      }
+      const { error: lndErr } = await lndQuery;
+      if (lndErr) console.warn('Update landlords status notice:', lndErr);
+
+      // 2. 確保 profiles 表角色降為 tenant (避免仍擁有 landlord 存取權限)
+      let profQuery = supabase.from('profiles').update({ role: 'tenant', updated_at: nowIso });
+      if (landlordId && cleanPhone) {
+        profQuery = profQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+      } else if (cleanPhone) {
+        profQuery = profQuery.eq('phone', cleanPhone);
+      } else if (landlordId) {
+        profQuery = profQuery.eq('id', landlordId);
+      }
+      const { error: profErr } = await profQuery;
+      if (profErr) console.warn('Update profiles role notice:', profErr);
+
+      // 3. 更新 line_bindings (若先前處於房東模式 active:landlord，調整為租客 active:tenant)
+      if (cleanPhone || landlordId) {
+        const { data: profs } = await supabase.from('profiles').select('id').or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone || 'none'}`);
+        const pIds = (profs || []).map(p => p.id);
+        if (pIds.length > 0) {
+          await supabase.from('line_bindings')
+            .update({ status: 'active:tenant', updated_at: nowIso })
+            .in('tenant_id', pIds)
+            .eq('status', 'active:landlord');
+        }
+      }
+
+      // 4. 更新本地狀態
+      setLandlords(prev => prev.map(l => {
+        const matches = (landlordId && l.id === landlordId) || (cleanPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanPhone);
+        return matches ? { ...l, status: 'rejected' } : l;
+      }));
+
+      showToast(`已成功撤銷「${landlordName}」的房東身分，該會員已恢復為正常租客身分。您可於「已退回申請」隨時查閱或重新核准。`, 'success');
+      fetchSupabaseData();
+    } catch (err) {
+      console.error('Revoke landlord error:', err);
+      showToast(`撤銷房東身分失敗: ${err.message || '操作異常'}`, 'error');
+    }
+  };
+
   const handleSuperadminDeleteLandlord = async (landlordId, landlordName, landlordPhone) => {
-    const confirmed = await showConfirmDialog(`確定要徹底刪除房東「${landlordName}」嗎？這將會一併移除該房東的所有房源、租約與專屬地址庫。`);
+    const confirmed = await showConfirmDialog(
+      `確定要「徹底註銷」房東「${landlordName}」嗎？\n\n` +
+      `⚠️ 嚴重警告：此操作為不可逆的徹底銷毀！\n` +
+      `這將會一併移除該使用者的登入帳號、LINE 官方帳號綁定、租客會員身分，以及名下所有房源、合約與帳單！\n\n` +
+      `💡 若您只是要收回其房東管理權限，請改用「撤銷身分 (降為租客)」。`
+    );
     if (!confirmed) return;
 
     try {
@@ -6263,13 +6332,22 @@ export default function App() {
                                         </button>
                                       </div>
                                     </td>
-                                    <td className="py-3.5 px-4 text-right">
+                                    <td className="py-3.5 px-4 text-right space-x-2">
+                                      <button
+                                        onClick={() => handleRevokeLandlord(lnd.id, lnd.name, lnd.phone)}
+                                        className="text-amber-600 hover:text-amber-800 font-bold text-xs inline-flex items-center focus:outline-none cursor-pointer"
+                                        title="收回房東管理權限，降為一般租客（保留租客身分與合約資料）"
+                                      >
+                                        <UserX size={13} className="mr-0.5" />
+                                        <span>撤銷身分</span>
+                                      </button>
                                       <button
                                         onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
-                                        className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none"
+                                        className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center focus:outline-none cursor-pointer"
+                                        title="徹底註銷整個帳號（連同租客身分一併清除）"
                                       >
                                         <Trash2 size={13} className="mr-0.5" />
-                                        <span>刪除</span>
+                                        <span>徹底刪除</span>
                                       </button>
                                     </td>
                                   </tr>
@@ -6322,13 +6400,22 @@ export default function App() {
                                     </button>
                                   </div>
                                 </div>
-                                <div className="pt-2 border-t border-slate-200/60 flex justify-end">
+                                <div className="pt-2 border-t border-slate-200/60 flex justify-end gap-3">
+                                  <button
+                                    onClick={() => handleRevokeLandlord(lnd.id, lnd.name, lnd.phone)}
+                                    className="text-amber-600 hover:text-amber-800 font-bold text-xs inline-flex items-center cursor-pointer"
+                                    title="收回房東管理權限，降為一般租客"
+                                  >
+                                    <UserX size={13} className="mr-0.5" />
+                                    <span>撤銷身分 (降為租客)</span>
+                                  </button>
                                   <button
                                     onClick={() => handleSuperadminDeleteLandlord(lnd.id, lnd.name, lnd.phone)}
-                                    className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center"
+                                    className="text-rose-600 hover:text-rose-800 font-bold text-xs inline-flex items-center cursor-pointer"
+                                    title="徹底註銷整個帳號"
                                   >
                                     <Trash2 size={13} className="mr-0.5" />
-                                    <span>刪除帳號</span>
+                                    <span>徹底刪除</span>
                                   </button>
                                 </div>
                               </div>
