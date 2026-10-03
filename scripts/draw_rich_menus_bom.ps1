@@ -1,7 +1,4 @@
-import fs from 'fs';
-import { execSync } from 'child_process';
-
-const psCode = `
+﻿
 Add-Type -AssemblyName System.Drawing
 
 function Generate-RichMenu {
@@ -162,19 +159,3 @@ $landlordItems = @(
     @{ Title = "🔄 切換為租客"; Desc1 = "一鍵切換生活模式"; Desc2 = "享有租客繳費功能" }
 )
 Generate-RichMenu -Path "public/richmenu_landlord.png" -Theme "landlord" -Items $landlordItems
-`;
-
-// Save with UTF-8 BOM
-const bom = '\uFEFF';
-fs.writeFileSync('scripts/draw_rich_menus_bom.ps1', bom + psCode, 'utf8');
-
-console.log('Running PowerShell drawing script with UTF-8 BOM...');
-const res = execSync('powershell -ExecutionPolicy Bypass -File scripts/draw_rich_menus_bom.ps1', { encoding: 'utf8' });
-console.log(res);
-
-const sStat = fs.statSync('public/richmenu_tenant_standard.png');
-const tStat = fs.statSync('public/richmenu_tenant.png');
-const lStat = fs.statSync('public/richmenu_landlord.png');
-console.log(`Standard Tenant Menu size: ${(sStat.size / 1024).toFixed(1)} KB`);
-console.log(`Dual Tenant Menu size: ${(tStat.size / 1024).toFixed(1)} KB`);
-console.log(`Landlord Menu size: ${(lStat.size / 1024).toFixed(1)} KB`);

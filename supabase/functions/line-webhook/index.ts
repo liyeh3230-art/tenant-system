@@ -1625,6 +1625,7 @@ function buildBankInfoFlex(landlord: any) {
 }
 
 const LIFF_REGISTRATION_URL = Deno.env.get("LIFF_REGISTRATION_URL") || "";
+const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 const SITE_URL = Deno.env.get("SITE_URL") || Deno.env.get("APP_URL") || "https://liyeh3230-art.github.io/tenant-system";
 
 function getRegisterUrl(lineUserId: string = "", displayName: string = ""): string {
@@ -1847,10 +1848,11 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 
 
 // -----------------------------------------------------------------------------
-// DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS
+// DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS (3-TIER ARCHITECTURE)
 // -----------------------------------------------------------------------------
-const TENANT_RICH_MENU_ID = "richmenu-aa6b131d849fa8ed0fa259bc9a1f714b";
-const LANDLORD_RICH_MENU_ID = "richmenu-a980c99ad846b07beb0bc17fdf827cb0";
+const TENANT_STANDARD_RICH_MENU_ID = "richmenu-0b16475f35c9b7a311146b7d290615d6"; // 純租客專屬選單（第 6 格：直接開啟 LIFF 申請成為房東）
+const TENANT_DUAL_RICH_MENU_ID = "richmenu-807a761a05e49395cbc09886f5cda6e7";     // 雙身分租客選單（第 6 格：切換為房東）
+const LANDLORD_RICH_MENU_ID = "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0";        // 房東經營選單（第 6 格：切換為租客）
 
 // Helper to push message to a specific LINE User ID
 async function pushLineMessage(to: string, messages: any[]): Promise<Response> {
@@ -1880,7 +1882,7 @@ async function linkUserRichMenu(userId: string, richMenuId: string): Promise<Res
 // -----------------------------------------------------------------------------
 // SMART QUICK REPLY BUILDER (DUAL-TRACK: RICH MENU + FLOATING ACTION BUTTONS)
 // -----------------------------------------------------------------------------
-function buildSmartQuickReply(role: string = "tenant") {
+function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = false) {
   if (role === "landlord") {
     return {
       items: [
@@ -1908,7 +1910,11 @@ function buildSmartQuickReply(role: string = "tenant") {
     };
   }
 
-  // Tenant Quick Reply
+  // 租客模式：依據是否有房東權限，動態呈現「切換為房東」或「申請成為房東」
+  const roleButton = isLandlord
+    ? { type: "action", action: { type: "postback", label: "🔄 切換為房東", data: "action=switch_role&target=landlord", displayText: "🔄 切換為房東模式" } }
+    : { type: "action", action: { type: "message", label: "📝 申請成為房東", text: "申請成為房東" } };
+
   return {
     items: [
       {
@@ -1927,10 +1933,7 @@ function buildSmartQuickReply(role: string = "tenant") {
         type: "action",
         action: { type: "message", label: "🏦 匯款帳號", text: "匯款帳號" }
       },
-      {
-        type: "action",
-        action: { type: "postback", label: "🔄 切換房東", data: "action=switch_role&target=landlord", displayText: "🔄 切換為房東模式" }
-      }
+      roleButton
     ]
   };
 }
@@ -1939,12 +1942,143 @@ function buildSmartQuickReply(role: string = "tenant") {
 // LANDLORD FLEX MESSAGE BUILDERS
 // -----------------------------------------------------------------------------
 
-// 1. 身分切換成功提示卡片
-function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "") {
-  const isLandlord = targetRole === "landlord";
-  const title = isLandlord ? "👑 已切換為【房東經營模式】" : "🏠 已切換為【租客生活模式】";
-  const themeColor = isLandlord ? "#0F172A" : "#064E3B";
-  const desc = isLandlord
+// 1. 申請成為房東專屬導引卡片 (含一鍵跳出申請表單，支援 LIFF 內嵌彈窗)
+function buildLandlordApplicationGuideFlex(userCtx: any) {
+  const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\/$/, "");
+  const phone = userCtx?.cleanPhone || "";
+  const name = userCtx?.userName || "";
+  const queryParams = `mode=apply_landlord&phone=${encodeURIComponent(phone)}&name=${encodeURIComponent(name)}`;
+
+  // 優先使用 LIFF 內嵌彈窗網址 (若有配置 LIFF_LANDLORD_APPLICATION_URL)
+  let applyUrl = `${cleanBase}/?${queryParams}`;
+  if (LIFF_LANDLORD_APPLICATION_URL) {
+    applyUrl = LIFF_LANDLORD_APPLICATION_URL.includes("?")
+      ? `${LIFF_LANDLORD_APPLICATION_URL}&${queryParams}`
+      : `${LIFF_LANDLORD_APPLICATION_URL}?${queryParams}`;
+  }
+
+  return {
+    type: "flex",
+    altText: "📝 申請成為房東 · 線上填表開通物業管理權限",
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#1E1B4B", // Deep Indigo 950
+        paddingAll: "18px",
+        contents: [
+          { type: "text", text: "智慧租屋 · 房東權限開通申請", color: "#FDE68A", size: "xs", weight: "bold" },
+          { type: "text", text: "📝 申請成為房東", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" },
+          { type: "text", text: "享有智慧物業管理 · 一鍵對帳 · 即時催繳", color: "#C7D2FE", size: "xs", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        spacing: "md",
+        contents: [
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "10px",
+            borderColor: "#E2E8F0",
+            borderWidth: "1px",
+            paddingAll: "12px",
+            spacing: "xs",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "👤 申請人", size: "xs", color: "#64748B", flex: 3 },
+                  { type: "text", text: `${name || '租客會員'}`, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+                ]
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "📞 聯絡手機", size: "xs", color: "#64748B", flex: 3 },
+                  { type: "text", text: `${phone || '未登記手機'}`, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+                ]
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "🛡️ 目前身分", size: "xs", color: "#64748B", flex: 3 },
+                  { type: "text", text: "租客 (未具備房東管理權限)", size: "xs", color: "#D97706", weight: "bold", flex: 7 }
+                ]
+              }
+            ]
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            contents: [
+              { type: "text", text: "✨ 開通房東權限專享功能：", size: "xs", color: "#334155", weight: "bold" },
+              { type: "text", text: "• 📊 房東即時經營看板（出租率、實收總額）", size: "xxs", color: "#64748B" },
+              { type: "text", text: "• ⏳ 租客繳費回報一鍵審核（自動開立電子收據）", size: "xxs", color: "#64748B" },
+              { type: "text", text: "• 🏠 旗下物業房間招租、房客合約到期追蹤", size: "xxs", color: "#64748B" }
+            ]
+          },
+          { type: "separator", margin: "xs" },
+          {
+            type: "text",
+            text: "點擊下方按鈕即可直接於 LINE 內嵌彈窗填寫認證資料（姓名與手機已為您自動代入），管理員核准後 LINE BOT 將自動為您切換為房東 6 宮格管理後台！",
+            size: "xxs",
+            color: "#64748B",
+            wrap: true
+          },
+          {
+            type: "button",
+            style: "primary",
+            color: "#4F46E5", // Indigo
+            height: "md",
+            action: {
+              type: "uri",
+              label: "🚀 填寫房東申請表 (LINE 內快速送審)",
+              uri: applyUrl
+            }
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "horizontal",
+        spacing: "sm",
+        paddingAll: "14px",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
+          },
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" }
+          }
+        ]
+      }
+    },
+    quickReply: buildSmartQuickReply("tenant", false)
+  };
+}
+
+// 2. 身分切換成功提示卡片
+function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "", isLandlord: boolean = false) {
+  const isTargetLandlord = targetRole === "landlord";
+  const title = isTargetLandlord ? "👑 已切換為【房東經營模式】" : "🏠 已切換為【租客生活模式】";
+  const themeColor = isTargetLandlord ? "#0F172A" : "#064E3B";
+  const desc = isTargetLandlord
     ? `您好，${userName || "房東"}！已為您成功切換至房東身分。\n\n📱 底部 6 宮格選單與下方快捷按鈕已即時切換為【房東經營後台】，您可隨時查閱即時出租率、物業概況與一鍵入帳審核！`
     : `您好，${userName || "租客"}！已為您成功切換至租客身分。\n\n📱 底部 6 宮格選單與下方快捷按鈕已即時切換為【租客生活選單】，您可隨時查閱合約、待繳帳單與電子繳費收據！`;
 
@@ -1960,7 +2094,7 @@ function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "") {
         backgroundColor: themeColor,
         paddingAll: "18px",
         contents: [
-          { type: "text", text: "智慧租屋 · 身分切換成功", color: isLandlord ? "#94A3B8" : "#A7F3D0", size: "xs", weight: "bold" },
+          { type: "text", text: "智慧租屋 · 身分切換成功", color: isTargetLandlord ? "#94A3B8" : "#A7F3D0", size: "xs", weight: "bold" },
           { type: "text", text: title, color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
         ]
       },
@@ -1980,12 +2114,12 @@ function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "") {
               {
                 type: "button",
                 style: "primary",
-                color: isLandlord ? "#4F46E5" : "#059669",
+                color: isTargetLandlord ? "#4F46E5" : "#059669",
                 height: "sm",
                 action: {
                   type: "message",
-                  label: isLandlord ? "📊 經營概況" : "⏳ 待繳帳單",
-                  text: isLandlord ? "經營概況" : "待繳帳單"
+                  label: isTargetLandlord ? "📊 經營概況" : "⏳ 待繳帳單",
+                  text: isTargetLandlord ? "經營概況" : "待繳帳單"
                 }
               },
               {
@@ -1994,8 +2128,8 @@ function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "") {
                 height: "sm",
                 action: {
                   type: "message",
-                  label: isLandlord ? "⏳ 待核帳單" : "📋 我的租約",
-                  text: isLandlord ? "待核帳單" : "租約狀況"
+                  label: isTargetLandlord ? "⏳ 待核帳單" : "📋 我的租約",
+                  text: isTargetLandlord ? "待核帳單" : "租約狀況"
                 }
               }
             ]
@@ -2003,11 +2137,11 @@ function buildRoleSwitchSuccessFlex(targetRole: string, userName: string = "") {
         ]
       }
     },
-    quickReply: buildSmartQuickReply(targetRole)
+    quickReply: buildSmartQuickReply(targetRole, isLandlord)
   };
 }
 
-// 2. 房東經營概況看板
+// 3. 房東經營概況看板
 function buildLandlordDashboardFlex(
   landlord: any,
   properties: any[],
@@ -2155,11 +2289,11 @@ function buildLandlordDashboardFlex(
         ]
       }
     },
-    quickReply: buildSmartQuickReply("landlord")
+    quickReply: buildSmartQuickReply("landlord", true)
   };
 }
 
-// 3. 待核帳單 Flex Message (支援一鍵確認入帳與駁回)
+// 4. 待核帳單 Flex Message (支援一鍵確認入帳與駁回)
 function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
   if (!pendingPayments || pendingPayments.length === 0) {
     return {
@@ -2209,7 +2343,7 @@ function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
           ]
         }
       },
-      quickReply: buildSmartQuickReply("landlord")
+      quickReply: buildSmartQuickReply("landlord", true)
     };
   }
 
@@ -2311,11 +2445,11 @@ function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
     type: "flex",
     altText: `⏳ 共有 ${pendingPayments.length} 筆帳單待審核`,
     contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
-    quickReply: buildSmartQuickReply("landlord")
+    quickReply: buildSmartQuickReply("landlord", true)
   };
 }
 
-// 4. 旗下房源現況 Flex Message
+// 5. 旗下房源現況 Flex Message
 function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
   if (!properties || properties.length === 0) {
     return {
@@ -2343,7 +2477,7 @@ function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
           ]
         }
       },
-      quickReply: buildSmartQuickReply("landlord")
+      quickReply: buildSmartQuickReply("landlord", true)
     };
   }
 
@@ -2428,11 +2562,11 @@ function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
     type: "flex",
     altText: `🏠 旗下房源現況 (共 ${properties.length} 間)`,
     contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
-    quickReply: buildSmartQuickReply("landlord")
+    quickReply: buildSmartQuickReply("landlord", true)
   };
 }
 
-// 5. 租客名冊 Flex Message
+// 6. 租客名冊 Flex Message
 function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
   if (!leases || leases.length === 0) {
     return {
@@ -2460,7 +2594,7 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
           ]
         }
       },
-      quickReply: buildSmartQuickReply("landlord")
+      quickReply: buildSmartQuickReply("landlord", true)
     };
   }
 
@@ -2531,7 +2665,7 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
     type: "flex",
     altText: `📋 旗下租客合約名冊 (共 ${leases.length} 戶)`,
     contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
-    quickReply: buildSmartQuickReply("landlord")
+    quickReply: buildSmartQuickReply("landlord", true)
   };
 }
 
@@ -2640,14 +2774,14 @@ async function getUserContext(supabase: any, lineUserId: string) {
     // ⚠️ 嚴格安全原則：非房東帳號一律強制鎖定為租客模式！
     currentRole = "tenant";
 
-    // 若資料庫內曾記錄為 active:landlord，自動自我修復修正回 active:tenant 並重置 Rich Menu
+    // 若資料庫內曾記錄為 active:landlord，自動自我修復修正回 active:tenant 並綁定標準租客 Rich Menu
     if (binding.status === "active:landlord") {
       await supabase
         .from("line_bindings")
         .update({ status: "active:tenant", updated_at: new Date().toISOString() })
         .eq("line_user_id", lineUserId);
       try {
-        await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+        await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
       } catch {}
     }
   }
@@ -2732,7 +2866,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
 serve(async (req: Request) => {
   // Support GET (health check / browser check)
   if (req.method === "GET") {
-    return new Response(JSON.stringify({ status: "ok", service: "line-webhook", version: "dual-role-v2-secure" }), {
+    return new Response(JSON.stringify({ status: "ok", service: "line-webhook", version: "dual-role-v3-dynamic" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -2811,25 +2945,27 @@ serve(async (req: Request) => {
         continue;
       }
 
-      // 已綁定用戶，根據目前身分同步綁定專屬 Rich Menu
+      // 依據是否具備房東權限與當前身分，精確綁定專屬 Rich Menu
       try {
         if (userCtx.currentRole === "landlord") {
           await linkUserRichMenu(lineUserId, LANDLORD_RICH_MENU_ID);
+        } else if (userCtx.isLandlord) {
+          await linkUserRichMenu(lineUserId, TENANT_DUAL_RICH_MENU_ID);
         } else {
-          await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+          await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
         }
       } catch (err) {
         console.warn("Follow event link rich menu error:", err);
       }
 
       const welcomeName = userCtx.userName || displayName;
-      const isLandlord = userCtx.currentRole === "landlord";
+      const isLandlordMode = userCtx.currentRole === "landlord";
 
       await replyLineMessage(replyToken, [
         {
           type: "text",
-          text: `🎉 歡迎您使用智慧租屋管家系統！\n\n您好，${welcomeName}！您目前處於【${isLandlord ? '房東經營模式' : '租客生活模式'}】。\n\n日後有任何新帳單、繳費回報或審核確認，系統將在此為您進行即時推播通知！\n\n您可點擊下方 6 宮格選單或快捷按鈕開始使用：`,
-          quickReply: buildSmartQuickReply(userCtx.currentRole)
+          text: `🎉 歡迎您使用智慧租屋管家系統！\n\n您好，${welcomeName}！您目前處於【${isLandlordMode ? '房東經營模式' : '租客生活模式'}】。\n\n日後有任何新帳單、繳費回報或審核確認，系統將在此為您進行即時推播通知！\n\n您可點擊下方 6 宮格選單或快捷按鈕開始使用：`,
+          quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
         }
       ]);
       continue;
@@ -2843,21 +2979,36 @@ serve(async (req: Request) => {
       const params = new URLSearchParams(dataStr);
       const action = params.get("action");
 
-      // 1. 身分切換 Postback
+      // 1. 申請成為房東 Postback
+      if (action === "apply_landlord") {
+        if (userCtx?.isLandlord) {
+          await replyLineMessage(replyToken, [
+            {
+              type: "text",
+              text: "🎉 您已經具備房東管理權限囉！您可直接點選下方按鈕切換至房東經營模式：",
+              quickReply: buildSmartQuickReply("tenant", true)
+            }
+          ]);
+          continue;
+        }
+
+        await replyLineMessage(replyToken, [
+          buildLandlordApplicationGuideFlex(userCtx)
+        ]);
+        continue;
+      }
+
+      // 2. 身分切換 Postback
       if (action === "switch_role") {
         const target = params.get("target") || "tenant";
         const displayName = userCtx?.userName || "使用者";
 
         if (target === "landlord") {
-          // 嚴格權限防護：非房東帳號嚴禁切換
+          // 嚴格權限防護：非房東帳號嚴禁切換，導引申請成為房東
           if (!userCtx?.isLandlord) {
-            await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+            await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              {
-                type: "text",
-                text: `⚠️ 權限不足：您的帳號（電話：${userCtx?.cleanPhone || '未登錄'}）為【租客身分】，未具備房東管理權限。\n\n若您已持有出租物業，請先登入網頁後台填寫房東申請資料，審核通過後方可開啟房東經營功能！`,
-                quickReply: buildSmartQuickReply("tenant")
-              }
+              buildLandlordApplicationGuideFlex(userCtx)
             ]);
             continue;
           }
@@ -2872,7 +3023,7 @@ serve(async (req: Request) => {
           await linkUserRichMenu(lineUserId, LANDLORD_RICH_MENU_ID);
 
           await replyLineMessage(replyToken, [
-            buildRoleSwitchSuccessFlex("landlord", displayName)
+            buildRoleSwitchSuccessFlex("landlord", displayName, true)
           ]);
           continue;
         }
@@ -2884,21 +3035,22 @@ serve(async (req: Request) => {
             .update({ status: "active:tenant", updated_at: new Date().toISOString() })
             .eq("line_user_id", lineUserId);
 
-          // 切換 LINE Rich Menu 為租客選單
-          await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+          // 切換 LINE Rich Menu 為對應之租客選單 (具房東者用 dual，純租客用 standard)
+          const targetMenu = userCtx?.isLandlord ? TENANT_DUAL_RICH_MENU_ID : TENANT_STANDARD_RICH_MENU_ID;
+          await linkUserRichMenu(lineUserId, targetMenu);
 
           await replyLineMessage(replyToken, [
-            buildRoleSwitchSuccessFlex("tenant", displayName)
+            buildRoleSwitchSuccessFlex("tenant", displayName, userCtx?.isLandlord)
           ]);
           continue;
         }
       }
 
-      // 2. 房東確認入帳 (Approve Payment) - 嚴格限房東
+      // 3. 房東確認入帳 (Approve Payment) - 嚴格限房東
       if (action === "approve_payment") {
         if (!userCtx?.isLandlord) {
           await replyLineMessage(replyToken, [
-            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant") }
+            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant", false) }
           ]);
           continue;
         }
@@ -2971,17 +3123,17 @@ serve(async (req: Request) => {
           {
             type: "text",
             text: `✅ 帳單【${title}】(金額 NT$ ${amt}) 已成功確認入帳！\n\n電子收據已即時開立，並已推播通知承租人。如需查看更多，請點選下方選單：`,
-            quickReply: buildSmartQuickReply("landlord")
+            quickReply: buildSmartQuickReply("landlord", true)
           }
         ]);
         continue;
       }
 
-      // 3. 房東駁回繳款回報 (Reject Payment) - 嚴格限房東
+      // 4. 房東駁回繳款回報 (Reject Payment) - 嚴格限房東
       if (action === "reject_payment") {
         if (!userCtx?.isLandlord) {
           await replyLineMessage(replyToken, [
-            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant") }
+            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant", false) }
           ]);
           continue;
         }
@@ -3043,13 +3195,13 @@ serve(async (req: Request) => {
           {
             type: "text",
             text: `❌ 已駁回帳單【${title}】之回報，該筆帳單已重置為待繳狀態，並已推播通知租客重新核對。\n\n如需查看其他帳單，請點選下方選單：`,
-            quickReply: buildSmartQuickReply("landlord")
+            quickReply: buildSmartQuickReply("landlord", true)
           }
         ]);
         continue;
       }
 
-      // 4. 租客選擇帳單鎖定 (select_bill)
+      // 5. 租客選擇帳單鎖定 (select_bill)
       if (action === "select_bill") {
         const title = decodeURIComponent(params.get("title") || "待繳帳單");
         const amount = params.get("amount") || "";
@@ -3066,7 +3218,7 @@ serve(async (req: Request) => {
             {
               type: "text",
               text: `✅ 帳單【${getPaymentTitle(payment)}】已於 ${payment.paid_date || "先前"} 完成結清！如需查看收據，請輸入「已繳金額」。`,
-              quickReply: buildSmartQuickReply("tenant")
+              quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord)
             }
           ]);
           continue;
@@ -3080,7 +3232,7 @@ serve(async (req: Request) => {
             {
               type: "text",
               text: `🔍 帳單【${getPaymentTitle(payment)}】先前已回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`,
-              quickReply: buildSmartQuickReply("tenant")
+              quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord)
             }
           ]);
           continue;
@@ -3100,7 +3252,7 @@ serve(async (req: Request) => {
         continue;
       }
 
-      // 5. 租客現金回報 (report_cash)
+      // 6. 租客現金回報 (report_cash)
       if (action === "report_cash") {
         const billId = params.get("id") || params.get("billId");
         const leaseIds = userCtx ? userCtx.leases.map((l: any) => l.id) : [];
@@ -3116,7 +3268,7 @@ serve(async (req: Request) => {
             {
               type: "text",
               text: `✅ 帳單【${getPaymentTitle(targetPayment)}】已於 ${targetPayment.paid_date || "先前"} 完成結清！如需查看收據，請輸入「已繳金額」。`,
-              quickReply: buildSmartQuickReply("tenant")
+              quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord)
             }
           ]);
           continue;
@@ -3129,7 +3281,7 @@ serve(async (req: Request) => {
             {
               type: "text",
               text: `🔍 帳單【${prevTitle}】您先前已完成回報（${prevDesc}），房東正在核對入帳中！`,
-              quickReply: buildSmartQuickReply("tenant")
+              quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord)
             }
           ]);
           continue;
@@ -3150,7 +3302,7 @@ serve(async (req: Request) => {
 
         if (!targetPayment) {
           await replyLineMessage(replyToken, [
-            { type: "text", text: "🎉 您目前沒有待繳納之帳單！如需核對歷史紀錄，請輸入「已繳金額」。", quickReply: buildSmartQuickReply("tenant") }
+            { type: "text", text: "🎉 您目前沒有待繳納之帳單！如需核對歷史紀錄，請輸入「已繳金額」。", quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord) }
           ]);
           continue;
         }
@@ -3170,7 +3322,7 @@ serve(async (req: Request) => {
 
         if (updateErr) {
           await replyLineMessage(replyToken, [
-            { type: "text", text: `❌ 現金回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply("tenant") }
+            { type: "text", text: `❌ 現金回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord) }
           ]);
         } else {
           lockedBillsByUser.delete(lineUserId);
@@ -3187,7 +3339,7 @@ serve(async (req: Request) => {
                     {
                       type: "text",
                       text: `🔔【租客現金繳款回報通知】\n\n承租人：${userCtx.userName || targetPayment.tenant_name || "租客"}\n項目：${getPaymentTitle(targetPayment)}\n金額：NT$ ${Number(targetPayment.amount || 0).toLocaleString()}\n方式：💵 現金交付\n\n請點選下方選單「⏳ 待核帳單」即可一鍵確認入帳並開立收據！`,
-                      quickReply: buildSmartQuickReply("landlord")
+                      quickReply: buildSmartQuickReply("landlord", true)
                     }
                   ]);
                 }
@@ -3244,21 +3396,37 @@ serve(async (req: Request) => {
 
         const isLandlordRole = userCtx.currentRole === "landlord";
 
-        // 1. 身分切換指令判斷
+        // 1. 申請成為房東指令
+        const isApplyLandlord = /^(申請成為房東|申請房東|我要當房東|成為房東|我要申請房東|開通房東)$/i.test(text.replace(/\s+/g, ''));
+        if (isApplyLandlord) {
+          if (userCtx.isLandlord) {
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: "🎉 您已經具備房東管理權限囉！您可直接點選下方「🔄 切換為房東」開啟經營後台：",
+                quickReply: buildSmartQuickReply("tenant", true)
+              }
+            ]);
+            continue;
+          }
+
+          await replyLineMessage(replyToken, [
+            buildLandlordApplicationGuideFlex(userCtx)
+          ]);
+          continue;
+        }
+
+        // 2. 身分切換指令判斷
         const isSwitchToLandlord = /^(切換為房東|切換房東|房東模式|我是房東|房東)$/i.test(text.replace(/\s+/g, ''));
         const isSwitchToTenant = /^(切換為租客|切換租客|租客模式|我是租客|租客)$/i.test(text.replace(/\s+/g, ''));
         const isToggleRole = /^(切換身分|身分切換|切換模式|切換)$/i.test(text.replace(/\s+/g, ''));
 
         if (isSwitchToLandlord || (isToggleRole && !isLandlordRole)) {
-          // 嚴格拒絕非房東切換
+          // 嚴格拒絕非房東切換，自動引導申請成為房東
           if (!userCtx.isLandlord) {
-            await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+            await linkUserRichMenu(lineUserId, TENANT_STANDARD_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
-              {
-                type: "text",
-                text: `⚠️ 權限不足：您的帳號（電話：${userCtx?.cleanPhone || '未登錄'}）為【租客身分】，未具備房東管理權限。\n\n若您已持有出租物業，請先登入網頁後台填寫房東申請資料，審核通過後方可切換為房東模式！`,
-                quickReply: buildSmartQuickReply("tenant")
-              }
+              buildLandlordApplicationGuideFlex(userCtx)
             ]);
             continue;
           }
@@ -3269,11 +3437,11 @@ serve(async (req: Request) => {
             .update({ status: "active:landlord", updated_at: new Date().toISOString() })
             .eq("line_user_id", lineUserId);
 
-          // 切換 Rich Menu
+          // 切換 Rich Menu 為房東選單
           await linkUserRichMenu(lineUserId, LANDLORD_RICH_MENU_ID);
 
           await replyLineMessage(replyToken, [
-            buildRoleSwitchSuccessFlex("landlord", userCtx.userName)
+            buildRoleSwitchSuccessFlex("landlord", userCtx.userName, true)
           ]);
           continue;
         }
@@ -3285,16 +3453,17 @@ serve(async (req: Request) => {
             .update({ status: "active:tenant", updated_at: new Date().toISOString() })
             .eq("line_user_id", lineUserId);
 
-          // 切換 Rich Menu
-          await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+          // 切換 Rich Menu 為對應之租客選單
+          const targetMenu = userCtx.isLandlord ? TENANT_DUAL_RICH_MENU_ID : TENANT_STANDARD_RICH_MENU_ID;
+          await linkUserRichMenu(lineUserId, targetMenu);
 
           await replyLineMessage(replyToken, [
-            buildRoleSwitchSuccessFlex("tenant", userCtx.userName)
+            buildRoleSwitchSuccessFlex("tenant", userCtx.userName, userCtx.isLandlord)
           ]);
           continue;
         }
 
-        // 2. 房東功能分支 (嚴格限房東身分，非房東直接拒絕)
+        // 3. 房東功能分支 (嚴格限房東身分，非房東直接拒絕)
         const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單)$/.test(text) ||
           text.includes("經營") || text.includes("待核") || text.includes("名冊");
 
@@ -3302,15 +3471,15 @@ serve(async (req: Request) => {
           await replyLineMessage(replyToken, [
             {
               type: "text",
-              text: "⚠️ 權限不足：您目前為【租客身分】，無法查閱物業經營管理資料。\n\n如需查看您的租約與帳單，請使用下方租客快捷功能：",
-              quickReply: buildSmartQuickReply("tenant")
+              text: "⚠️ 權限不足：您目前為【租客身分】，無法查閱物業經營管理資料。\n\n如您持有出租物業，請點擊下方「📝 申請成為房東」送出開通申請：",
+              quickReply: buildSmartQuickReply("tenant", false)
             }
           ]);
           continue;
         }
 
         if (isLandlordRole && userCtx.isLandlord) {
-          // 2.1 經營概況
+          // 3.1 經營概況
           if (text.includes("概況") || text.includes("統計") || text.includes("儀表板") || text.includes("經營") || text === "1") {
             const props = userCtx.landlordProperties;
             const leases = userCtx.landlordManagedLeases;
@@ -3349,7 +3518,7 @@ serve(async (req: Request) => {
             continue;
           }
 
-          // 2.2 待核帳單
+          // 3.2 待核帳單
           if (text.includes("待核") || text.includes("審核") || text.includes("核帳") || text === "2") {
             const leaseIds = userCtx.landlordManagedLeases.map((l: any) => l.id);
             let pendingPayments: any[] = [];
@@ -3371,7 +3540,7 @@ serve(async (req: Request) => {
             continue;
           }
 
-          // 2.3 房源現況
+          // 3.3 房源現況
           if (text.includes("房源") || text.includes("房間") || text.includes("物業") || text === "3") {
             await replyLineMessage(replyToken, [
               buildLandlordPropertiesFlex(userCtx.landlordProperties, userCtx.landlordManagedLeases)
@@ -3379,7 +3548,7 @@ serve(async (req: Request) => {
             continue;
           }
 
-          // 2.4 租客名冊
+          // 3.4 租客名冊
           if (text.includes("名冊") || text.includes("房客") || text.includes("名單") || text === "4") {
             await replyLineMessage(replyToken, [
               buildLandlordTenantsFlex(userCtx.landlordManagedLeases, userCtx.landlordProperties)
@@ -3388,10 +3557,10 @@ serve(async (req: Request) => {
           }
         }
 
-        // 3. 租客功能分支
+        // 4. 租客功能分支
         const leaseIds = userCtx.leases.map((l: any) => l.id);
 
-        // 3.1 繳款回報：末五碼或現金
+        // 4.1 繳款回報：末五碼或現金
         const last5Match = text.match(/(?:後五碼|末五碼|回報|轉帳)\s*(\d{5})\b|^\s*(\d{5})\s*$/);
         const isCash = /^(現金|現金交付|付現|現金繳費|現金支付|已付現金)$/i.test(text.replace(/\s+/g, '')) || text.includes("現金交付");
 
@@ -3443,7 +3612,7 @@ serve(async (req: Request) => {
                 {
                   type: "text",
                   text: `🔍 您先前已送交【${prevTitle}】之繳款回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`,
-                  quickReply: buildSmartQuickReply(userCtx.currentRole)
+                  quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
                 }
               ]);
             } else {
@@ -3451,7 +3620,7 @@ serve(async (req: Request) => {
                 {
                   type: "text",
                   text: "🎉 您目前沒有任何待繳納之帳單！感謝您的準時繳納。如需核對歷史紀錄，請輸入「已繳金額」。",
-                  quickReply: buildSmartQuickReply(userCtx.currentRole)
+                  quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
                 }
               ]);
             }
@@ -3472,7 +3641,7 @@ serve(async (req: Request) => {
 
           if (updateErr) {
             await replyLineMessage(replyToken, [
-              { type: "text", text: `❌ 回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply(userCtx.currentRole) }
+              { type: "text", text: `❌ 回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord) }
             ]);
           } else {
             lockedBillsByUser.delete(lineUserId);
@@ -3490,7 +3659,7 @@ serve(async (req: Request) => {
                       {
                         type: "text",
                         text: `🔔【租客繳費回報提醒】\n\n承租人：${userCtx.userName || targetPayment.tenant_name || "租客"}\n項目：${getPaymentTitle(targetPayment)}\n金額：NT$ ${Number(targetPayment.amount || 0).toLocaleString()}\n方式：${payDesc}\n\n請點選下方「⏳ 待核帳單」即可一鍵確認入帳並開立收據！`,
-                        quickReply: buildSmartQuickReply("landlord")
+                        quickReply: buildSmartQuickReply("landlord", true)
                       }
                     ]);
                   }
@@ -3507,14 +3676,14 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 3.2 租約狀況
+        // 4.2 租約狀況
         if (text.includes("租約") || text.includes("合約") || text.includes("我的租約")) {
           if (!userCtx.lease) {
             await replyLineMessage(replyToken, [
               {
                 type: "text",
                 text: "⚠️ 目前查無您生效中的租約資料。若已簽訂新約，請洽詢房東完成系統登記。",
-                quickReply: buildSmartQuickReply(userCtx.currentRole)
+                quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
               }
             ]);
           } else {
@@ -3525,7 +3694,7 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 3.3 已繳金額 / 歷史收據
+        // 4.3 已繳金額 / 歷史收據
         if (text.includes("已繳") || text.includes("收據") || text.includes("繳款紀錄")) {
           let paidPayments: any[] = [];
           let query = supabase
@@ -3550,7 +3719,7 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 3.4 待繳帳單
+        // 4.4 待繳帳單
         if (text.includes("帳單") || text.includes("待繳") || text.includes("應繳") || text.includes("未繳")) {
           let pendingPayments: any[] = [];
           if (leaseIds.length > 0) {
@@ -3570,7 +3739,7 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 3.5 匯款帳號
+        // 4.5 匯款帳號
         if (text.includes("匯款") || text.includes("帳戶") || text.includes("銀行")) {
           await replyLineMessage(replyToken, [
             buildBankInfoFlex(userCtx.landlord)
@@ -3578,7 +3747,7 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 4. 預設導覽
+        // 5. 預設導覽
         if (isLandlordRole && userCtx.isLandlord) {
           const props = userCtx.landlordProperties;
           const leases = userCtx.landlordManagedLeases;

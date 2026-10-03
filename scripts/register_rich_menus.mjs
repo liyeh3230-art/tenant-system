@@ -13,10 +13,27 @@ const bounds = [
   { x: 1666, y: 843, width: 834, height: 843 },
 ];
 
-const tenantMenuDef = {
+// 1. 純租客標準選單（第 6 格：申請成為房東）
+const tenantStandardMenuDef = {
   size: { width: 2500, height: 1686 },
   selected: true,
-  name: "Tenant Service Menu",
+  name: "Tenant Standard Menu",
+  chatBarText: "📋 租客生活選單",
+  areas: [
+    { bounds: bounds[0], action: { type: "message", text: "我的租約" } },
+    { bounds: bounds[1], action: { type: "message", text: "待繳帳單" } },
+    { bounds: bounds[2], action: { type: "message", text: "已繳金額" } },
+    { bounds: bounds[3], action: { type: "message", text: "匯款帳號" } },
+    { bounds: bounds[4], action: { type: "uri", uri: "https://liyeh3230-art.github.io/tenant-system/" } },
+    { bounds: bounds[5], action: { type: "uri", uri: "https://liff.line.me/2011231660-Jgip7AQv?mode=apply_landlord" } }
+  ]
+};
+
+// 2. 雙身分租客選單（具房東身分者：第 6 格：切換為房東）
+const tenantDualMenuDef = {
+  size: { width: 2500, height: 1686 },
+  selected: true,
+  name: "Tenant Dual Menu",
   chatBarText: "📋 租客生活選單",
   areas: [
     { bounds: bounds[0], action: { type: "message", text: "我的租約" } },
@@ -28,6 +45,7 @@ const tenantMenuDef = {
   ]
 };
 
+// 3. 房東經營選單（第 6 格：切換為租客）
 const landlordMenuDef = {
   size: { width: 2500, height: 1686 },
   selected: true,
@@ -90,34 +108,44 @@ async function setDefaultRichMenu(richMenuId) {
 }
 
 async function main() {
-  console.log("=== Registering LINE Rich Menus ===");
+  console.log("=== Registering 3-Tier Dynamic LINE Rich Menus ===");
   
-  // 1. Create Tenant Rich Menu
-  console.log("1. Creating Tenant Rich Menu...");
-  const tenantMenuId = await createRichMenu(tenantMenuDef);
-  console.log(`   Tenant Rich Menu ID: ${tenantMenuId}`);
+  // 1. Create Standard Tenant Rich Menu (For pure tenants: Grid 5 is 申請成為房東)
+  console.log("1. Creating Standard Tenant Rich Menu (申請成為房東)...");
+  const tenantStandardMenuId = await createRichMenu(tenantStandardMenuDef);
+  console.log(`   Tenant Standard Menu ID: ${tenantStandardMenuId}`);
   
-  console.log("2. Uploading Tenant Rich Menu Image...");
-  await uploadRichMenuImage(tenantMenuId, "public/richmenu_tenant.png");
-  console.log("   Tenant Image uploaded successfully!");
+  console.log("2. Uploading Standard Tenant Image...");
+  await uploadRichMenuImage(tenantStandardMenuId, "public/richmenu_tenant_standard.png");
+  console.log("   Standard Tenant Image uploaded successfully!");
 
-  // 2. Create Landlord Rich Menu
-  console.log("3. Creating Landlord Rich Menu...");
-  const landlordMenuId = await createRichMenu(landlordMenuDef);
-  console.log(`   Landlord Rich Menu ID: ${landlordMenuId}`);
+  // 2. Create Dual Tenant Rich Menu (For landlords in tenant mode: Grid 5 is 切換為房東)
+  console.log("3. Creating Dual Tenant Rich Menu (切換為房東)...");
+  const tenantDualMenuId = await createRichMenu(tenantDualMenuDef);
+  console.log(`   Tenant Dual Menu ID: ${tenantDualMenuId}`);
   
-  console.log("4. Uploading Landlord Rich Menu Image...");
+  console.log("4. Uploading Dual Tenant Image...");
+  await uploadRichMenuImage(tenantDualMenuId, "public/richmenu_tenant.png");
+  console.log("   Dual Tenant Image uploaded successfully!");
+
+  // 3. Create Landlord Rich Menu
+  console.log("5. Creating Landlord Rich Menu...");
+  const landlordMenuId = await createRichMenu(landlordMenuDef);
+  console.log(`   Landlord Menu ID: ${landlordMenuId}`);
+  
+  console.log("6. Uploading Landlord Image...");
   await uploadRichMenuImage(landlordMenuId, "public/richmenu_landlord.png");
   console.log("   Landlord Image uploaded successfully!");
 
-  // 3. Set Tenant Rich Menu as default for all users
-  console.log("5. Setting Tenant Rich Menu as default...");
-  await setDefaultRichMenu(tenantMenuId);
-  console.log("   Default rich menu set to Tenant Menu!");
+  // 4. Set Standard Tenant Rich Menu as default for all general users
+  console.log("7. Setting Standard Tenant Rich Menu as default...");
+  await setDefaultRichMenu(tenantStandardMenuId);
+  console.log("   Default rich menu set to Tenant Standard Menu!");
 
-  // 4. Save to config file for Edge Function
+  // 5. Save to config file for Edge Function
   const config = {
-    tenantRichMenuId: tenantMenuId,
+    tenantStandardRichMenuId: tenantStandardMenuId,
+    tenantDualRichMenuId: tenantDualMenuId,
     landlordRichMenuId: landlordMenuId,
     updatedAt: new Date().toISOString()
   };
@@ -126,7 +154,7 @@ async function main() {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
   console.log(`Config written to ${configPath}:`, config);
 
-  console.log("=== ALL RICH MENUS SUCCESSFULLY REGISTERED & LINKED! ===");
+  console.log("=== ALL 3 RICH MENUS SUCCESSFULLY REGISTERED & CONFIGURED! ===");
 }
 
 main().catch(err => {

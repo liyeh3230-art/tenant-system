@@ -1490,6 +1490,22 @@ export default function App() {
   const [lineFirstLoginNewPassword, setLineFirstLoginNewPassword] = useState('');
   const [lineFirstLoginConfirmPassword, setLineFirstLoginConfirmPassword] = useState('');
 
+  // --- LINE Front-end Framework (LIFF) 初始化 ---
+  useEffect(() => {
+    const initLiff = async () => {
+      const liffId = import.meta.env.VITE_LIFF_LANDLORD_ID || import.meta.env.VITE_LIFF_ID || '';
+      if (typeof window !== 'undefined' && window.liff && liffId) {
+        try {
+          await window.liff.init({ liffId });
+          console.log('LIFF initialized successfully');
+        } catch (err) {
+          console.warn('LIFF init notice:', err);
+        }
+      }
+    };
+    initLiff();
+  }, []);
+
   useEffect(() => {
     const processSocialOAuth = async () => {
       try {
@@ -1535,6 +1551,69 @@ export default function App() {
               }
             } catch (liffErr) {
               console.warn('LIFF profile check notice:', liffErr);
+            }
+          }
+          return;
+        }
+
+        // 支援直接透過 LINE BOT / LIFF 連結開啟「申請成為房東」認證表單
+        if (mode === 'apply_landlord' || mode === 'landlord_application') {
+          const phoneParam = searchParams.get('phone') || '';
+          const nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
+
+          if (phoneParam) {
+            setActiveUserPhone(phoneParam);
+            setCurrentTenantPhone(phoneParam);
+          }
+          if (nameParam) {
+            setCurrentTenantName(nameParam);
+          }
+
+          setOnboardingUser({
+            id: currentUser?.id || myLandlordAccount?.id || (phoneParam ? `usr_${phoneParam}` : `usr_${Date.now()}`),
+            phone: phoneParam || activeUserPhone || currentTenantPhone || '',
+            name: nameParam || currentTenantName || currentUser?.user_metadata?.name || '會員',
+          });
+
+          setActiveModal('landlordApplication');
+          showToast('👋 歡迎申請開通房東權限！請填寫以下查核資料並送出審核。', 'info');
+
+          // 若在 LIFF 環境中，若未帶 name/phone 則嘗試透過 LIFF SDK 讀取使用者 Profile 與資料庫綁定
+          if (typeof window !== 'undefined' && window.liff) {
+            try {
+              if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
+                const liffProfile = await window.liff.getProfile();
+                if (liffProfile) {
+                  if (!nameParam && liffProfile.displayName) {
+                    setCurrentTenantName(liffProfile.displayName);
+                    setOnboardingUser(prev => prev ? { ...prev, name: liffProfile.displayName } : prev);
+                  }
+                  if (!phoneParam && liffProfile.userId) {
+                    try {
+                      const { data: binding } = await supabase
+                        .from('line_bindings')
+                        .select('phone, name, line_display_name')
+                        .eq('line_user_id', liffProfile.userId)
+                        .maybeSingle();
+                      if (binding && binding.phone) {
+                        setActiveUserPhone(binding.phone);
+                        setCurrentTenantPhone(binding.phone);
+                        if (binding.name) setCurrentTenantName(binding.name);
+                        setOnboardingUser(prev => prev ? {
+                          ...prev,
+                          phone: binding.phone,
+                          name: binding.name || prev.name,
+                          id: `usr_${binding.phone}`
+                        } : prev);
+                      }
+                    } catch (e) {
+                      console.warn('Failed to query binding:', e);
+                    }
+                  }
+                }
+              }
+            } catch (liffErr) {
+              console.warn('LIFF landlord profile notice:', liffErr);
             }
           }
           return;
@@ -2579,6 +2658,14 @@ export default function App() {
 
       showToast('🎉 房東認證資料已成功送出！管理員審核中（期間您可繼續使用租客中心），核准後將自動開通房東功能。', 'success');
       fetchSupabaseData();
+
+      // 若在 LINE LIFF 內嵌環境中送出，提示後自動關閉彈窗返回 LINE 對話
+      if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+        showToast('🎉 房東認證資料已成功送出！審核中，即將為您返回 LINE 對話...', 'success');
+        setTimeout(() => {
+          try { window.liff.closeWindow(); } catch (e) {}
+        }, 1800);
+      }
     } catch (err) {
       showToast('申請送出失敗: ' + (err.message || '請重試'), 'error');
     } finally {
@@ -9532,7 +9619,12 @@ export default function App() {
                 {activeModal === 'tenantReportPayment' && '回報已繳費用'}
                 {activeModal === 'tenantPay' && '回報已繳費用'}
               </h3>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 focus:outline-none p-1 rounded-lg hover:bg-slate-200/60">
+              <button onClick={() => {
+                if (activeModal === 'landlordApplication' && typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                  try { window.liff.closeWindow(); return; } catch (e) {}
+                }
+                setActiveModal(null);
+              }} className="text-slate-400 hover:text-slate-600 focus:outline-none p-1 rounded-lg hover:bg-slate-200/60">
                 <X size={18} />
               </button>
             </div>
@@ -11276,11 +11368,18 @@ export default function App() {
                       {isRejectedLandlord ? <RefreshCw size={20} /> : <ShieldCheck size={20} />}
                     </div>
                     <div className="space-y-0.5">
-                      <h4 className={`text-sm font-bold ${
-                        isRejectedLandlord ? 'text-rose-950' : 'text-indigo-950'
-                      }`}>
-                        {isRejectedLandlord ? '修改房東認證資料 (重新送審)' : '房東身分真實性查核'}
-                      </h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className={`text-sm font-bold ${
+                          isRejectedLandlord ? 'text-rose-950' : 'text-indigo-950'
+                        }`}>
+                          {isRejectedLandlord ? '修改房東認證資料 (重新送審)' : '房東身分真實性查核'}
+                        </h4>
+                        {(typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) && (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                            🟢 LINE 內嵌彈窗
+                          </span>
+                        )}
+                      </div>
                       <p className={`text-xs leading-relaxed ${
                         isRejectedLandlord ? 'text-rose-800' : 'text-indigo-800'
                       }`}>
@@ -11300,8 +11399,18 @@ export default function App() {
                         <input
                           type="text"
                           value={onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || ''}
-                          disabled
-                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setCurrentTenantName(val);
+                            setOnboardingUser(prev => ({ ...(prev || {}), name: val }));
+                          }}
+                          disabled={!!(currentTenantName && currentTenantName !== '會員')}
+                          placeholder="請輸入真實姓名"
+                          className={`w-full border rounded-xl px-3.5 py-2 text-sm font-semibold ${
+                            (currentTenantName && currentTenantName !== '會員')
+                              ? 'bg-slate-100 border-slate-200 text-slate-600'
+                              : 'bg-white border-slate-300 text-slate-900 focus:border-indigo-500'
+                          }`}
                         />
                       </div>
 
@@ -11312,8 +11421,19 @@ export default function App() {
                         <input
                           type="text"
                           value={onboardingUser?.phone || activeUserPhone || currentTenantPhone || ''}
-                          disabled
-                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-sm text-slate-600 font-semibold"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setActiveUserPhone(val);
+                            setCurrentTenantPhone(val);
+                            setOnboardingUser(prev => ({ ...(prev || {}), phone: val }));
+                          }}
+                          disabled={!!(activeUserPhone || currentTenantPhone)}
+                          placeholder="請輸入手機號碼 (例如 0912345678)"
+                          className={`w-full border rounded-xl px-3.5 py-2 text-sm font-semibold ${
+                            (activeUserPhone || currentTenantPhone)
+                              ? 'bg-slate-100 border-slate-200 text-slate-600'
+                              : 'bg-white border-slate-300 text-slate-900 focus:border-indigo-500'
+                          }`}
                         />
                       </div>
                     </div>
@@ -11394,6 +11514,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => {
+                          if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
+                            try { window.liff.closeWindow(); return; } catch (e) {}
+                          }
                           if (lineFirstLoginUser) {
                             setActiveModal('lineFirstLogin');
                           } else if (onboardingUser && !currentTenantPhone) {

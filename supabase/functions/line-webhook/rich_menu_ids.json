@@ -1,5 +1,6 @@
 {
-  "tenantRichMenuId": "richmenu-aa6b131d849fa8ed0fa259bc9a1f714b",
-  "landlordRichMenuId": "richmenu-a980c99ad846b07beb0bc17fdf827cb0",
-  "updatedAt": "2026-10-02T21:40:00.161Z"
+  "tenantStandardRichMenuId": "richmenu-0b16475f35c9b7a311146b7d290615d6",
+  "tenantDualRichMenuId": "richmenu-807a761a05e49395cbc09886f5cda6e7",
+  "landlordRichMenuId": "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0",
+  "updatedAt": "2026-10-03T04:25:16.761Z"
 }
