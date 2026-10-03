@@ -1562,7 +1562,6 @@ export default function App() {
           const nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
 
           if (phoneParam) {
-            setActiveUserPhone(phoneParam);
             setCurrentTenantPhone(phoneParam);
           }
           if (nameParam) {
@@ -1596,7 +1595,6 @@ export default function App() {
                         .eq('line_user_id', liffProfile.userId)
                         .maybeSingle();
                       if (binding && binding.phone) {
-                        setActiveUserPhone(binding.phone);
                         setCurrentTenantPhone(binding.phone);
                         if (binding.name) setCurrentTenantName(binding.name);
                         setOnboardingUser(prev => prev ? {
@@ -11423,7 +11421,6 @@ export default function App() {
                           value={onboardingUser?.phone || activeUserPhone || currentTenantPhone || ''}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setActiveUserPhone(val);
                             setCurrentTenantPhone(val);
                             setOnboardingUser(prev => ({ ...(prev || {}), phone: val }));
                           }}
