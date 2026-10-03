@@ -284,21 +284,46 @@ export const completeTenantOnboarding = async ({ userId, phone, name }) => {
   const cleanName = sanitizeText(name || '租客');
 
   try {
+    // 0. 查詢既有 profile，確保使用現存的真實 profile.id
+    const { data: existingProf } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('phone', safePhone)
+      .maybeSingle();
+    const actualUserId = existingProf?.id || userId;
+
     // 1. 更新 profile 為 tenant
-    await supabase.from('profiles').upsert({
-      id: userId,
-      role: 'tenant',
-      name: cleanName,
-      phone: safePhone,
-      updated_at: new Date().toISOString(),
-    });
+    if (existingProf) {
+      await supabase.from('profiles').update({
+        role: 'tenant',
+        name: cleanName,
+        updated_at: new Date().toISOString(),
+      }).eq('id', existingProf.id);
+    } else {
+      await supabase.from('profiles').upsert({
+        id: actualUserId,
+        role: 'tenant',
+        name: cleanName,
+        phone: safePhone,
+        updated_at: new Date().toISOString(),
+      });
+    }
 
     // 2. 建立/啟用 tenants 表紀錄
     await supabase.from('tenants').upsert({
-      id: userId,
+      id: actualUserId,
       status: 'active',
       updated_at: new Date().toISOString(),
     });
+
+    // 3. 自動連動同步 landlords 與 line_bindings 中的姓名 (保持全站姓名一致)
+    await supabase.from('landlords')
+      .update({ name: cleanName, updated_at: new Date().toISOString() })
+      .or(`id.eq.${actualUserId},phone.eq.${safePhone},id.eq.usr_${safePhone}`);
+
+    await supabase.from('line_bindings')
+      .update({ line_display_name: cleanName, updated_at: new Date().toISOString() })
+      .or(`tenant_id.eq.${actualUserId},line_user_id.eq.${actualUserId}`);
 
     return { success: true, role: 'tenant' };
   } catch (err) {
@@ -342,11 +367,20 @@ export const submitLandlordApplication = async ({
   });
 
   try {
+    // 0. 優先使用該手機號碼已存在的 profile id，確保身分一致不脫鉤
+    const { data: existingProf } = await supabase
+      .from('profiles')
+      .select('id, name')
+      .eq('phone', safePhone)
+      .maybeSingle();
+
+    const actualUserId = existingProf?.id || userId;
+
     // 檢查若帳號已經審核通過，則不重複變更其已開通之狀態
     const { data: existingLandlord } = await supabase
       .from('landlords')
       .select('status')
-      .or(`id.eq.${userId},phone.eq.${safePhone}`)
+      .or(`id.eq.${actualUserId},phone.eq.${safePhone},id.eq.usr_${safePhone}`)
       .maybeSingle();
 
     if (existingLandlord && existingLandlord.status === 'approved') {
@@ -359,20 +393,28 @@ export const submitLandlordApplication = async ({
       };
     }
 
-    // 1. 維持 profiles 基礎身分為 tenant (審核通過前不提前升級為 landlord)
-    await supabase.from('profiles').upsert({
-      id: userId,
-      role: 'tenant',
-      name: cleanName,
-      phone: safePhone,
-      updated_at: new Date().toISOString(),
-    });
+    // 1. 維持 profiles 基礎身分為 tenant (審核通過前不提前升級為 landlord)，並同步統一姓名
+    if (existingProf) {
+      await supabase.from('profiles').update({
+        name: cleanName,
+        role: 'tenant',
+        updated_at: new Date().toISOString(),
+      }).eq('id', existingProf.id);
+    } else {
+      await supabase.from('profiles').upsert({
+        id: actualUserId,
+        role: 'tenant',
+        name: cleanName,
+        phone: safePhone,
+        updated_at: new Date().toISOString(),
+      });
+    }
 
     // 2. 寫入 landlords 表，狀態一律設為 pending (待審核)
     // 相容寫入：同時將驗證資料寫入 company_name (格式化字串) 與專屬欄位 (若已遷移)
     const displayCompany = cleanCompany || `【個人房東】身分證號: ${cleanIdNumber || '未提供'}`;
     const updateData = {
-      id: userId,
+      id: actualUserId,
       name: cleanName,
       phone: safePhone,
       company_name: verificationPayload, // 儲存結構化申請資料
@@ -392,7 +434,7 @@ export const submitLandlordApplication = async ({
     if (landlordErr) {
       // 容錯回退：若無擴充欄位，僅寫入標準欄位
       await supabase.from('landlords').upsert({
-        id: userId,
+        id: actualUserId,
         name: cleanName,
         phone: safePhone,
         company_name: verificationPayload,
@@ -402,11 +444,16 @@ export const submitLandlordApplication = async ({
       });
     }
 
+    // 2.5 同步更新 line_bindings 中的顯示名稱 (保持全站姓名一致)
+    await supabase.from('line_bindings')
+      .update({ line_display_name: cleanName, updated_at: new Date().toISOString() })
+      .or(`tenant_id.eq.${actualUserId},line_user_id.eq.${actualUserId}`);
+
     // 3. 同步寫入房東專屬地址庫 (若是有效地址)
     if (cleanAddress) {
       try {
         await supabase.from('landlord_addresses').upsert({
-          landlord_id: userId,
+          landlord_id: actualUserId,
           address: cleanAddress,
         });
       } catch (addrErr) {

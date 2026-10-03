@@ -1122,10 +1122,14 @@ export default function App() {
           if (l && l.id && !lndIdSet.has(l.id)) {
             lndIdSet.add(l.id);
             const bInfo = extractLandlordBankInfo(l);
+            // 優先比對 profiles 註冊姓名，確保雙向同步一致 (Single Source of Truth)
+            const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
+            const prof = (profileData || []).find(p => (cleanP && (p.phone || '').replace(/[^0-9]/g, '') === cleanP) || p.id === l.id);
+            const unifiedName = prof?.name || l.name || '房東';
             lnds.push({
               id: l.id,
-              name: l.name || '房東',
-              phone: l.phone || '',
+              name: unifiedName,
+              phone: l.phone || prof?.phone || '',
               company_name: l.company_name || '',
               id_number: l.id_number || '',
               contact_address: l.contact_address || '',
@@ -1188,11 +1192,15 @@ export default function App() {
         (leaseData || []).forEach(l => {
           const cleanP = (l.phone || '').replace(/[^0-9]/g, '');
           if (cleanP && l.tenant_name) {
-            tenantMap.set(cleanP, { id: `lease_${l.id}`, name: l.tenant_name, phone: l.phone, fromLease: true });
+            const prof = (profileData || []).find(p => (p.phone || '').replace(/[^0-9]/g, '') === cleanP);
+            const unifiedName = prof?.name || l.tenant_name;
+            tenantMap.set(cleanP, { id: `lease_${l.id}`, name: unifiedName, phone: l.phone, fromLease: true });
           }
           const cleanCoP = (l.co_phone || '').replace(/[^0-9]/g, '');
           if (cleanCoP && l.co_tenant_name) {
-            tenantMap.set(cleanCoP, { id: `co_${l.id}`, name: l.co_tenant_name, phone: l.co_phone, fromLease: true });
+            const prof = (profileData || []).find(p => (p.phone || '').replace(/[^0-9]/g, '') === cleanCoP);
+            const unifiedName = prof?.name || l.co_tenant_name;
+            tenantMap.set(cleanCoP, { id: `co_${l.id}`, name: unifiedName, phone: l.co_phone, fromLease: true });
           }
         });
 
@@ -2722,7 +2730,9 @@ export default function App() {
 
     const targetUserId = onboardingUser?.id || currentUser?.id || myLandlordAccount?.id || `usr_${activeUserPhone}`;
     const targetPhone = onboardingUser?.phone || activeUserPhone || currentTenantPhone;
-    const targetName = onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '房東';
+    const cleanP = String(targetPhone || '').replace(/[^0-9]/g, '');
+    const matchedReg = registeredTenants.find(t => String(t.phone || '').replace(/[^0-9]/g, '') === cleanP);
+    const targetName = matchedReg?.name || onboardingUser?.name || currentTenantName || currentUser?.user_metadata?.name || myLandlordAccount?.name || '房東';
 
     if (!targetPhone) {
       showToast('缺少聯絡電話，請重新登入後再試！', 'error');
