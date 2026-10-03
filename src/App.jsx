@@ -3131,26 +3131,64 @@ export default function App() {
     }
   };
 
-  const handleApproveLandlord = async (landlordId, landlordName) => {
+  const handleApproveLandlord = async (landlordId, landlordName, landlordPhone) => {
     try {
       const nowIso = new Date().toISOString();
-      const { error: rpcErr } = await supabase.rpc('approve_landlord_account', { p_landlord_id: landlordId });
-      if (rpcErr) {
-        // 降級容錯：直接更新 landlords 表與 profiles 表
-        await supabase
-          .from('landlords')
-          .update({ status: 'approved', updated_at: nowIso })
-          .eq('id', landlordId);
-      }
-      await supabase
-        .from('profiles')
-        .update({ role: 'landlord', updated_at: nowIso })
-        .eq('id', landlordId);
+      const cleanPhone = String(landlordPhone || '').replace(/[^0-9]/g, '');
 
-      setLandlords(landlords.map(l =>
-        l.id === landlordId ? { ...l, status: 'approved' } : l
-      ));
-      showToast(`已成功核准房東「${landlordName}」的申請！該會員已正式升級為房東。`, 'success');
+      // 1. 更新 landlords 表為 approved
+      let lndQuery = supabase.from('landlords').update({ status: 'approved', updated_at: nowIso });
+      if (landlordId && cleanPhone) {
+        lndQuery = lndQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        lndQuery = lndQuery.or(`phone.eq.${cleanPhone},id.eq.usr_${cleanPhone}`);
+      } else if (landlordId) {
+        lndQuery = lndQuery.eq('id', landlordId);
+      }
+      await lndQuery;
+
+      // 2. 更新 profiles 表角色為 landlord
+      let profQuery = supabase.from('profiles').update({ role: 'landlord', updated_at: nowIso });
+      if (landlordId && cleanPhone) {
+        profQuery = profQuery.or(`id.eq.${landlordId},phone.eq.${cleanPhone}`);
+      } else if (cleanPhone) {
+        profQuery = profQuery.eq('phone', cleanPhone);
+      } else if (landlordId) {
+        profQuery = profQuery.eq('id', landlordId);
+      }
+      await profQuery;
+
+      // 3. 自動更新 line_bindings 為 active:landlord (啟用房東管理模式)
+      if (cleanPhone || landlordId) {
+        const { data: profs } = await supabase.from('profiles').select('id').or(`id.eq.${landlordId || 'none'},phone.eq.${cleanPhone || 'none'}`);
+        const pIds = (profs || []).map(p => p.id);
+        if (pIds.length > 0) {
+          await supabase.from('line_bindings')
+            .update({ status: 'active:landlord', updated_at: nowIso })
+            .in('tenant_id', pIds);
+        }
+      }
+
+      // 4. 觸發 LINE Edge Function 自動切換圖文選單為【房東管理選單】並發送推播通知
+      try {
+        await supabase.functions.invoke('line-push', {
+          body: {
+            action: 'approve_landlord',
+            landlordId,
+            name: landlordName,
+            phone: cleanPhone
+          }
+        });
+      } catch (pushErr) {
+        console.warn('Invoke line-push approve_landlord notice:', pushErr);
+      }
+
+      setLandlords(prev => prev.map(l => {
+        const matches = (landlordId && l.id === landlordId) || (cleanPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanPhone);
+        return matches ? { ...l, status: 'approved' } : l;
+      }));
+
+      showToast(`已成功核准房東「${landlordName}」的申請！LINE 圖文選單已自動為其切換為【房東管理選單】並發送通知。`, 'success');
       fetchSupabaseData();
     } catch (err) {
       showToast(`核准失敗: ${err.message}`, 'error');
@@ -3196,6 +3234,19 @@ export default function App() {
               .in('tenant_id', pIds)
               .eq('status', 'active:landlord');
           }
+        }
+
+        // 4. 觸發 LINE Edge Function 自動切換圖文選單回「租客生活選單」
+        try {
+          await supabase.functions.invoke('line-push', {
+            body: {
+              action: 'revoke_landlord',
+              landlordId,
+              phone: cleanPhone
+            }
+          });
+        } catch (pushErr) {
+          console.warn('Invoke line-push revoke_landlord notice:', pushErr);
         }
 
         setLandlords(prev => prev.map(l => {
@@ -3260,13 +3311,26 @@ export default function App() {
         }
       }
 
-      // 4. 更新本地狀態
+      // 4. 觸發 LINE Edge Function 自動切換圖文選單回「租客生活選單」
+      try {
+        await supabase.functions.invoke('line-push', {
+          body: {
+            action: 'revoke_landlord',
+            landlordId,
+            phone: cleanPhone
+          }
+        });
+      } catch (pushErr) {
+        console.warn('Invoke line-push revoke_landlord notice:', pushErr);
+      }
+
+      // 5. 更新本地狀態
       setLandlords(prev => prev.map(l => {
         const matches = (landlordId && l.id === landlordId) || (cleanPhone && String(l.phone || '').replace(/[^0-9]/g, '') === cleanPhone);
         return matches ? { ...l, status: 'rejected' } : l;
       }));
 
-      showToast(`已成功撤銷「${landlordName}」的房東身分，該會員已恢復為正常租客身分。您可於「已退回申請」隨時查閱或重新核准。`, 'success');
+      showToast(`已成功撤銷「${landlordName}」的房東身分，該會員已恢復為正常租客身分，LINE 選單已自動切換回租客選單。您可於「已退回申請」隨時查閱或重新核准。`, 'success');
       fetchSupabaseData();
     } catch (err) {
       console.error('Revoke landlord error:', err);
@@ -6550,7 +6614,7 @@ export default function App() {
                                       <td className="py-3.5 px-4 text-xs text-slate-600 max-w-xs truncate" title={addr}>{addr}</td>
                                       <td className="py-3.5 px-4 text-right space-x-2">
                                         <button
-                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name, lnd.phone)}
                                           className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors focus:outline-none cursor-pointer"
                                         >
                                           核准啟用
@@ -6599,7 +6663,7 @@ export default function App() {
                                   </div>
                                   <div className="flex gap-2 pt-2 border-t border-amber-200/50">
                                     <button
-                                      onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                      onClick={() => handleApproveLandlord(lnd.id, lnd.name, lnd.phone)}
                                       className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
                                     >
                                       核准啟用
@@ -6664,7 +6728,7 @@ export default function App() {
                                       </td>
                                       <td className="py-3.5 px-4 text-right space-x-2">
                                         <button
-                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                          onClick={() => handleApproveLandlord(lnd.id, lnd.name, lnd.phone)}
                                           className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors focus:outline-none cursor-pointer"
                                         >
                                           重新核准
@@ -6703,7 +6767,7 @@ export default function App() {
                                 </div>
                                 <div className="flex gap-2 pt-2 border-t border-rose-200/50">
                                   <button
-                                    onClick={() => handleApproveLandlord(lnd.id, lnd.name)}
+                                    onClick={() => handleApproveLandlord(lnd.id, lnd.name, lnd.phone)}
                                     className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg text-xs font-bold text-center cursor-pointer"
                                   >
                                     重新核准

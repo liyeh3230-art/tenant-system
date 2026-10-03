@@ -526,6 +526,237 @@ serve(async (req: Request) => {
     const payload = await req.json();
     const { action = "push_bill", payment, lease, property } = payload;
 
+    // -------------------------------------------------------------------------
+    // ACTION: approve_landlord (房東審核通過：自動切換至房東管理選單並推播通知)
+    // -------------------------------------------------------------------------
+    if (action === "approve_landlord") {
+      const { landlordId, name, phone } = payload;
+      const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+      // 1. 查找 profiles
+      let targetProfileId = landlordId;
+      let userName = name || "房東";
+      if (cleanPhone) {
+        const { data: profs } = await supabase.from("profiles").select("id, name, phone").eq("phone", cleanPhone).is("deleted_at", null);
+        if (profs && profs.length > 0) {
+          targetProfileId = profs[0].id;
+          if (profs[0].name) userName = profs[0].name;
+        }
+      }
+
+      // 2. 查找 line_bindings
+      let bQuery = supabase.from("line_bindings").select("*");
+      if (targetProfileId && cleanPhone) {
+        bQuery = bQuery.or(`tenant_id.eq.${targetProfileId},tenant_id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        bQuery = bQuery.eq("tenant_id", `usr_${cleanPhone}`);
+      } else if (targetProfileId) {
+        bQuery = bQuery.eq("tenant_id", targetProfileId);
+      }
+      const { data: bindings } = await bQuery;
+      const activeBinding = (bindings || []).find((b: any) => b.line_user_id && b.line_user_id.startsWith("U"));
+
+      if (!activeBinding) {
+        return new Response(
+          JSON.stringify({ success: true, message: "User has no LINE binding, skip LINE notification." }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const lineUserId = activeBinding.line_user_id;
+
+      // 3. 更新 line_bindings status 為 active:landlord
+      await supabase
+        .from("line_bindings")
+        .update({ status: "active:landlord", updated_at: new Date().toISOString() })
+        .eq("line_user_id", lineUserId);
+
+      // 4. 即時切換 LINE Rich Menu 為房東管理選單 (richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0)
+      const LANDLORD_RICH_MENU_ID = "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0";
+      try {
+        await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${LANDLORD_RICH_MENU_ID}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+        });
+      } catch (err) {
+        console.warn("Link landlord rich menu error:", err);
+      }
+
+      // 5. 即時發送恭喜審核通過之 Flex Message 推播
+      const celebrateMessage = {
+        type: "flex",
+        altText: "🎉 恭喜您！您的房東身分申請已審核通過！已為您自動切換至【房東管理選單】",
+        contents: {
+          type: "bubble",
+          size: "mega",
+          header: {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#0F172A",
+            paddingAll: "18px",
+            contents: [
+              { type: "text", text: "智慧租屋 · 房東認證審核通過", color: "#38BDF8", size: "xs", weight: "bold" },
+              { type: "text", text: "🎉 恭喜成為認證房東！", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" },
+              { type: "text", text: "已自動為您開通權限並切換至房東管理選單", color: "#94A3B8", size: "xs", margin: "xs" }
+            ]
+          },
+          body: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "18px",
+            spacing: "md",
+            contents: [
+              {
+                type: "box",
+                layout: "vertical",
+                backgroundColor: "#F8FAFC",
+                cornerRadius: "10px",
+                borderColor: "#E2E8F0",
+                borderWidth: "1px",
+                paddingAll: "12px",
+                spacing: "xs",
+                contents: [
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      { type: "text", text: "👤 房東姓名", size: "xs", color: "#64748B", flex: 3 },
+                      { type: "text", text: userName, size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+                    ]
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      { type: "text", text: "📱 聯絡手機", size: "xs", color: "#64748B", flex: 3 },
+                      { type: "text", text: cleanPhone || "已登記", size: "xs", color: "#0F172A", weight: "bold", flex: 7 }
+                    ]
+                  },
+                  {
+                    type: "box",
+                    layout: "horizontal",
+                    contents: [
+                      { type: "text", text: "🛡️ 當前身分", size: "xs", color: "#64748B", flex: 3 },
+                      { type: "text", text: "👑 認證房東 (管理模式)", size: "xs", color: "#4F46E5", weight: "bold", flex: 7 }
+                    ]
+                  }
+                ]
+              },
+              {
+                type: "text",
+                text: "✨ 底部 6 宮格選單已自動為您跳轉為【📊 房東管理選單】！您可直接點選選單或下方快捷按鈕開始體驗：\n\n• 📊 經營概況：即時掌握出租率與月收租總額\n• ⏳ 待核帳單：租客繳款後一鍵核帳開立收據\n• 🏠 房源現況：查詢旗下所有房源招租現狀\n• 📋 租客名冊：即時查閱租客資料與合約狀態\n\n💡 若需要查詢個人租約或待繳帳單，可隨時點選選單第 6 格「🔄 切換為租客模式」無縫切換！",
+                size: "xs",
+                color: "#334155",
+                wrap: true
+              }
+            ]
+          },
+          footer: {
+            type: "box",
+            layout: "horizontal",
+            spacing: "sm",
+            paddingAll: "14px",
+            contents: [
+              {
+                type: "button",
+                style: "primary",
+                color: "#4F46E5",
+                height: "sm",
+                action: {
+                  type: "message",
+                  label: "📊 經營概況",
+                  text: "經營概況"
+                }
+              },
+              {
+                type: "button",
+                style: "secondary",
+                height: "sm",
+                action: {
+                  type: "message",
+                  label: "⏳ 待核帳單",
+                  text: "待核帳單"
+                }
+              }
+            ]
+          }
+        },
+        quickReply: {
+          items: [
+            { type: "action", action: { type: "message", label: "📊 經營概況", text: "經營概況" } },
+            { type: "action", action: { type: "message", label: "⏳ 待核帳單", text: "待核帳單" } },
+            { type: "action", action: { type: "message", label: "🏠 房源現況", text: "房源現況" } },
+            { type: "action", action: { type: "message", label: "📋 租客名冊", text: "租客名冊" } },
+            { type: "action", action: { type: "postback", label: "🔄 切換租客", data: "action=switch_role&target=tenant", displayText: "🔄 切換為租客模式" } }
+          ]
+        }
+      };
+
+      try {
+        await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+          },
+          body: JSON.stringify({
+            to: lineUserId,
+            messages: [celebrateMessage],
+          }),
+        });
+      } catch (err) {
+        console.warn("Push celebrate message error:", err);
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: "Landlord approved, switched to landlord menu, and notification pushed." }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION: revoke_landlord (撤銷房東身分：自動切換回租客標準選單)
+    // -------------------------------------------------------------------------
+    if (action === "revoke_landlord") {
+      const { landlordId, phone } = payload;
+      const cleanPhone = String(phone || "").replace(/[^0-9]/g, "");
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+      let targetProfileId = landlordId;
+      if (cleanPhone) {
+        const { data: profs } = await supabase.from("profiles").select("id").eq("phone", cleanPhone).is("deleted_at", null);
+        if (profs && profs.length > 0) targetProfileId = profs[0].id;
+      }
+
+      let bQuery = supabase.from("line_bindings").select("*");
+      if (targetProfileId && cleanPhone) {
+        bQuery = bQuery.or(`tenant_id.eq.${targetProfileId},tenant_id.eq.usr_${cleanPhone}`);
+      } else if (cleanPhone) {
+        bQuery = bQuery.eq("tenant_id", `usr_${cleanPhone}`);
+      } else if (targetProfileId) {
+        bQuery = bQuery.eq("tenant_id", targetProfileId);
+      }
+      const { data: bindings } = await bQuery;
+      const activeBinding = (bindings || []).find((b: any) => b.line_user_id && b.line_user_id.startsWith("U"));
+
+      if (activeBinding) {
+        const lineUserId = activeBinding.line_user_id;
+        const TENANT_STANDARD_RICH_MENU_ID = "richmenu-cfddd338cb4c727d0ac9c86274615a2a";
+        try {
+          await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${TENANT_STANDARD_RICH_MENU_ID}`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}` },
+          });
+        } catch {}
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: "Landlord revoked, switched to tenant menu." }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     if (!payment) {
       return new Response(
         JSON.stringify({ error: "Missing required parameter: payment" }),

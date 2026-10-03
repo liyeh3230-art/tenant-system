@@ -3048,12 +3048,14 @@ serve(async (req: Request) => {
       // 1. 申請成為房東 Postback
       if (action === "apply_landlord") {
         if (userCtx?.isLandlord) {
+          await linkUserRichMenu(lineUserId, LANDLORD_RICH_MENU_ID);
+          await supabase
+            .from("line_bindings")
+            .update({ status: "active:landlord", updated_at: new Date().toISOString() })
+            .eq("line_user_id", lineUserId);
+
           await replyLineMessage(replyToken, [
-            {
-              type: "text",
-              text: "🎉 您已經具備房東管理權限囉！您可直接點選下方按鈕切換至房東經營模式：",
-              quickReply: buildSmartQuickReply("tenant", true)
-            }
+            buildRoleSwitchSuccessFlex("landlord", userCtx?.userName || "房東", true)
           ]);
           continue;
         }
@@ -3466,12 +3468,14 @@ serve(async (req: Request) => {
         const isApplyLandlord = /^(?:📝|✍️)?\s*(申請成為房東|申請房東|我要當房東|成為房東|我要申請房東|開通房東)$/i.test(text.replace(/[\s\uFE0F]/g, ''));
         if (isApplyLandlord) {
           if (userCtx.isLandlord) {
+            await linkUserRichMenu(lineUserId, LANDLORD_RICH_MENU_ID);
+            await supabase
+              .from("line_bindings")
+              .update({ status: "active:landlord", updated_at: new Date().toISOString() })
+              .eq("line_user_id", lineUserId);
+
             await replyLineMessage(replyToken, [
-              {
-                type: "text",
-                text: "🎉 您已經具備房東管理權限囉！您可直接點選下方「🔄 切換為房東」開啟經營後台：",
-                quickReply: buildSmartQuickReply("tenant", true)
-              }
+              buildRoleSwitchSuccessFlex("landlord", userCtx?.userName || "房東", true)
             ]);
             continue;
           }
