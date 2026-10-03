@@ -1,6 +1,6 @@
 import fs from 'fs';
 
-// Read the first 1843 lines of backup file
+// Read the first lines of backup file
 const backupContent = fs.readFileSync('supabase/functions/line-webhook/index.ts.backup_stable', 'utf8');
 const backupLines = backupContent.split('\n');
 
@@ -515,7 +515,6 @@ function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
     };
   }
 
-  // Create bubbles for properties (up to 10 in carousel)
   const bubbles = properties.slice(0, 10).map((prop) => {
     const activeLease = leases.find((l) => l.property_id === prop.id && l.status === "active");
     const isRented = !!activeLease;
@@ -705,7 +704,7 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
 }
 
 // -----------------------------------------------------------------------------
-// DUAL-ROLE INTELLIGENT USER CONTEXT FETCHER
+// DUAL-ROLE STRICT USER CONTEXT FETCHER (ZERO LEAKAGE / STRICT AUTH)
 // -----------------------------------------------------------------------------
 async function getUserContext(supabase: any, lineUserId: string) {
   // 1. 查詢 line_bindings (支援 status: active, active:landlord, active:tenant)
@@ -730,7 +729,11 @@ async function getUserContext(supabase: any, lineUserId: string) {
   const cleanPhone = profile?.phone ? String(profile.phone).replace(/[^0-9]/g, "") : "";
   const userName = profile?.name || binding.line_display_name || "";
 
-  // 3. 判斷房東資格 (Landlord Eligibility)
+  // 3. 嚴格判定房東身分 (Strict Landlord Verification)
+  // 核心安全規則：
+  // - 嚴格禁止任何模糊姓名比對或備註文字比對！
+  // - 使用者必須在 landlords 表擁有 status === 'approved' 且未刪除之紀錄
+  // - 比對基準僅限：profile.id === landlords.id 或 cleanPhone === landlords.phone
   let landlordRecord: any = null;
 
   if (profile?.id) {
@@ -755,33 +758,24 @@ async function getUserContext(supabase: any, lineUserId: string) {
     if (lByPhone) landlordRecord = lByPhone;
   }
 
-  if (!landlordRecord && (profile?.role === "landlord" || profile?.role === "superadmin")) {
+  // 若使用者 profiles 角色的確為 superadmin，才允許管理存取
+  if (!landlordRecord && profile?.role === "superadmin") {
     const { data: lFirst } = await supabase
       .from("landlords")
       .select("*")
       .eq("status", "approved")
       .is("deleted_at", null)
+      .order("created_at", { ascending: true })
       .limit(1);
     if (lFirst && lFirst[0]) landlordRecord = lFirst[0];
   }
 
-  if (!landlordRecord && userName) {
-    const { data: allLnds } = await supabase
-      .from("landlords")
-      .select("*")
-      .eq("status", "approved")
-      .is("deleted_at", null);
-    if (allLnds) {
-      for (const l of allLnds) {
-        if (l.name === userName || (l.company_name && l.company_name.includes(userName))) {
-          landlordRecord = l;
-          break;
-        }
-      }
-    }
-  }
-
-  const isLandlord = !!landlordRecord;
+  // 判定是否為房東：必須有 landlordRecord 且 (角色為 landlord/superadmin 或電話精確相符)
+  const isLandlord = !!landlordRecord && (
+    profile?.role === "superadmin" ||
+    (landlordRecord.id === profile?.id) ||
+    (landlordRecord.phone && String(landlordRecord.phone).replace(/[^0-9]/g, "") === cleanPhone)
+  );
 
   // 4. 判斷租客資格與進行中租約 (Tenant Eligibility)
   let leaseQuery = supabase
@@ -799,27 +793,39 @@ async function getUserContext(supabase: any, lineUserId: string) {
   const isTenant = tenantLeases && tenantLeases.length > 0;
   const activeLease = tenantLeases?.[0] || null;
 
-  // 5. 智慧判斷當前作用中模式 (Active Role)
+  // 5. 智慧模式判定與安全防護 (Active Role Enforcement)
   let currentRole = "tenant";
-  if (binding.status === "active:landlord") {
-    currentRole = "landlord";
-  } else if (binding.status === "active:tenant") {
-    currentRole = "tenant";
-  } else {
-    // 預設身分自動指派
-    if (isLandlord && !isTenant) {
+
+  if (isLandlord) {
+    if (binding.status === "active:landlord") {
       currentRole = "landlord";
-    } else {
+    } else if (binding.status === "active:tenant") {
       currentRole = "tenant";
+    } else {
+      currentRole = "landlord";
+    }
+  } else {
+    // ⚠️ 嚴格安全原則：非房東帳號一律強制鎖定為租客模式！
+    currentRole = "tenant";
+
+    // 若資料庫內曾記錄為 active:landlord，自動自我修復修正回 active:tenant 並重置 Rich Menu
+    if (binding.status === "active:landlord") {
+      await supabase
+        .from("line_bindings")
+        .update({ status: "active:tenant", updated_at: new Date().toISOString() })
+        .eq("line_user_id", lineUserId);
+      try {
+        await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
+      } catch {}
     }
   }
 
   const isDualRole = isLandlord && isTenant;
 
-  // 6. 若具備房東身分，查詢房東旗下房源與合約
+  // 6. 房東專屬物業資料 (嚴格鎖定此房東 ID，若非房東則完全為空陣列)
   let landlordProperties: any[] = [];
   let landlordManagedLeases: any[] = [];
-  if (isLandlord && landlordRecord) {
+  if (isLandlord && landlordRecord?.id) {
     const { data: props } = await supabase
       .from("properties")
       .select("*")
@@ -839,7 +845,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     }
   }
 
-  // 7. 若為租客，查詢關聯房源與房東資訊
+  // 7. 租客承租關聯房東資料
   let tenantProperty: any = null;
   let tenantLandlord: any = null;
   if (activeLease) {
@@ -878,7 +884,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     isTenant,
     isDualRole,
     currentRole,
-    landlordRecord,
+    landlordRecord: isLandlord ? landlordRecord : null,
     landlordProperties,
     landlordManagedLeases,
     lease: activeLease,
@@ -894,7 +900,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
 serve(async (req: Request) => {
   // Support GET (health check / browser check)
   if (req.method === "GET") {
-    return new Response(JSON.stringify({ status: "ok", service: "line-webhook", version: "dual-role-v2" }), {
+    return new Response(JSON.stringify({ status: "ok", service: "line-webhook", version: "dual-role-v2-secure" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -957,7 +963,7 @@ serve(async (req: Request) => {
     const replyToken = event.replyToken;
     if (!replyToken) continue;
 
-    // 獲取使用者完整上下文 (雙身分判斷)
+    // 獲取使用者完整上下文 (雙身分嚴格判斷)
     const userCtx = await getUserContext(supabase, lineUserId);
 
     // -------------------------------------------------------------------------
@@ -1011,11 +1017,13 @@ serve(async (req: Request) => {
         const displayName = userCtx?.userName || "使用者";
 
         if (target === "landlord") {
+          // 嚴格權限防護：非房東帳號嚴禁切換
           if (!userCtx?.isLandlord) {
+            await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
               {
                 type: "text",
-                text: "⚠️ 您目前尚未具備房東管理權限。\\n\\n若您已持有出租物業，請登入網頁後台填寫房東申請資料，審核通過後即可開啟完整經營功能！",
+                text: \`⚠️ 權限不足：您的帳號（電話：\${userCtx?.cleanPhone || '未登錄'}）為【租客身分】，未具備房東管理權限。\\n\\n若您已持有出租物業，請先登入網頁後台填寫房東申請資料，審核通過後方可開啟房東經營功能！\`,
                 quickReply: buildSmartQuickReply("tenant")
               }
             ]);
@@ -1054,8 +1062,15 @@ serve(async (req: Request) => {
         }
       }
 
-      // 2. 房東確認入帳 (Approve Payment)
+      // 2. 房東確認入帳 (Approve Payment) - 嚴格限房東
       if (action === "approve_payment") {
+        if (!userCtx?.isLandlord) {
+          await replyLineMessage(replyToken, [
+            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant") }
+          ]);
+          continue;
+        }
+
         const billId = params.get("id");
         if (!billId) {
           await replyLineMessage(replyToken, [{ type: "text", text: "❌ 缺少帳單識別碼。" }]);
@@ -1098,7 +1113,6 @@ serve(async (req: Request) => {
 
         // 立即推播收據確認給承租人 (Instant Push to Tenant)
         try {
-          // 透過 lease 查詢承租人
           if (bill.lease_id) {
             const { data: lse } = await supabase.from("leases").select("tenant_name, phone, co_phone").eq("id", bill.lease_id).maybeSingle();
             const tPhone = lse?.phone ? String(lse.phone).replace(/[^0-9]/g, "") : "";
@@ -1131,8 +1145,15 @@ serve(async (req: Request) => {
         continue;
       }
 
-      // 3. 房東駁回繳款回報 (Reject Payment)
+      // 3. 房東駁回繳款回報 (Reject Payment) - 嚴格限房東
       if (action === "reject_payment") {
+        if (!userCtx?.isLandlord) {
+          await replyLineMessage(replyToken, [
+            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法執行審核操作！", quickReply: buildSmartQuickReply("tenant") }
+          ]);
+          continue;
+        }
+
         const billId = params.get("id");
         if (!billId) {
           await replyLineMessage(replyToken, [{ type: "text", text: "❌ 缺少帳單識別碼。" }]);
@@ -1397,11 +1418,13 @@ serve(async (req: Request) => {
         const isToggleRole = /^(切換身分|身分切換|切換模式|切換)$/i.test(text.replace(/\\s+/g, ''));
 
         if (isSwitchToLandlord || (isToggleRole && !isLandlordRole)) {
+          // 嚴格拒絕非房東切換
           if (!userCtx.isLandlord) {
+            await linkUserRichMenu(lineUserId, TENANT_RICH_MENU_ID);
             await replyLineMessage(replyToken, [
               {
                 type: "text",
-                text: "⚠️ 您目前尚未具備房東管理權限。\\n\\n若您已持有出租物業，請登入網頁後台填寫房東申請資料，審核通過後即可開啟完整經營功能！",
+                text: \`⚠️ 權限不足：您的帳號（電話：\${userCtx?.cleanPhone || '未登錄'}）為【租客身分】，未具備房東管理權限。\\n\\n若您已持有出租物業，請先登入網頁後台填寫房東申請資料，審核通過後方可切換為房東模式！\`,
                 quickReply: buildSmartQuickReply("tenant")
               }
             ]);
@@ -1439,8 +1462,22 @@ serve(async (req: Request) => {
           continue;
         }
 
-        // 2. 房東功能分支
-        if (isLandlordRole) {
+        // 2. 房東功能分支 (嚴格限房東身分，非房東直接拒絕)
+        const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單)$/.test(text) ||
+          text.includes("經營") || text.includes("待核") || text.includes("名冊");
+
+        if (isLandlordCommand && !userCtx.isLandlord) {
+          await replyLineMessage(replyToken, [
+            {
+              type: "text",
+              text: "⚠️ 權限不足：您目前為【租客身分】，無法查閱物業經營管理資料。\\n\\n如需查看您的租約與帳單，請使用下方租客快捷功能：",
+              quickReply: buildSmartQuickReply("tenant")
+            }
+          ]);
+          continue;
+        }
+
+        if (isLandlordRole && userCtx.isLandlord) {
           // 2.1 經營概況
           if (text.includes("概況") || text.includes("統計") || text.includes("儀表板") || text.includes("經營") || text === "1") {
             const props = userCtx.landlordProperties;
@@ -1461,7 +1498,6 @@ serve(async (req: Request) => {
               const allBills = bills || [];
               pendingAuditBills = allBills.filter((b: any) => b.status === "tenant_submitted" || b.status === "pending_approval");
 
-              // 計算當前月份已繳總金額
               const currentMonthPrefix = new Date().toISOString().substring(0, 7);
               monthlyCollectedRent = allBills
                 .filter((b: any) => b.status === "paid" && (b.paid_date?.startsWith(currentMonthPrefix) || b.due_date?.startsWith(currentMonthPrefix)))
@@ -1520,7 +1556,7 @@ serve(async (req: Request) => {
           }
         }
 
-        // 3. 租客功能分支 (或房東模式下查詢租客個人相關合約)
+        // 3. 租客功能分支
         const leaseIds = userCtx.leases.map((l: any) => l.id);
 
         // 3.1 繳款回報：末五碼或現金
@@ -1711,7 +1747,7 @@ serve(async (req: Request) => {
         }
 
         // 4. 預設導覽
-        if (isLandlordRole) {
+        if (isLandlordRole && userCtx.isLandlord) {
           const props = userCtx.landlordProperties;
           const leases = userCtx.landlordManagedLeases;
           const leaseIds = leases.map((l: any) => l.id);
