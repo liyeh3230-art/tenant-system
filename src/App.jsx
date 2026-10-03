@@ -2618,7 +2618,7 @@ export default function App() {
       return;
     }
     if (!addr || addr.length < 5) {
-      showToast('請填寫完整通訊聯絡地址！', 'warning');
+      showToast('請填寫完整租賃地址！', 'warning');
       return;
     }
 
@@ -5818,7 +5818,7 @@ export default function App() {
                             </div>
                             <div>
                               <label className="block text-xs font-bold text-slate-700 mb-1">
-                                通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                                租賃地址 <span className="text-rose-500">*</span>
                               </label>
                               <input
                                 type="text"
@@ -11382,7 +11382,7 @@ export default function App() {
                         isRejectedLandlord ? 'text-rose-800' : 'text-indigo-800'
                       }`}>
                         {isRejectedLandlord
-                          ? '您先前的房東申請未通過。系統已為您自動載入先前填寫之資訊，請檢查並修正有誤的身分證/統編或通訊地址等資料後重新送審。'
+                          ? '您先前的房東申請未通過。系統已為您自動載入先前填寫之資訊，請檢查並修正有誤的身分證/統編或租賃地址等資料後重新送審。'
                           : '為維護全平台租賃安全與租客權益，房東身分需填寫基本查核資料，送出後由平台管理員確認後方可開通完整房東權限。'}
                       </p>
                     </div>
@@ -11454,7 +11454,7 @@ export default function App() {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                        租賃地址 <span className="text-rose-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -11466,32 +11466,17 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          公司抬頭 / 物業品牌名稱 (選填)
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="例如：安居物業管理 或 個人"
-                          value={landlordAppForm.companyName}
-                          onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          預設收款銀行機構與帳號 (選填)
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="例如：玉山銀行(808) 1234567890"
-                          value={landlordAppForm.bankAccount}
-                          onChange={(e) => setLandlordAppForm(prev => ({ ...prev, bankAccount: e.target.value }))}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        公司抬頭 / 物業品牌名稱 (選填)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="例如：安居物業管理 或 個人"
+                        value={landlordAppForm.companyName}
+                        onChange={(e) => setLandlordAppForm(prev => ({ ...prev, companyName: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-semibold"
+                      />
                     </div>
 
                     <div>
@@ -11500,7 +11485,6 @@ export default function App() {
                       </label>
                       <textarea
                         rows="2"
-                        placeholder="可填寫管理物業座落區域或額外說明..."
                         value={landlordAppForm.notes}
                         onChange={(e) => setLandlordAppForm(prev => ({ ...prev, notes: e.target.value }))}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white font-medium"
@@ -11780,7 +11764,7 @@ export default function App() {
 
                             <div>
                               <label className="block text-xs font-bold text-slate-700 mb-1">
-                                通訊聯絡地址 / 戶籍地址 <span className="text-rose-500">*</span>
+                                租賃地址 <span className="text-rose-500">*</span>
                               </label>
                               <input
                                 type="text"
