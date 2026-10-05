@@ -544,32 +544,77 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
 
     const bodyContents: any[] = [];
 
-    // 第一頁顯示累計已繳總額概況看板
+    // 第一頁顯示累計已繳總額概況看板（上下雙層排版，金額獨立整行寬敞展示，永不截斷）
     if (isFirstPage) {
       bodyContents.push(
         {
           type: "box",
-          layout: "horizontal",
-          justifyContent: "space-between",
-          alignItems: "center",
+          layout: "vertical",
           backgroundColor: "#ECFDF5",
-          cornerRadius: "10px",
-          paddingAll: "12px",
+          cornerRadius: "12px",
+          paddingAll: "14px",
           contents: [
             {
               type: "box",
-              layout: "vertical",
+              layout: "horizontal",
+              justifyContent: "space-between",
+              alignItems: "center",
               contents: [
-                { type: "text", text: "累計已核銷總額", size: "xxs", color: "#065F46", weight: "bold" },
-                { type: "text", text: `NT$ ${totalPaid.toLocaleString()}`, size: "xl", weight: "bold", color: "#047857", margin: "xs" }
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  alignItems: "center",
+                  spacing: "xs",
+                  contents: [
+                    { type: "text", text: "📊", size: "xs", flex: 0 },
+                    { type: "text", text: "累計已核銷總額", size: "xs", color: "#065F46", weight: "bold", flex: 0 }
+                  ]
+                },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  backgroundColor: "#D1FAE5",
+                  cornerRadius: "10px",
+                  paddingStart: "8px",
+                  paddingEnd: "8px",
+                  paddingTop: "3px",
+                  paddingBottom: "3px",
+                  contents: [
+                    {
+                      type: "text",
+                      text: `共 ${sortedPayments.length} 筆已結清`,
+                      size: "xxs",
+                      color: "#047857",
+                      weight: "bold"
+                    }
+                  ]
+                }
               ]
             },
             {
-              type: "text",
-              text: `共 ${sortedPayments.length} 筆已結清`,
-              size: "xs",
-              color: "#059669",
-              weight: "bold"
+              type: "box",
+              layout: "baseline",
+              margin: "sm",
+              spacing: "xs",
+              contents: [
+                {
+                  type: "text",
+                  text: "NT$",
+                  size: "sm",
+                  color: "#047857",
+                  weight: "bold",
+                  flex: 0
+                },
+                {
+                  type: "text",
+                  text: totalPaid.toLocaleString(),
+                  size: "xxl",
+                  color: "#047857",
+                  weight: "bold",
+                  wrap: true,
+                  flex: 1
+                }
+              ]
             }
           ]
         },
