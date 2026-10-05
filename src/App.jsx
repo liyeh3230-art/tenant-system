@@ -1055,7 +1055,11 @@ export default function App() {
           })));
         }
 
-        const { data: paymentData } = await supabase.from('payments').select('*').is('deleted_at', null);
+        const { data: paymentData } = await supabase
+          .from('payments')
+          .select('*')
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false });
         if (paymentData) {
           setPayments(paymentData.map(p => ({
             id: p.id,
@@ -1070,7 +1074,9 @@ export default function App() {
             paidDate: p.paid_date,
             paymentMethod: p.payment_method,
             transferLast5: p.transfer_last5,
-            note: p.note
+            note: p.note,
+            createdAt: p.created_at,
+            updatedAt: p.updated_at
           })));
         }
 
@@ -3678,6 +3684,39 @@ export default function App() {
     (activeLandlordId && l.landlordId === activeLandlordId) ||
     (currentLandlord && l.landlordId === currentLandlord.id)
   );
+  // 輔助函式：取得帳單排序時間戳記（支援已入帳依確認時間為準、待繳帳單依開立時間為準）
+  const getPaymentSortTimestamp = (p) => {
+    if (!p) return 0;
+    // 若為已結清/已付款 (paid)，依確認入帳時間 (updatedAt / updated_at / paidDate) 遞減，最後確認的排在最上面
+    if (p.status === 'paid') {
+      const tStr = p.updatedAt || p.updated_at || p.paidDate || p.paid_date;
+      if (tStr) {
+        const t = new Date(tStr).getTime();
+        if (!isNaN(t) && t > 0) return t;
+      }
+    }
+    // 若為待審核 (tenant_submitted / pending_approval)，依回報時間 (updatedAt / updated_at / createdAt)
+    if (p.status === 'pending_approval' || p.status === 'tenant_submitted') {
+      const tStr = p.updatedAt || p.updated_at || p.paidDate || p.paid_date || p.createdAt || p.created_at;
+      if (tStr) {
+        const t = new Date(tStr).getTime();
+        if (!isNaN(t) && t > 0) return t;
+      }
+    }
+    // 待繳帳單或開立帳單，依開立時間 (createdAt / created_at / id Timestamp) 遞減，最後開立的在最上面
+    const cStr = p.createdAt || p.created_at;
+    if (cStr) {
+      const t = new Date(cStr).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    const idMatch = String(p.id || '').match(/(?:BILL|PAY)(\d{10,})/i);
+    if (idMatch && idMatch[1]) {
+      const t = parseInt(idMatch[1], 10);
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return new Date(p.dueDate || p.due_date || 0).getTime() || 0;
+  };
+
   const landlordLeaseIds = landlordLeases.map(l => l.id);
   const landlordPayments = payments.filter(p =>
     role === 'admin' ||
@@ -3686,6 +3725,7 @@ export default function App() {
 
   const markAsPaid = async (paymentId) => {
     const today = new Date().toISOString().split('T')[0];
+    const nowIso = new Date().toISOString();
     try {
       await transitionPaymentStatus({
         paymentId,
@@ -3693,7 +3733,7 @@ export default function App() {
         metadata: { operator: 'landlord' }
       });
       setPayments(payments.map(p =>
-        p.id === paymentId ? { ...p, status: 'paid', paidDate: today } : p
+        p.id === paymentId ? { ...p, status: 'paid', paidDate: today, updatedAt: nowIso } : p
       ));
       showToast('已確認收款並標記為「已付款」', 'success');
     } catch (err) {
@@ -5008,6 +5048,7 @@ export default function App() {
       cash: '現金交付'
     };
 
+    const nowIso = new Date().toISOString();
     const newPayment = {
       id: `BILL${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       leaseId: targetLease.id,
@@ -5022,7 +5063,9 @@ export default function App() {
       paymentMethod: isDirectlyPaid ? (methodNames[customBillPaymentMethod] || customBillPaymentMethod) : null,
       creatorRole: 'landlord',
       approvalStatus: 'approved',
-      note: customBillNote.trim() || ''
+      note: customBillNote.trim() || '',
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     try {
@@ -5044,6 +5087,8 @@ export default function App() {
         if (insertErr) throw insertErr;
         if (insertedRows && insertedRows[0]) {
           newPayment.id = insertedRows[0].id;
+          newPayment.createdAt = insertedRows[0].created_at || nowIso;
+          newPayment.updatedAt = insertedRows[0].updated_at || nowIso;
         }
 
         // 📲 觸發 LINE Messaging API 主動推播（若租客已綁定 LINE）
@@ -5286,6 +5331,7 @@ export default function App() {
           }
         });
 
+        const nowIso = new Date().toISOString();
         setPayments(payments.map(p => p.id === tenantReportTargetBill.id
           ? {
               ...p,
@@ -5294,11 +5340,13 @@ export default function App() {
               paymentMethod: methodNames[tenantReportMethod],
               transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
               note: tenantReportNote.trim() || p.note,
-              paidDate: tenantReportDate || new Date().toISOString().split('T')[0]
+              paidDate: tenantReportDate || nowIso.split('T')[0],
+              updatedAt: nowIso
             }
           : p));
       } else {
         // 情境 2：租客自行申報新費用（租金、押金保證金、水電費、管理費等），待房東核對確認後入帳
+        const nowIso = new Date().toISOString();
         const newPaymentId = `PAY${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         const newPayment = {
           id: newPaymentId,
@@ -5306,16 +5354,18 @@ export default function App() {
           tenantName: currentTenantLease.tenantName,
           propertyName: currentTenantProperty?.name || '租賃房源',
           amount: amt,
-          dueDate: tenantReportDate || new Date().toISOString().split('T')[0],
+          dueDate: tenantReportDate || nowIso.split('T')[0],
           status: 'pending_approval',
           approvalStatus: 'pending_approval',
-          paidDate: tenantReportDate || new Date().toISOString().split('T')[0],
+          paidDate: tenantReportDate || nowIso.split('T')[0],
           billType: tenantReportCategory,
           title: formatFeeItemName(tenantReportTitle, tenantReportCategory, tenantReportDate),
           paymentMethod: methodNames[tenantReportMethod],
           transferLast5: tenantReportMethod === 'bank' ? tenantReportTransferLast5 : null,
           creatorRole: 'tenant',
-          note: tenantReportNote.trim() || ''
+          note: tenantReportNote.trim() || '',
+          createdAt: nowIso,
+          updatedAt: nowIso
         };
 
         if (isSupabaseConfigured) {
@@ -5332,7 +5382,9 @@ export default function App() {
             title: newPayment.title,
             payment_method: newPayment.paymentMethod,
             transfer_last5: newPayment.transferLast5,
-            note: newPayment.note
+            note: newPayment.note,
+            created_at: nowIso,
+            updated_at: nowIso
           }).select();
 
           if (insertErr) {
@@ -5669,7 +5721,7 @@ export default function App() {
         : normalizedCategory(payment.billType) === filterPaymentCategory;
 
     return matchesSearch && matchesStatus && matchesProperty && matchesCategory;
-  });
+  }).sort((a, b) => getPaymentSortTimestamp(b) - getPaymentSortTimestamp(a));
 
   const openViewLease = (lease) => {
     setViewingLease(lease);
@@ -7118,7 +7170,9 @@ export default function App() {
             {/* LANDLORD LOGGED IN DASHBOARD & PAYMENTS HUB */}
             {role === 'admin' && currentLandlordId && (activeTab === 'dashboard' || activeTab === 'payments' || !['properties', 'advertise', 'leases', 'history'].includes(activeTab)) && (() => {
               // Financial & category calculations (純租金收入計算：排除押金、水電費、管理費、其他)
-              const pendingTenantReports = landlordPayments.filter(p => p.status === 'pending_approval' || p.status === 'tenant_submitted');
+              const pendingTenantReports = landlordPayments
+                .filter(p => p.status === 'pending_approval' || p.status === 'tenant_submitted')
+                .sort((a, b) => getPaymentSortTimestamp(b) - getPaymentSortTimestamp(a));
               const activeLandlordLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active');
               const activeLeaseIds = activeLandlordLeases.map(l => l.id);
 
@@ -9179,6 +9233,12 @@ export default function App() {
                               });
 
                               const sortedTenantBills = [...displayedTenantBills].sort((a, b) => {
+                                if (filterTenantPaymentStatus === 'paid') {
+                                  return getPaymentSortTimestamp(b) - getPaymentSortTimestamp(a);
+                                }
+                                if (filterTenantPaymentStatus === 'pending') {
+                                  return getPaymentSortTimestamp(b) - getPaymentSortTimestamp(a);
+                                }
                                 const priority = {
                                   overdue: 1,
                                   pending: 2,
@@ -9190,7 +9250,7 @@ export default function App() {
                                 };
                                 const priDiff = (priority[a.status] || 99) - (priority[b.status] || 99);
                                 if (priDiff !== 0) return priDiff;
-                                return new Date(b.dueDate || b.paidDate || 0) - new Date(a.dueDate || a.paidDate || 0);
+                                return getPaymentSortTimestamp(b) - getPaymentSortTimestamp(a);
                               });
 
                               const renderStatusBadge = (status) => {

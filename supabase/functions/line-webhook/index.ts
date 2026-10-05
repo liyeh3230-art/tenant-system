@@ -523,14 +523,35 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
     };
   }
 
-  // 排序：最新繳納或最新建立的款項排在最前面
+  // 排序：依確認入帳時間 (updated_at) 遞減，最後確認的在最上面
+  const getPaidSortTimestamp = (item: any) => {
+    if (item.updated_at) {
+      const t = new Date(item.updated_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (item.paid_date) {
+      const t = new Date(item.paid_date).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (item.created_at) {
+      const t = new Date(item.created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (typeof item.id === 'string') {
+      const digits = item.id.replace(/\D/g, '');
+      if (digits.length >= 10) {
+        const t = parseInt(digits.substring(0, 13), 10);
+        if (!isNaN(t) && t > 1000000000000) return t;
+      }
+    }
+    return 0;
+  };
+
   const sortedPayments = [...payments].sort((a, b) => {
-    const dateA = a.paid_date || a.due_date || a.created_at || "";
-    const dateB = b.paid_date || b.due_date || b.created_at || "";
-    if (dateA !== dateB) return dateB.localeCompare(dateA);
-    const timeA = new Date(a.created_at || 0).getTime();
-    const timeB = new Date(b.created_at || 0).getTime();
-    return timeB - timeA;
+    const timeA = getPaidSortTimestamp(a);
+    const timeB = getPaidSortTimestamp(b);
+    if (timeA !== timeB) return timeB - timeA;
+    return String(b.id || "").localeCompare(String(a.id || ""));
   });
 
   const ITEMS_PER_PAGE = 5; // 每頁 5 筆，簡約收據直覺清單呈現，一目了然
@@ -857,17 +878,34 @@ function buildPendingBillsFlex(payments: any[], profile: any) {
     };
   }
 
-  // 1. 統計待繳總額並排序（未回報者依到期日由近到遠優先，已回報核帳中放後方）
+  // 1. 統計待繳總額並排序（依開立時間遞減排序，最後開立的排在最上面）
   const totalPending = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const todayStr = new Date().toISOString().split("T")[0];
 
+  const getPendingSortTimestamp = (item: any) => {
+    if (item.created_at) {
+      const t = new Date(item.created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (typeof item.id === 'string') {
+      const digits = item.id.replace(/\D/g, '');
+      if (digits.length >= 10) {
+        const t = parseInt(digits.substring(0, 13), 10);
+        if (!isNaN(t) && t > 1000000000000) return t;
+      }
+    }
+    if (item.due_date) {
+      const t = new Date(item.due_date).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
+
   const sortedPayments = [...payments].sort((a, b) => {
-    const isSubA = (a.status === "tenant_submitted" || a.status === "pending_approval");
-    const isSubB = (b.status === "tenant_submitted" || b.status === "pending_approval");
-    if (isSubA !== isSubB) return isSubA ? 1 : -1;
-    const dueA = a.due_date || "9999-12-31";
-    const dueB = b.due_date || "9999-12-31";
-    return dueA.localeCompare(dueB);
+    const timeA = getPendingSortTimestamp(a);
+    const timeB = getPendingSortTimestamp(b);
+    if (timeA !== timeB) return timeB - timeA;
+    return String(b.id || "").localeCompare(String(a.id || ""));
   });
 
   // 每頁 2 筆，卡片更寬敞大器，保證手機全螢幕瀏覽不被截斷
@@ -2442,8 +2480,28 @@ function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
     };
   }
 
+  // 排序：依租客回報時間 (updated_at) 遞減，最後回報的在最上面
+  const getAuditSortTimestamp = (item: any) => {
+    if (item.updated_at) {
+      const t = new Date(item.updated_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (item.created_at) {
+      const t = new Date(item.created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
+
+  const sortedAuditBills = [...pendingPayments].sort((a, b) => {
+    const timeA = getAuditSortTimestamp(a);
+    const timeB = getAuditSortTimestamp(b);
+    if (timeA !== timeB) return timeB - timeA;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
+
   // Build carousel bubbles (max 10 bills)
-  const bubbles = pendingPayments.slice(0, 10).map((bill) => {
+  const bubbles = sortedAuditBills.slice(0, 10).map((bill) => {
     const title = getPaymentTitle(bill);
     const amt = Number(bill.amount || 0).toLocaleString();
     const isCash = bill.payment_method === "現金交付";
@@ -3655,7 +3713,7 @@ serve(async (req: Request) => {
                 .in("lease_id", leaseIds)
                 .in("status", ["tenant_submitted", "pending_approval"])
                 .is("deleted_at", null)
-                .order("due_date", { ascending: true });
+                .order("updated_at", { ascending: false });
               pendingPayments = pData || [];
             }
 
@@ -3827,7 +3885,7 @@ serve(async (req: Request) => {
             .select("*")
             .eq("status", "paid")
             .is("deleted_at", null)
-            .order("created_at", { ascending: false });
+            .order("updated_at", { ascending: false });
 
           if (leaseIds.length > 0) {
             query = query.in("lease_id", leaseIds);
@@ -3854,7 +3912,7 @@ serve(async (req: Request) => {
               .in("lease_id", leaseIds)
               .in("status", ["pending", "pending_approval", "tenant_submitted"])
               .is("deleted_at", null)
-              .order("due_date", { ascending: true });
+              .order("created_at", { ascending: false });
             pendingPayments = pData || [];
           }
 
