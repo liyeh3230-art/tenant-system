@@ -799,11 +799,15 @@ serve(async (req: Request) => {
     }
 
     if (targetProfileId) {
-      const { data: bindings } = await supabase
+      let bQuery = supabase
         .from("line_bindings")
-        .select("line_user_id, status")
-        .eq("tenant_id", targetProfileId)
-        .eq("status", "active");
+        .select("line_user_id, status");
+      if (cleanPhone) {
+        bQuery = bQuery.or(`tenant_id.eq.${targetProfileId},tenant_id.eq.usr_${cleanPhone}`);
+      } else {
+        bQuery = bQuery.eq("tenant_id", targetProfileId);
+      }
+      const { data: bindings } = await bQuery.like("status", "active%");
 
       if (bindings && bindings.length > 0) {
         // Find binding that is a genuine LINE User ID (starts with 'U' and not 'fb_')
@@ -819,11 +823,15 @@ serve(async (req: Request) => {
       const { data: allActiveBindings } = await supabase
         .from("line_bindings")
         .select("line_user_id, tenant_id")
-        .eq("status", "active")
+        .like("status", "active%")
         .like("line_user_id", "U%");
 
       if (allActiveBindings && allActiveBindings.length > 0) {
         for (const b of allActiveBindings) {
+          if (b.tenant_id === `usr_${cleanPhone}` || b.tenant_id === cleanPhone) {
+            lineUserId = b.line_user_id;
+            break;
+          }
           const { data: p } = await supabase
             .from("profiles")
             .select("phone")

@@ -2843,7 +2843,7 @@ export default function App() {
       }
 
       if (!matchedProfile) {
-        const { data: bindings } = await supabase.from('line_bindings').select('*').eq('status', 'active');
+        const { data: bindings } = await supabase.from('line_bindings').select('*').like('status', 'active%');
         const found = (bindings || []).find(b => b.line_user_id === cleanInput || b.tenant_id === cleanInput);
         if (found) {
           const { data: profs } = await supabase.from('profiles').select('*').eq('id', found.tenant_id);
@@ -4857,6 +4857,47 @@ export default function App() {
         }
         return p;
       }));
+      // 📲 自動觸發 LINE 費用入帳收據憑證推播
+      const targetLease = leases.find(l => l.id === recordingPayment.leaseId || l.id === recordingPayment.lease_id);
+      const targetProp = properties.find(p => p.id === (targetLease?.propertyId || targetLease?.property_id));
+      try {
+        if (isSupabaseConfigured) {
+          supabase.functions.invoke('line-push', {
+            body: {
+              action: 'push_bill',
+              payment: {
+                id: recordingPayment.id,
+                lease_id: recordingPayment.leaseId || recordingPayment.lease_id,
+                amount: recordingPayment.amount,
+                bill_type: recordingPayment.billType || recordingPayment.bill_type,
+                title: recordingPayment.title,
+                due_date: recordingPayment.dueDate || recordingPayment.due_date,
+                status: 'paid',
+                paid_date: paidDateVal,
+                payment_method: finalMethod,
+                note: recordPaymentNote
+              },
+              lease: targetLease ? {
+                id: targetLease.id,
+                tenantName: targetLease.tenantName || targetLease.tenant_name,
+                phone: targetLease.phone,
+                landlordId: targetLease.landlordId || targetLease.landlord_id || currentLandlordId,
+                propertyId: targetLease.propertyId || targetLease.property_id
+              } : null,
+              property: targetProp ? { name: targetProp.name } : null
+            }
+          }).then(({ data: pushRes, error: pushErr }) => {
+            if (pushErr) {
+              console.warn('LINE push receipt warning:', pushErr);
+            } else if (pushRes?.pushed) {
+              showToast(`📲 已自動發送 LINE 入帳收據通知至「${recordingPayment.tenantName}」的手機！`, 'success');
+            }
+          });
+        }
+      } catch (pushEx) {
+        console.warn('Invoke line-push receipt failed:', pushEx);
+      }
+
       setActiveModal(null);
       setRecordingPayment(null);
       showToast(`已確認「${recordingPayment.tenantName}」的帳單收款入帳！`, 'success');
@@ -4865,7 +4906,47 @@ export default function App() {
     }
   };
 
-  const handleSendPaymentReminder = (payment) => {
+  const handleSendPaymentReminder = async (payment) => {
+    const targetLease = leases.find(l => l.id === payment.leaseId || l.id === payment.lease_id);
+    const targetProp = properties.find(p => p.id === (targetLease?.propertyId || targetLease?.property_id));
+    try {
+      if (isSupabaseConfigured) {
+        supabase.functions.invoke('line-push', {
+          body: {
+            action: 'push_bill',
+            payment: {
+              id: payment.id,
+              lease_id: payment.leaseId || payment.lease_id,
+              amount: payment.amount,
+              bill_type: payment.billType || payment.bill_type,
+              title: payment.title,
+              due_date: payment.dueDate || payment.due_date,
+              status: payment.status || 'pending',
+              paid_date: payment.paidDate || payment.paid_date,
+              note: payment.note
+            },
+            lease: targetLease ? {
+              id: targetLease.id,
+              tenantName: targetLease.tenantName || targetLease.tenant_name,
+              phone: targetLease.phone,
+              landlordId: targetLease.landlordId || targetLease.landlord_id || currentLandlordId,
+              propertyId: targetLease.propertyId || targetLease.property_id
+            } : null,
+            property: targetProp ? { name: targetProp.name } : null
+          }
+        }).then(({ data: pushRes, error: pushErr }) => {
+          if (pushErr) {
+            console.warn('LINE push reminder warning:', pushErr);
+          } else if (pushRes?.pushed) {
+            showToast(`📲 已向租客「${payment.tenantName}」成功發送 LINE 繳費提醒！`, 'success');
+          } else if (pushRes?.reason === 'tenant_not_bound') {
+            showToast(`租客「${payment.tenantName}」尚未綁定 LINE，無法接收推播提醒。`, 'warning');
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Invoke line-push reminder failed:', e);
+    }
     showToast(`📢 已向租客「${payment.tenantName}」發送繳費提醒通知！`, 'success');
   };
 
@@ -5304,6 +5385,47 @@ export default function App() {
         entityId: paymentId,
         newData: { amount: target.amount, status: 'paid' }
       });
+
+      // 📲 自動觸發 LINE 費用入帳收據憑證推播
+      const targetLease = leases.find(l => l.id === target.leaseId || l.id === target.lease_id);
+      const targetProp = properties.find(p => p.id === (targetLease?.propertyId || targetLease?.property_id));
+      try {
+        if (isSupabaseConfigured) {
+          supabase.functions.invoke('line-push', {
+            body: {
+              action: 'push_bill',
+              payment: {
+                id: target.id,
+                lease_id: target.leaseId || target.lease_id,
+                amount: target.amount,
+                bill_type: target.billType || target.bill_type,
+                title: target.title,
+                due_date: target.dueDate || target.due_date,
+                status: 'paid',
+                paid_date: new Date().toISOString().split('T')[0],
+                payment_method: target.paymentMethod || target.payment_method,
+                note: target.note
+              },
+              lease: targetLease ? {
+                id: targetLease.id,
+                tenantName: targetLease.tenantName || targetLease.tenant_name,
+                phone: targetLease.phone,
+                landlordId: targetLease.landlordId || targetLease.landlord_id || currentLandlordId,
+                propertyId: targetLease.propertyId || targetLease.property_id
+              } : null,
+              property: targetProp ? { name: targetProp.name } : null
+            }
+          }).then(({ data: pushRes, error: pushErr }) => {
+            if (pushErr) {
+              console.warn('LINE push receipt warning:', pushErr);
+            } else if (pushRes?.pushed) {
+              showToast(`📲 已自動發送 LINE 入帳收據通知至「${target.tenantName}」的手機！`, 'success');
+            }
+          });
+        }
+      } catch (pushEx) {
+        console.warn('Invoke line-push receipt failed:', pushEx);
+      }
 
       const cat = getCategoryInfo(target.billType);
       const itemTitle = formatFeeItemName(target.title, target.billType, target.dueDate || target.paidDate);
