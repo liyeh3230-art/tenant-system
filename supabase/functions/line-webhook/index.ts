@@ -2072,11 +2072,7 @@ function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = fal
         },
         {
           type: "action",
-          action: { type: "message", label: "🏠 房源現況", text: "房源現況" }
-        },
-        {
-          type: "action",
-          action: { type: "message", label: "📋 租客名冊", text: "租客名冊" }
+          action: { type: "message", label: "📑 當前租約", text: "當前租約" }
         },
         {
           type: "action",
@@ -2500,7 +2496,7 @@ function buildLandlordDashboardFlex(
             type: "button",
             style: "secondary",
             height: "sm",
-            action: { type: "message", label: "🏠 房源現況", text: "房源現況" }
+            action: { type: "message", label: "📑 當前租約", text: "當前租約" }
           }
         ]
       }
@@ -2554,7 +2550,7 @@ function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
               type: "button",
               style: "secondary",
               height: "sm",
-              action: { type: "message", label: "🏠 房源現況", text: "房源現況" }
+              action: { type: "message", label: "📑 當前租約", text: "當前租約" }
             }
           ]
         }
@@ -2685,129 +2681,12 @@ function buildLandlordAuditBillsFlex(pendingPayments: any[]) {
   };
 }
 
-// 5. 旗下房源現況 Flex Message
-function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
-  if (!properties || properties.length === 0) {
-    return {
-      type: "flex",
-      altText: "🏠 目前尚無登錄之房源",
-      contents: {
-        type: "bubble",
-        size: "mega",
-        header: {
-          type: "box",
-          layout: "vertical",
-          backgroundColor: "#0F172A",
-          paddingAll: "18px",
-          contents: [
-            { type: "text", text: "智慧租屋 · 房源現況", color: "#94A3B8", size: "xs", weight: "bold" },
-            { type: "text", text: "尚無房源資料", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
-          ]
-        },
-        body: {
-          type: "box",
-          layout: "vertical",
-          paddingAll: "20px",
-          contents: [
-            { type: "text", text: "您目前尚未在系統登錄出租物業房源，請至管理後台新增。", size: "sm", color: "#64748B", wrap: true }
-          ]
-        }
-      },
-      quickReply: buildSmartQuickReply("landlord", true)
-    };
-  }
-
-  const bubbles = properties.slice(0, 10).map((prop) => {
-    const activeLease = leases.find((l) => l.property_id === prop.id && l.status === "active");
-    const isRented = !!activeLease;
-    const rentAmt = Number(prop.rent || activeLease?.monthly_rent || 0).toLocaleString();
-
-    return {
-      type: "bubble",
-      size: "mega",
-      header: {
-        type: "box",
-        layout: "vertical",
-        backgroundColor: isRented ? "#0F172A" : "#1E293B",
-        paddingAll: "16px",
-        contents: [
-          {
-            type: "text",
-            text: isRented ? "🟢 已出租履行中" : "🟡 空置招租中",
-            color: isRented ? "#A7F3D0" : "#FDE68A",
-            size: "xs",
-            weight: "bold"
-          },
-          {
-            type: "text",
-            text: `${prop.name || "房號"} · NT$ ${rentAmt}/月`,
-            color: "#FFFFFF",
-            size: "lg",
-            weight: "bold",
-            margin: "xs"
-          }
-        ]
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "16px",
-        spacing: "sm",
-        contents: [
-          {
-            type: "box",
-            layout: "horizontal",
-            contents: [
-              { type: "text", text: "📍 物業地址", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: prop.address || "未填地址", size: "xs", color: "#1E293B", weight: "bold", wrap: true, flex: 7 }
-            ]
-          },
-          ...(isRented ? [
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                { type: "text", text: "👤 當前租客", size: "xs", color: "#64748B", flex: 3 },
-                { type: "text", text: `${activeLease.tenant_name || "租客"} (${activeLease.phone || ""})`, size: "xs", color: "#059669", weight: "bold", flex: 7 }
-              ]
-            },
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                { type: "text", text: "🗓️ 合約到期", size: "xs", color: "#64748B", flex: 3 },
-                { type: "text", text: activeLease.end_date || "未載", size: "xs", color: "#D97706", weight: "bold", flex: 7 }
-              ]
-            }
-          ] : [
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                { type: "text", text: "✨ 招租現況", size: "xs", color: "#64748B", flex: 3 },
-                { type: "text", text: "隨時可起租預約", size: "xs", color: "#D97706", weight: "bold", flex: 7 }
-              ]
-            }
-          ])
-        ]
-      }
-    };
-  });
-
-  return {
-    type: "flex",
-    altText: `🏠 旗下房源現況 (共 ${properties.length} 間)`,
-    contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
-    quickReply: buildSmartQuickReply("landlord", true)
-  };
-}
-
-// 6. 租客名冊 Flex Message
-function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
+// 5. 房東「當前租約」Flex Message (合併原「房源現況」與「租客名冊」)
+function buildLandlordCurrentLeasesFlex(leases: any[], properties: any[], payments: any[] = []) {
   if (!leases || leases.length === 0) {
     return {
       type: "flex",
-      altText: "📋 目前尚無進行中合約",
+      altText: "📑 智慧租屋 · 當前租約 (目前無進行中租約)",
       contents: {
         type: "bubble",
         size: "mega",
@@ -2817,8 +2696,8 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
           backgroundColor: "#0F172A",
           paddingAll: "18px",
           contents: [
-            { type: "text", text: "智慧租屋 · 租客名冊", color: "#94A3B8", size: "xs", weight: "bold" },
-            { type: "text", text: "目前無簽約租客", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
+            { type: "text", text: "智慧租屋 · 租賃合約管理", color: "#94A3B8", size: "xs", weight: "bold" },
+            { type: "text", text: "📑 目前無進行中租約", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
           ]
         },
         body: {
@@ -2826,7 +2705,29 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
           layout: "vertical",
           paddingAll: "20px",
           contents: [
-            { type: "text", text: "目前所有房源皆為空置或尚未登錄生效中之合約。", size: "sm", color: "#64748B" }
+            { type: "text", text: "您名下目前沒有生效或履約中之租約資料。", size: "sm", color: "#64748B", wrap: true },
+            { type: "text", text: "當您與租客建立合約並生效後，系統將在此呈現最新租約、押租金與收租進度。", size: "xs", color: "#94A3B8", margin: "md", wrap: true }
+          ]
+        },
+        footer: {
+          type: "box",
+          layout: "horizontal",
+          spacing: "sm",
+          paddingAll: "14px",
+          contents: [
+            {
+              type: "button",
+              style: "primary",
+              color: "#4F46E5",
+              height: "sm",
+              action: { type: "message", label: "📊 經營概況", text: "經營概況" }
+            },
+            {
+              type: "button",
+              style: "secondary",
+              height: "sm",
+              action: { type: "message", label: "⏳ 待核帳單", text: "待核帳單" }
+            }
           ]
         }
       },
@@ -2836,10 +2737,33 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
 
   const bubbles = leases.slice(0, 10).map((l) => {
     const prop = properties.find((p) => p.id === l.property_id);
+    const propName = prop?.name || l.property_name || "租賃房源";
+    const propAddress = prop?.address || "未載明地址";
+
     const duration = calculateContractDuration(l.start_date, l.end_date);
-    const today = new Date();
-    const dEnd = new Date(l.end_date);
-    const daysRemaining = Math.max(0, Math.round((dEnd.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+    const totalContractRent = (l.total_contract_rent && Number(l.total_contract_rent) > 0)
+      ? Number(l.total_contract_rent)
+      : (Number(l.monthly_rent || 0) * (duration.months > 0 ? duration.months : 1));
+
+    const leasePaidRent = (payments || [])
+      .filter((p: any) => p.lease_id === l.id && p.status === "paid" && p.bill_type === "rent")
+      .reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+    const leaseRemainingRent = Math.max(0, totalContractRent - leasePaidRent);
+
+    const tenantName = l.tenant_name || "未填姓名";
+    const tenantPhone = l.phone || "未填電話";
+
+    const rawCoName = String(l.co_tenant_name || "").trim();
+    const rawCoPhone = String(l.co_phone || "").trim();
+    const hasCoTenant = !!rawCoName && rawCoName !== "null" && rawCoName !== "undefined" && rawCoName !== "無" && rawCoName !== "無同住人";
+    const coTenantDisplay = hasCoTenant
+      ? `${rawCoName}${rawCoPhone && rawCoPhone !== "null" && rawCoPhone !== "無" ? ` (${rawCoPhone})` : ""}`
+      : "";
+
+    const depositStr = Number(l.deposit || 0).toLocaleString();
+    const monthlyStr = Number(l.monthly_rent || 0).toLocaleString();
+    const remainingStr = leaseRemainingRent.toLocaleString();
+    const totalStr = totalContractRent.toLocaleString();
 
     return {
       type: "bubble",
@@ -2847,49 +2771,120 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: "#1E293B",
+        backgroundColor: "#0F172A",
         paddingAll: "16px",
         contents: [
-          { type: "text", text: `房號：${prop?.name || '承租房源'}`, color: "#38BDF8", size: "xs", weight: "bold" },
-          { type: "text", text: l.tenant_name || "承租人", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: "#059669",
+                cornerRadius: "4px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                contents: [
+                  { type: "text", text: "● 租賃中", size: "xxs", color: "#FFFFFF", weight: "bold" }
+                ]
+              }
+            ]
+          },
+          {
+            type: "text",
+            text: `房源：${propName}`,
+            color: "#FFFFFF",
+            size: "lg",
+            weight: "bold",
+            margin: "sm",
+            wrap: true
+          },
+          {
+            type: "text",
+            text: `租賃地址：${propAddress}`,
+            color: "#94A3B8",
+            size: "xs",
+            margin: "xs",
+            wrap: true
+          }
         ]
       },
       body: {
         type: "box",
         layout: "vertical",
         paddingAll: "16px",
-        spacing: "sm",
+        spacing: "md",
         contents: [
+          // 1. 承租人：姓名(電話)
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "📞 聯絡電話", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: l.phone || "未填電話", size: "xs", color: "#1E293B", weight: "bold", flex: 7 }
+              { type: "text", text: "承租人：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${tenantName} (${tenantPhone})`, size: "xs", color: "#0F172A", weight: "bold", wrap: true, flex: 7 }
             ]
           },
+          // 2. 同住人：姓名(電話) (無則不顯示)
+          ...(hasCoTenant ? [
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                { type: "text", text: "同住人：", size: "xs", color: "#64748B", flex: 3 },
+                { type: "text", text: coTenantDisplay, size: "xs", color: "#334155", weight: "bold", wrap: true, flex: 7 }
+              ]
+            }
+          ] : []),
+          // 3. 合約起迄：
           {
             type: "box",
             layout: "horizontal",
             contents: [
-              { type: "text", text: "🗓️ 合約起訖", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `${l.start_date} ~ ${l.end_date}`, size: "xs", color: "#334155", flex: 7 }
+              { type: "text", text: "合約起迄：", size: "xs", color: "#64748B", flex: 3 },
+              { type: "text", text: `${l.start_date || "未載"} ~ ${l.end_date || "未載"}`, size: "xs", color: "#334155", wrap: true, flex: 7 }
             ]
           },
+          // 分隔線
+          { type: "separator", margin: "xs" },
+          // 4. 押金與每月租金：
           {
             type: "box",
-            layout: "horizontal",
+            layout: "vertical",
+            spacing: "xs",
             contents: [
-              { type: "text", text: "⏳ 剩餘天數", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `倒數 ${daysRemaining} 天 (${duration.formatted})`, size: "xs", color: daysRemaining < 30 ? "#DC2626" : "#059669", weight: "bold", flex: 7 }
+              { type: "text", text: "押金與每月租金：", size: "xs", color: "#64748B" },
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: "#F8FAFC",
+                cornerRadius: "6px",
+                paddingAll: "8px",
+                contents: [
+                  { type: "text", text: `押金 NT$ ${depositStr}  |  月租 NT$ ${monthlyStr}`, size: "xs", color: "#4338CA", weight: "bold", wrap: true }
+                ]
+              }
             ]
           },
+          // 5. 合約尚餘租金／合約總租金：
           {
             type: "box",
-            layout: "horizontal",
+            layout: "vertical",
+            spacing: "xs",
             contents: [
-              { type: "text", text: "💵 每月租金", size: "xs", color: "#64748B", flex: 3 },
-              { type: "text", text: `NT$ ${Number(l.monthly_rent || 0).toLocaleString()}`, size: "xs", color: "#4F46E5", weight: "bold", flex: 7 }
+              { type: "text", text: "合約尚餘租金／合約總租金：", size: "xs", color: "#64748B" },
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: "#F8FAFC",
+                cornerRadius: "6px",
+                paddingAll: "8px",
+                contents: [
+                  { type: "text", text: `NT$ ${remainingStr} ／ NT$ ${totalStr}`, size: "xs", color: leaseRemainingRent > 0 ? "#D97706" : "#059669", weight: "bold", wrap: true }
+                ]
+              }
             ]
           }
         ]
@@ -2899,10 +2894,18 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
 
   return {
     type: "flex",
-    altText: `📋 旗下租客合約名冊 (共 ${leases.length} 戶)`,
+    altText: `📑 房東管理 · 當前租約 (共 ${leases.length} 間)`,
     contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
     quickReply: buildSmartQuickReply("landlord", true)
   };
+}
+
+// 相容別名函式
+function buildLandlordPropertiesFlex(properties: any[], leases: any[]) {
+  return buildLandlordCurrentLeasesFlex(leases, properties);
+}
+function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
+  return buildLandlordCurrentLeasesFlex(leases, properties);
 }
 
 // -----------------------------------------------------------------------------
@@ -3060,15 +3063,21 @@ async function getUserContext(supabase: any, lineUserId: string) {
     landlordProperties = props || [];
 
     const propIds = landlordProperties.map((p) => p.id);
-    if (propIds.length > 0) {
-      const { data: mLeases } = await supabase
-        .from("leases")
-        .select("*")
-        .in("property_id", propIds)
-        .eq("status", "active")
-        .is("deleted_at", null);
-      landlordManagedLeases = mLeases || [];
+    let lQuery = supabase
+      .from("leases")
+      .select("*")
+      .eq("status", "active")
+      .is("deleted_at", null);
+
+    if (propIds.length > 0 && landlordRecord.id) {
+      lQuery = lQuery.or(`property_id.in.(${propIds.join(",")}),landlord_id.eq.${landlordRecord.id}`);
+    } else if (propIds.length > 0) {
+      lQuery = lQuery.in("property_id", propIds);
+    } else if (landlordRecord.id) {
+      lQuery = lQuery.eq("landlord_id", landlordRecord.id);
     }
+    const { data: mLeases } = await lQuery;
+    landlordManagedLeases = mLeases || [];
   }
 
   // 7. 租客承租關聯房東資料（僅在存在生效租約時嚴格關聯該合約所屬房東）
@@ -3725,8 +3734,8 @@ serve(async (req: Request) => {
         }
 
         // 3. 房東功能分支 (嚴格限房東身分，非房東直接拒絕)
-        const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單)$/.test(text) ||
-          text.includes("經營") || text.includes("待核") || text.includes("名冊");
+        const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|當前租約|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單)$/.test(text) ||
+          text.includes("經營") || text.includes("待核") || text.includes("當前租約") || text.includes("名冊");
 
         if (isLandlordCommand && !userCtx.isLandlord) {
           await replyLineMessage(replyToken, [
@@ -3801,18 +3810,33 @@ serve(async (req: Request) => {
             continue;
           }
 
-          // 3.3 房源現況
-          if (text.includes("房源") || text.includes("房間") || text.includes("物業") || text === "3") {
-            await replyLineMessage(replyToken, [
-              buildLandlordPropertiesFlex(userCtx.landlordProperties, userCtx.landlordManagedLeases)
-            ]);
-            continue;
-          }
+          // 3.3 當前租約（合併原「房源現況」與「租客名冊」）
+          if (
+            text.includes("當前租約") || text.includes("租約") || text.includes("合約") ||
+            text.includes("房源") || text.includes("房間") || text.includes("物業") ||
+            text.includes("名冊") || text.includes("房客") || text.includes("名單") ||
+            text === "3" || text === "4"
+          ) {
+            const leases = userCtx.landlordManagedLeases;
+            const leaseIds = leases.map((l: any) => l.id);
+            let paidRentPayments: any[] = [];
+            if (leaseIds.length > 0) {
+              const { data: pData } = await supabase
+                .from("payments")
+                .select("lease_id, amount, status, bill_type")
+                .in("lease_id", leaseIds)
+                .eq("status", "paid")
+                .eq("bill_type", "rent")
+                .is("deleted_at", null);
+              paidRentPayments = pData || [];
+            }
 
-          // 3.4 租客名冊
-          if (text.includes("名冊") || text.includes("房客") || text.includes("名單") || text === "4") {
             await replyLineMessage(replyToken, [
-              buildLandlordTenantsFlex(userCtx.landlordManagedLeases, userCtx.landlordProperties)
+              buildLandlordCurrentLeasesFlex(
+                userCtx.landlordManagedLeases,
+                userCtx.landlordProperties,
+                paidRentPayments
+              )
             ]);
             continue;
           }
