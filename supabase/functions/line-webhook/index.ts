@@ -2888,6 +2888,25 @@ function buildLandlordCurrentLeasesFlex(leases: any[], properties: any[], paymen
             ]
           }
         ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "14px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#4F46E5",
+            height: "sm",
+            action: {
+              type: "postback",
+              label: "📋 查閱此房源已繳清單",
+              data: `action=view_lease_paid&leaseId=${l.id}`,
+              displayText: `📋 查閱【${propName}】已繳清單`
+            }
+          }
+        ]
       }
     };
   });
@@ -2895,6 +2914,273 @@ function buildLandlordCurrentLeasesFlex(leases: any[], properties: any[], paymen
   return {
     type: "flex",
     altText: `📑 房東管理 · 當前租約 (共 ${leases.length} 間)`,
+    contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
+    quickReply: buildSmartQuickReply("landlord", true)
+  };
+}
+
+// 5-1. 房東專屬「特定房源已繳清單」Flex Message
+function buildLandlordLeasePaidFlex(lease: any, property: any, payments: any[]) {
+  const propName = property?.name || lease?.property_name || "租賃房源";
+  const tenantName = lease?.tenant_name || "承租人";
+  const tenantPhone = lease?.phone || "未填電話";
+
+  const getPaidSortTimestamp = (item: any) => {
+    if (item.updated_at) {
+      const t = new Date(item.updated_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (item.paid_date) {
+      const t = new Date(item.paid_date).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    if (item.created_at) {
+      const t = new Date(item.created_at).getTime();
+      if (!isNaN(t) && t > 0) return t;
+    }
+    return 0;
+  };
+
+  const sortedPayments = [...(payments || [])].sort((a, b) => {
+    const timeA = getPaidSortTimestamp(a);
+    const timeB = getPaidSortTimestamp(b);
+    if (timeA !== timeB) return timeB - timeA;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
+
+  const totalPaid = sortedPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  // 空狀態
+  if (!sortedPayments || sortedPayments.length === 0) {
+    return {
+      type: "flex",
+      altText: `💰 【${propName}】目前尚無已核銷款項`,
+      contents: {
+        type: "bubble",
+        size: "mega",
+        header: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#0F172A",
+          paddingAll: "16px",
+          contents: [
+            { type: "text", text: "智慧租屋 · 歷史繳費紀錄", color: "#94A3B8", size: "xs", weight: "bold" },
+            { type: "text", text: `${propName} · 已繳清單`, color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" },
+            { type: "text", text: `承租人：${tenantName} (${tenantPhone})`, color: "#CBD5E1", size: "xs", margin: "xs" }
+          ]
+        },
+        body: {
+          type: "box",
+          layout: "vertical",
+          paddingAll: "20px",
+          contents: [
+            { type: "text", text: "此房源目前尚無已核銷之繳費紀錄。", size: "sm", color: "#64748B", align: "center", margin: "lg" }
+          ]
+        },
+        footer: {
+          type: "box",
+          layout: "vertical",
+          paddingAll: "14px",
+          contents: [
+            {
+              type: "button",
+              style: "secondary",
+              height: "sm",
+              action: { type: "message", label: "🔙 返回當前租約", text: "當前租約" }
+            }
+          ]
+        }
+      },
+      quickReply: buildSmartQuickReply("landlord", true)
+    };
+  }
+
+  const ITEMS_PER_PAGE = 5;
+  const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
+
+  const buildPageBubble = (pageIndex: number) => {
+    const startIdx = pageIndex * ITEMS_PER_PAGE;
+    const pageItems = sortedPayments.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+    const isFirstPage = pageIndex === 0;
+
+    const bodyContents: any[] = [];
+
+    // 第一頁顯示看板
+    if (isFirstPage) {
+      bodyContents.push(
+        {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#ECFDF5",
+          cornerRadius: "12px",
+          paddingAll: "14px",
+          contents: [
+            {
+              type: "box",
+              layout: "horizontal",
+              justifyContent: "space-between",
+              alignItems: "center",
+              contents: [
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  alignItems: "center",
+                  spacing: "xs",
+                  contents: [
+                    { type: "text", text: "📊", size: "xs", flex: 0 },
+                    { type: "text", text: "累計已核銷總額", size: "xs", color: "#065F46", weight: "bold", flex: 0 }
+                  ]
+                },
+                {
+                  type: "box",
+                  layout: "horizontal",
+                  backgroundColor: "#D1FAE5",
+                  cornerRadius: "10px",
+                  paddingStart: "8px",
+                  paddingEnd: "8px",
+                  paddingTop: "3px",
+                  paddingBottom: "3px",
+                  contents: [
+                    {
+                      type: "text",
+                      text: `共 ${sortedPayments.length} 筆已結清`,
+                      size: "xxs",
+                      color: "#047857",
+                      weight: "bold"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              type: "box",
+              layout: "baseline",
+              margin: "sm",
+              spacing: "xs",
+              contents: [
+                { type: "text", text: "NT$", size: "sm", color: "#047857", weight: "bold", flex: 0 },
+                { type: "text", text: totalPaid.toLocaleString(), size: "xxl", color: "#047857", weight: "bold", wrap: true, flex: 1 }
+              ]
+            }
+          ]
+        },
+        { type: "separator", margin: "md" }
+      );
+    }
+
+    pageItems.forEach((p, idx) => {
+      const cat = getCategoryMeta(p.bill_type || p.billType);
+      const itemTitle = getPaymentTitle(p);
+      const amtStr = Number(p.amount || 0).toLocaleString();
+      const paidDate = (p.updated_at ? String(p.updated_at).split("T")[0] : null) || p.paid_date || p.due_date || "已結清";
+      const methodInfo = p.payment_method === "現金交付"
+        ? "💵 現金交付"
+        : (p.transfer_last5 ? `🏦 轉帳末五碼：${p.transfer_last5}` : "🏦 銀行轉帳");
+
+      if (idx > 0) {
+        bodyContents.push({ type: "separator", margin: "md" });
+      }
+
+      bodyContents.push({
+        type: "box",
+        layout: "vertical",
+        margin: "md",
+        spacing: "xs",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                alignItems: "center",
+                spacing: "xs",
+                flex: 7,
+                contents: [
+                  { type: "text", text: cat.icon, size: "sm", flex: 0 },
+                  { type: "text", text: itemTitle, size: "sm", weight: "bold", color: "#0F172A", wrap: true, flex: 1 }
+                ]
+              },
+              {
+                type: "text",
+                text: `NT$ ${amtStr}`,
+                size: "sm",
+                weight: "bold",
+                color: "#059669",
+                align: "end",
+                flex: 4
+              }
+            ]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            contents: [
+              { type: "text", text: `確認入帳：${paidDate}`, size: "xxs", color: "#64748B" },
+              { type: "text", text: methodInfo, size: "xxs", color: "#047857", weight: "bold" }
+            ]
+          }
+        ]
+      });
+    });
+
+    return {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#0F172A",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            contents: [
+              { type: "text", text: "智慧租屋 · 歷史繳費紀錄", color: "#94A3B8", size: "xs", weight: "bold" },
+              ...(totalPages > 1 ? [
+                { type: "text", text: `第 ${pageIndex + 1}/${totalPages} 頁`, color: "#CBD5E1", size: "xxs", align: "end" }
+              ] : [])
+            ]
+          },
+          { type: "text", text: `${propName} · 已繳清單`, color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs", wrap: true },
+          { type: "text", text: `承租人：${tenantName} (${tenantPhone})`, color: "#CBD5E1", size: "xs", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        contents: bodyContents
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "14px",
+        contents: [
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            action: { type: "message", label: "🔙 返回當前租約", text: "當前租約" }
+          }
+        ]
+      }
+    };
+  };
+
+  const bubbles = Array.from({ length: totalPages }, (_, i) => buildPageBubble(i));
+
+  return {
+    type: "flex",
+    altText: `💰 【${propName}】已繳清單 (累計 NT$ ${totalPaid.toLocaleString()})`,
     contents: bubbles.length === 1 ? bubbles[0] : { type: "carousel", contents: bubbles },
     quickReply: buildSmartQuickReply("landlord", true)
   };
@@ -3312,6 +3598,58 @@ serve(async (req: Request) => {
           ]);
           continue;
         }
+      }
+
+      // 2.5 房東查閱特定房源已繳清單 (view_lease_paid) - 嚴格限房東
+      if (action === "view_lease_paid") {
+        if (!userCtx?.isLandlord) {
+          await replyLineMessage(replyToken, [
+            { type: "text", text: "⚠️ 權限不足：您未具備房東管理權限，無法查閱此資訊！", quickReply: buildSmartQuickReply("tenant", false) }
+          ]);
+          continue;
+        }
+
+        const leaseId = params.get("leaseId");
+        if (!leaseId) {
+          await replyLineMessage(replyToken, [{ type: "text", text: "❌ 缺少租約識別碼。" }]);
+          continue;
+        }
+
+        const { data: targetLease } = await supabase
+          .from("leases")
+          .select("*")
+          .eq("id", leaseId)
+          .maybeSingle();
+
+        if (!targetLease) {
+          await replyLineMessage(replyToken, [{ type: "text", text: "⚠️ 查無此筆租約資料。" }]);
+          continue;
+        }
+
+        let targetProp: any = null;
+        if (targetLease.property_id) {
+          const { data: p } = await supabase
+            .from("properties")
+            .select("*")
+            .eq("id", targetLease.property_id)
+            .maybeSingle();
+          targetProp = p;
+        }
+
+        const { data: pData } = await supabase
+          .from("payments")
+          .select("*")
+          .eq("lease_id", leaseId)
+          .eq("status", "paid")
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false });
+
+        const paidPayments = pData || [];
+
+        await replyLineMessage(replyToken, [
+          buildLandlordLeasePaidFlex(targetLease, targetProp, paidPayments)
+        ]);
+        continue;
       }
 
       // 3. 房東確認入帳 (Approve Payment) - 嚴格限房東
@@ -3810,14 +4148,30 @@ serve(async (req: Request) => {
             continue;
           }
 
-          // 3.3 當前租約（合併原「房源現況」與「租客名冊」）
+          // 3.3 當前租約（合併原「房源現況」與「租客名冊」）及已繳清單快速檢視
           if (
             text.includes("當前租約") || text.includes("租約") || text.includes("合約") ||
             text.includes("房源") || text.includes("房間") || text.includes("物業") ||
             text.includes("名冊") || text.includes("房客") || text.includes("名單") ||
+            text.includes("已繳") || text.includes("收據") ||
             text === "3" || text === "4"
           ) {
             const leases = userCtx.landlordManagedLeases;
+            if ((text.includes("已繳") || text.includes("收據")) && leases.length === 1) {
+              const singleLease = leases[0];
+              const singleProp = userCtx.landlordProperties.find((p: any) => p.id === singleLease.property_id);
+              const { data: pData } = await supabase
+                .from("payments")
+                .select("*")
+                .eq("lease_id", singleLease.id)
+                .eq("status", "paid")
+                .is("deleted_at", null)
+                .order("updated_at", { ascending: false });
+              await replyLineMessage(replyToken, [
+                buildLandlordLeasePaidFlex(singleLease, singleProp, pData || [])
+              ]);
+              continue;
+            }
             const leaseIds = leases.map((l: any) => l.id);
             let paidRentPayments: any[] = [];
             if (leaseIds.length > 0) {
