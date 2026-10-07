@@ -1612,8 +1612,91 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
   };
 }
 
+// 5-0. 無租約提示 Flex Message (依合約安全保護房東約定收款資訊)
+function buildNoLeaseBankInfoFlex(profile: any) {
+  const userName = profile?.name || "租客";
+  return {
+    type: "flex",
+    altText: "⚠️ 尚未簽訂租賃合約 - 目前無約定匯款帳號",
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#D97706", // Amber 600 醒目暖橘色
+        paddingAll: "18px",
+        contents: [
+          { type: "text", text: "智慧租屋 · 匯款帳號查詢", color: "#FEF3C7", size: "xs", weight: "bold" },
+          { type: "text", text: "⚠️ 尚未簽訂租賃合約", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "md",
+        contents: [
+          {
+            type: "text",
+            text: `${userName} 您好：`,
+            size: "sm",
+            weight: "bold",
+            color: "#1E293B"
+          },
+          {
+            type: "text",
+            text: "系統目前查無您生效中的租賃合約資料。依租約安全規範，只有在雙方正式簽署合約後，系統才會為您顯示該合約所屬房東的約定轉帳資訊。",
+            size: "xs",
+            color: "#475569",
+            wrap: true,
+            lineSpacing: "4px"
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#FFFBEB",
+            borderColor: "#FDE68A",
+            borderWidth: "1px",
+            cornerRadius: "8px",
+            paddingAll: "12px",
+            margin: "md",
+            contents: [
+              {
+                type: "text",
+                text: "💡 溫馨提醒：若您已與房東完成簽約，請請房東於管理系統確認合約啟用並登記您的手機號碼，系統將即時為您開通專屬匯款帳戶與帳單明細！",
+                size: "xs",
+                color: "#92400E",
+                wrap: true,
+                lineSpacing: "3px"
+              }
+            ]
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "14px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#4F46E5",
+            height: "sm",
+            action: { type: "message", label: "📋 查詢我的租約", text: "我的租約" }
+          }
+        ]
+      }
+    }
+  };
+}
+
 // 5. 房東帳號 Flex Message
 function buildBankInfoFlex(landlord: any) {
+  if (!landlord) {
+    return buildNoLeaseBankInfoFlex(null);
+  }
   const bank = parseLandlordBank(landlord);
   return {
     type: "flex",
@@ -2988,7 +3071,7 @@ async function getUserContext(supabase: any, lineUserId: string) {
     }
   }
 
-  // 7. 租客承租關聯房東資料
+  // 7. 租客承租關聯房東資料（僅在存在生效租約時嚴格關聯該合約所屬房東）
   let tenantProperty: any = null;
   let tenantLandlord: any = null;
   if (activeLease) {
@@ -3000,23 +3083,18 @@ async function getUserContext(supabase: any, lineUserId: string) {
         .maybeSingle();
       tenantProperty = p;
     }
-    if (activeLease.landlord_id) {
+    const targetLandlordId = activeLease.landlord_id || tenantProperty?.landlord_id;
+    if (targetLandlordId) {
       const { data: l } = await supabase
         .from("landlords")
         .select("*")
-        .eq("id", activeLease.landlord_id)
+        .eq("id", targetLandlordId)
         .maybeSingle();
       tenantLandlord = l;
     }
   }
-  if (!tenantLandlord) {
-    const { data: allLnds } = await supabase
-      .from("landlords")
-      .select("*")
-      .is("deleted_at", null)
-      .limit(1);
-    tenantLandlord = allLnds?.[0] || null;
-  }
+  // ⚠️ 嚴格安全原則：若租客無租約或租約無關聯房東，tenantLandlord 必須嚴格保持為 null！
+  // 嚴格禁止任何跨租約 fallback（如 SELECT * FROM landlords LIMIT 1），以維護不同房東個資與轉帳安全！
 
   return {
     lineUserId,
@@ -3924,9 +4002,15 @@ serve(async (req: Request) => {
 
         // 4.5 匯款帳號
         if (text.includes("匯款") || text.includes("帳戶") || text.includes("銀行")) {
-          await replyLineMessage(replyToken, [
-            buildBankInfoFlex(userCtx.landlord)
-          ]);
+          if (!userCtx.lease || !userCtx.landlord) {
+            await replyLineMessage(replyToken, [
+              buildNoLeaseBankInfoFlex(userCtx.profile)
+            ]);
+          } else {
+            await replyLineMessage(replyToken, [
+              buildBankInfoFlex(userCtx.landlord)
+            ]);
+          }
           continue;
         }
 

@@ -5161,7 +5161,7 @@ export default function App() {
     };
     try {
       if (isSupabaseConfigured) {
-        const targetId = currentLandlordId || currentUser?.id || landlords[0]?.id;
+        const targetId = currentLandlordId || currentUser?.id;
         if (targetId) {
           // 1. 讀取現有 landlords.company_name 中的元資料
           let existingMeta = {};
@@ -5227,12 +5227,17 @@ export default function App() {
 
   useEffect(() => {
     if (role === 'tenant' && currentTenantLease) {
-      const lnd = landlords.find(l => l.id === currentTenantLease.landlordId) || landlords[0];
+      const targetLandlordId = currentTenantLease.landlordId || currentTenantProperty?.landlordId;
+      const lnd = landlords.find(l => l.id === targetLandlordId);
       if (lnd) {
         setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      } else {
+        setLandlordBankInfo(null);
       }
+    } else if (role === 'tenant' && !currentTenantLease) {
+      setLandlordBankInfo(null);
     }
-  }, [role, currentTenantLeaseId, currentTenantLease, landlords]);
+  }, [role, currentTenantLeaseId, currentTenantLease, currentTenantProperty, landlords]);
 
   const handleOpenTenantReportPayment = (targetBill = null) => {
     if (!currentTenantLease) {
@@ -5242,9 +5247,13 @@ export default function App() {
 
     const activeLease = (targetBill && leases.find(l => l.id === targetBill.leaseId)) || currentTenantLease;
     if (activeLease) {
-      const lnd = landlords.find(l => l.id === activeLease.landlordId) || landlords[0];
+      const activeProp = properties.find(p => p.id === activeLease.propertyId);
+      const targetLandlordId = activeLease.landlordId || activeProp?.landlordId;
+      const lnd = landlords.find(l => l.id === targetLandlordId);
       if (lnd) {
         setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      } else {
+        setLandlordBankInfo(null);
       }
     }
 
@@ -5591,10 +5600,16 @@ export default function App() {
     setTenantPayTransferLast5('');
     const activeLease = (bill && leases.find(l => l.id === bill.leaseId)) || currentTenantLease;
     if (activeLease) {
-      const lnd = landlords.find(l => l.id === activeLease.landlordId) || landlords[0];
+      const activeProp = properties.find(p => p.id === activeLease.propertyId);
+      const targetLandlordId = activeLease.landlordId || activeProp?.landlordId;
+      const lnd = landlords.find(l => l.id === targetLandlordId);
       if (lnd) {
         setLandlordBankInfo(extractLandlordBankInfo(lnd));
+      } else {
+        setLandlordBankInfo(null);
       }
+    } else {
+      setLandlordBankInfo(null);
     }
     setActiveModal('tenantPay');
   };
@@ -12990,8 +13005,9 @@ export default function App() {
                   {tenantReportMethod === 'bank' && (
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
                       {(() => {
-                        const targetLnd = landlords.find(l => l.id === currentTenantLease?.landlordId) || landlords[0];
-                        const fallbackBank = extractLandlordBankInfo(targetLnd);
+                        const targetLndId = currentTenantLease?.landlordId || currentTenantProperty?.landlordId;
+                        const targetLnd = landlords.find(l => l.id === targetLndId);
+                        const fallbackBank = targetLnd ? extractLandlordBankInfo(targetLnd) : null;
                         const displayBank = (landlordBankInfo?.bankAccount || landlordBankInfo?.bankName)
                           ? landlordBankInfo
                           : fallbackBank;
