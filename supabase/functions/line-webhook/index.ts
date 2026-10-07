@@ -12,8 +12,62 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "
 // In-memory rate limiting map (per LINE User ID)
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-// 記憶體快取：紀錄每位租客最新鎖定之待繳帳單 (有效期限 1 小時)
+// 記憶體快取與資料庫持久化：紀錄每位租客最新鎖定之待繳帳單 (跨 Serverless 實例安全持久化，有效期限 1 小時)
 const lockedBillsByUser = new Map<string, { billId: string; timestamp: number }>();
+
+async function setLockedBill(supabase: any, lineUserId: string, billId: string) {
+  lockedBillsByUser.set(lineUserId, { billId, timestamp: Date.now() });
+  try {
+    const token = `lock_${lineUserId}`;
+    const expires_at = new Date(Date.now() + 3600000).toISOString();
+    await supabase.from("line_binding_tokens").upsert({
+      token,
+      tenant_id: billId,
+      expires_at,
+      is_used: false
+    });
+  } catch (err) {
+    console.warn("setLockedBill persistence warning:", err);
+  }
+}
+
+async function getLockedBill(supabase: any, lineUserId: string): Promise<string | null> {
+  // 1. 先查資料庫持久化 (保證跨 Serverless 實例不丟失)
+  try {
+    const token = `lock_${lineUserId}`;
+    const { data } = await supabase
+      .from("line_binding_tokens")
+      .select("tenant_id, expires_at")
+      .eq("token", token)
+      .maybeSingle();
+    if (data && data.tenant_id) {
+      if (data.expires_at && new Date(data.expires_at).getTime() < Date.now()) {
+        await clearLockedBill(supabase, lineUserId);
+        return null;
+      }
+      return data.tenant_id;
+    }
+  } catch (err) {
+    console.warn("getLockedBill persistence warning:", err);
+  }
+
+  // 2. 備援記憶體快取
+  const mem = lockedBillsByUser.get(lineUserId);
+  if (mem && (Date.now() - mem.timestamp < 3600000)) {
+    return mem.billId;
+  }
+  return null;
+}
+
+async function clearLockedBill(supabase: any, lineUserId: string) {
+  lockedBillsByUser.delete(lineUserId);
+  try {
+    const token = `lock_${lineUserId}`;
+    await supabase.from("line_binding_tokens").delete().eq("token", token);
+  } catch (err) {
+    console.warn("clearLockedBill persistence warning:", err);
+  }
+}
 
 function checkRateLimit(userId: string, limit = 15, windowMs = 60000): boolean {
   const now = Date.now();
@@ -1316,8 +1370,9 @@ function buildReportSuccessFlex(payment: any, last5: string | null, isCash: bool
 }
 
 // 4-1. 鎖定待繳帳單 Flex Message (仿網頁版雙管道繳費樣式)
-function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string, fallbackAmount?: string | number) {
+function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string, fallbackAmount?: string | number, fallbackBillId?: string) {
   const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
+  const targetBillId = payment?.id || fallbackBillId || "";
   const displayTitle = payment ? getPaymentTitle(payment) : (fallbackTitle || "待繳帳單");
   const rawAmt = payment?.amount !== undefined ? payment.amount : (fallbackAmount || 0);
   const amountStr = Number(rawAmt).toLocaleString();
@@ -1565,7 +1620,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             action: {
               type: "postback",
               label: "🏦 轉帳完成：回報末五碼",
-              data: `action=guide_transfer_report&id=${payment?.id || ""}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+              data: `action=guide_transfer_report&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
               displayText: "🏦 我已完成轉帳，回報末五碼"
             }
           },
@@ -1578,7 +1633,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             action: {
               type: "postback",
               label: "💵 現場繳交：現金交付",
-              data: `action=report_cash&id=${payment?.id || ""}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+              data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
               displayText: "💵 現金交付"
             }
           },
@@ -1616,7 +1671,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
           action: {
             type: "postback",
             label: "🏦 回報末五碼",
-            data: `action=guide_transfer_report&id=${payment?.id || ""}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+            data: `action=guide_transfer_report&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
             displayText: "🏦 回報末五碼"
           }
         },
@@ -3883,14 +3938,11 @@ serve(async (req: Request) => {
 
         const targetId = payment?.id || billId;
         if (targetId) {
-          lockedBillsByUser.set(lineUserId, {
-            billId: targetId,
-            timestamp: Date.now()
-          });
+          await setLockedBill(supabase, lineUserId, targetId);
         }
 
         await replyLineMessage(replyToken, [
-          buildLockedBillFlex(payment, userCtx?.landlord, title, amount)
+          buildLockedBillFlex(payment, userCtx?.landlord, title, amount, targetId)
         ]);
         continue;
       }
@@ -3901,10 +3953,39 @@ serve(async (req: Request) => {
         const amount = params.get("amount") || "";
         const billId = params.get("id") || params.get("billId") || "";
 
+        let targetId = billId;
         let payment: any = null;
-        if (billId) {
-          const { data: p } = await supabase.from("payments").select("*").eq("id", billId).maybeSingle();
+        if (targetId) {
+          const { data: p } = await supabase.from("payments").select("*").eq("id", targetId).maybeSingle();
           payment = p;
+        }
+
+        // 若無 id 或查無 payment，嘗試從 DB 讀取先前鎖定
+        if (!targetId || !payment) {
+          const dbId = await getLockedBill(supabase, lineUserId);
+          if (dbId) {
+            targetId = dbId;
+            const { data: p } = await supabase.from("payments").select("*").eq("id", targetId).maybeSingle();
+            payment = p;
+          }
+        }
+
+        // 若依然沒有，但該租客僅有 1 筆待繳帳單，自動綁定該筆
+        if (!payment && userCtx) {
+          const leaseIds = userCtx.leases.map((l: any) => l.id);
+          if (leaseIds.length > 0) {
+            const { data: pList } = await supabase
+              .from("payments")
+              .select("*")
+              .in("lease_id", leaseIds)
+              .eq("status", "pending")
+              .is("deleted_at", null)
+              .order("due_date", { ascending: true });
+            if (pList && pList.length === 1) {
+              payment = pList[0];
+              targetId = payment.id;
+            }
+          }
         }
 
         if (payment && payment.status === "paid") {
@@ -3932,16 +4013,47 @@ serve(async (req: Request) => {
           continue;
         }
 
-        const targetId = payment?.id || billId;
-        if (targetId) {
-          lockedBillsByUser.set(lineUserId, {
-            billId: targetId,
-            timestamp: Date.now()
-          });
+        if (!payment) {
+          const leaseIds = userCtx ? userCtx.leases.map((l: any) => l.id) : [];
+          let pendingPayments: any[] = [];
+          if (leaseIds.length > 0) {
+            const { data: pList } = await supabase
+              .from("payments")
+              .select("*")
+              .in("lease_id", leaseIds)
+              .eq("status", "pending")
+              .is("deleted_at", null)
+              .order("due_date", { ascending: true });
+            pendingPayments = pList || [];
+          }
+
+          if (pendingPayments.length > 0) {
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: "⚠️【尚未指定欲回報之帳單】\n\n您名下有多筆待繳帳單，請先在欲繳納的帳單卡片中點選【📝 回報此筆繳款】以鎖定項目！",
+                quickReply: buildSmartQuickReply(userCtx?.currentRole || "tenant", userCtx?.isLandlord)
+              },
+              buildPendingBillsFlex(pendingPayments, userCtx?.profile)
+            ]);
+            continue;
+          } else {
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: "🎉 您目前沒有任何待繳納之帳單！感謝您的準時繳納。如需核對歷史紀錄，請輸入「已繳金額」。",
+                quickReply: buildSmartQuickReply(userCtx?.currentRole || "tenant", userCtx?.isLandlord)
+              }
+            ]);
+            continue;
+          }
         }
 
-        const displayTitle = payment ? getPaymentTitle(payment) : title;
-        const displayAmt = payment?.amount !== undefined ? payment.amount : amount;
+        targetId = payment.id;
+        await setLockedBill(supabase, lineUserId, targetId);
+
+        const displayTitle = getPaymentTitle(payment);
+        const displayAmt = payment.amount !== undefined ? payment.amount : amount;
 
         await replyLineMessage(replyToken, [
           {
@@ -4047,12 +4159,12 @@ serve(async (req: Request) => {
         }
 
         if (!targetPayment) {
-          const lockedInfo = lockedBillsByUser.get(lineUserId);
-          if (lockedInfo && (Date.now() - lockedInfo.timestamp < 3600000)) {
+          const lockedBillId = await getLockedBill(supabase, lineUserId);
+          if (lockedBillId) {
             const { data: lp } = await supabase
               .from("payments")
               .select("*")
-              .eq("id", lockedInfo.billId)
+              .eq("id", lockedBillId)
               .maybeSingle();
             if (lp) targetPayment = lp;
           }
@@ -4107,7 +4219,7 @@ serve(async (req: Request) => {
             { type: "text", text: `❌ 現金回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply("tenant", userCtx?.isLandlord) }
           ]);
         } else {
-          lockedBillsByUser.delete(lineUserId);
+          await clearLockedBill(supabase, lineUserId);
 
           // 立即推播通知房東審核 (Instant Push to Landlord)
           try {
@@ -4379,17 +4491,198 @@ serve(async (req: Request) => {
         const last5Match = text.match(/(?:後五碼|末五碼|回報|轉帳)\s*(\d{5})\b|^\s*(\d{5})\s*$/);
         const isCash = /^(現金|現金交付|付現|現金繳費|現金支付|已付現金)$/i.test(text.replace(/\s+/g, '')) || text.includes("現金交付");
 
+        // 4.0 繳款回報意圖（未帶 5 碼數字）：如「我已完成轉帳，回報末五碼」、「回報末五碼」、「完成轉帳」、「回報繳費」
+        const isReportIntent = !last5Match && !isCash && (
+          text.includes("我已完成轉帳") ||
+          text.includes("完成轉帳") ||
+          text.includes("回報末五碼") ||
+          text.includes("轉帳完成") ||
+          text.includes("回報繳費") ||
+          text.includes("回報繳款") ||
+          text.includes("回報轉帳") ||
+          text.trim() === "回報" ||
+          text.trim() === "末五碼"
+        );
+
+        if (isReportIntent) {
+          let targetPayment: any = null;
+          const lockedBillId = await getLockedBill(supabase, lineUserId);
+          if (lockedBillId) {
+            const { data: lp } = await supabase
+              .from("payments")
+              .select("*")
+              .eq("id", lockedBillId)
+              .eq("status", "pending")
+              .is("deleted_at", null)
+              .maybeSingle();
+            if (lp) targetPayment = lp;
+          }
+
+          let pendingPayments: any[] = [];
+          if (leaseIds.length > 0) {
+            const { data: pList } = await supabase
+              .from("payments")
+              .select("*")
+              .in("lease_id", leaseIds)
+              .eq("status", "pending")
+              .is("deleted_at", null)
+              .order("due_date", { ascending: true });
+            pendingPayments = pList || [];
+          }
+
+          // 若尚未鎖定但租客名下僅有 1 筆待繳帳單，自動鎖定該筆！
+          if (!targetPayment && pendingPayments.length === 1) {
+            targetPayment = pendingPayments[0];
+            await setLockedBill(supabase, lineUserId, targetPayment.id);
+          }
+
+          if (targetPayment) {
+            const displayTitle = getPaymentTitle(targetPayment);
+            const displayAmt = targetPayment.amount;
+            await replyLineMessage(replyToken, [
+              {
+                type: "flex",
+                altText: `🏦 請在下方輸入【${displayTitle}】轉帳末五碼`,
+                contents: {
+                  type: "bubble",
+                  size: "mega",
+                  header: {
+                    type: "box",
+                    layout: "vertical",
+                    backgroundColor: "#312E81",
+                    paddingAll: "16px",
+                    contents: [
+                      { type: "text", text: "智慧租屋 · 銀行轉帳回報", color: "#C7D2FE", size: "xs", weight: "bold" },
+                      { type: "text", text: "🏦 填寫轉帳末五碼", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
+                    ]
+                  },
+                  body: {
+                    type: "box",
+                    layout: "vertical",
+                    paddingAll: "18px",
+                    spacing: "md",
+                    contents: [
+                      {
+                        type: "box",
+                        layout: "vertical",
+                        backgroundColor: "#F8FAFC",
+                        cornerRadius: "10px",
+                        paddingAll: "12px",
+                        borderColor: "#E2E8F0",
+                        borderWidth: "1px",
+                        contents: [
+                          { type: "text", text: `📌 已鎖定項目：${displayTitle}`, size: "xs", color: "#64748B", wrap: true },
+                          { type: "text", text: `應繳金額：NT$ ${Number(displayAmt || 0).toLocaleString()}`, size: "sm", color: "#1E293B", weight: "bold", margin: "xs" }
+                        ]
+                      },
+                      {
+                        type: "box",
+                        layout: "vertical",
+                        backgroundColor: "#EEF2FF",
+                        cornerRadius: "10px",
+                        paddingAll: "14px",
+                        spacing: "xs",
+                        contents: [
+                          { type: "text", text: "👇 請直接在「下方 LINE 訊息輸入框」輸入：", size: "xs", color: "#3730A3", weight: "bold" },
+                          { type: "text", text: "您的【轉帳末五碼】（5 位數字，例如直接輸入 88621）發送，系統將立即為您完成回報並通知房東開立收據！", size: "xs", color: "#4338CA", wrap: true }
+                        ]
+                      }
+                    ]
+                  },
+                  footer: {
+                    type: "box",
+                    layout: "horizontal",
+                    spacing: "sm",
+                    paddingAll: "12px",
+                    contents: [
+                      {
+                        type: "button",
+                        style: "secondary",
+                        height: "sm",
+                        action: {
+                          type: "postback",
+                          label: "💵 改用現金交付",
+                          data: `action=report_cash&id=${targetPayment.id}&title=${encodeURIComponent(displayTitle)}&amount=${displayAmt}`
+                        }
+                      },
+                      {
+                        type: "button",
+                        style: "secondary",
+                        height: "sm",
+                        action: { type: "message", label: "⏳ 返回待繳帳單", text: "待繳帳單" }
+                      }
+                    ]
+                  }
+                },
+                quickReply: {
+                  items: [
+                    { type: "action", action: { type: "message", label: "💵 現金交付", text: "現金交付" } },
+                    { type: "action", action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" } }
+                  ]
+                }
+              }
+            ]);
+            continue;
+          }
+
+          if (pendingPayments.length > 0) {
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: "⚠️【請先鎖定欲回報之帳單】\n\n您名下有多筆待繳帳單，請在下方卡片中點選欲繳納帳單上的【📝 回報此筆繳款】，系統鎖定後再回傳轉帳末五碼喔！",
+                quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
+              },
+              buildPendingBillsFlex(pendingPayments, userCtx?.profile)
+            ]);
+            continue;
+          }
+
+          let submittedPayments: any[] = [];
+          if (leaseIds.length > 0) {
+            const { data: sList } = await supabase
+              .from("payments")
+              .select("*")
+              .in("lease_id", leaseIds)
+              .in("status", ["tenant_submitted", "pending_approval"])
+              .is("deleted_at", null);
+            submittedPayments = sList || [];
+          }
+
+          if (submittedPayments && submittedPayments.length > 0) {
+            const prevTitle = getPaymentTitle(submittedPayments[0]);
+            const prevDesc = submittedPayments[0].payment_method === '現金交付'
+              ? '現金交付'
+              : `轉帳末五碼：${submittedPayments[0].transfer_last5 || '已登記'}`;
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: `🔍 您先前已送交【${prevTitle}】之繳款回報（${prevDesc}），房東正在核對入帳中，請耐心等候開立收據！`,
+                quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
+              }
+            ]);
+          } else {
+            await replyLineMessage(replyToken, [
+              {
+                type: "text",
+                text: "🎉 您目前沒有任何待繳納之帳單！感謝您的準時繳納。如需核對歷史紀錄，請輸入「已繳金額」。",
+                quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
+              }
+            ]);
+          }
+          continue;
+        }
+
         if (last5Match || isCash) {
           const matchedLast5 = last5Match ? (last5Match[1] || last5Match[2]) : null;
           const reportMethod = isCash ? "現金交付" : "銀行轉帳";
 
           let targetPayment: any = null;
-          const lockedInfo = lockedBillsByUser.get(lineUserId);
-          if (lockedInfo && (Date.now() - lockedInfo.timestamp < 3600000)) {
+          const lockedBillId = await getLockedBill(supabase, lineUserId);
+          if (lockedBillId) {
             const { data: lp } = await supabase
               .from("payments")
               .select("*")
-              .eq("id", lockedInfo.billId)
+              .eq("id", lockedBillId)
               .eq("status", "pending")
               .is("deleted_at", null)
               .maybeSingle();
@@ -4478,7 +4771,7 @@ serve(async (req: Request) => {
               { type: "text", text: `❌ 回報更新失敗：${updateErr.message || "請稍後再試或直接向房東反映。"}`, quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord) }
             ]);
           } else {
-            lockedBillsByUser.delete(lineUserId);
+            await clearLockedBill(supabase, lineUserId);
 
             // 立即推播通知房東審核 (Instant Push to Landlord)
             try {
