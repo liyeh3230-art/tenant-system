@@ -1500,7 +1500,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                   margin: "sm",
                   contents: [
                     { type: "text", text: "收款銀行", size: "xs", color: "#6366F1", flex: 3 },
-                    { type: "text", text: bank.bankName, size: "xs", color: "#1E1B4B", weight: "bold", flex: 7 }
+                    { type: "text", text: bank.bankName, size: "xs", color: "#1E1B4B", weight: "bold", flex: 7, wrap: true }
                   ]
                 },
                 {
@@ -1508,7 +1508,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                   layout: "horizontal",
                   contents: [
                     { type: "text", text: "收款帳號", size: "xs", color: "#6366F1", flex: 3 },
-                    { type: "text", text: bank.bankAccount, size: "sm", color: "#4338CA", weight: "bold", flex: 7 }
+                    { type: "text", text: bank.bankAccount, size: "sm", color: "#4338CA", weight: "bold", flex: 7, wrap: true }
                   ]
                 },
                 {
@@ -1516,7 +1516,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                   layout: "horizontal",
                   contents: [
                     { type: "text", text: "帳戶戶名", size: "xs", color: "#6366F1", flex: 3 },
-                    { type: "text", text: bank.accountName || bank.landlordName, size: "xs", color: "#1E1B4B", weight: "bold", flex: 7 }
+                    { type: "text", text: bank.accountName || bank.landlordName, size: "xs", color: "#1E1B4B", weight: "bold", flex: 7, wrap: true }
                   ]
                 },
                 ...(bank.note ? [
@@ -1546,26 +1546,14 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                 cornerRadius: "8px",
                 paddingAll: "10px",
                 margin: "sm",
-                spacing: "xs",
+                borderColor: "#C7D2FE",
+                borderWidth: "1px",
                 contents: [
                   {
                     type: "text",
-                    text: "💡 轉帳回報步驟說明：",
-                    size: "xxs",
-                    color: "#4338CA",
-                    weight: "bold"
-                  },
-                  {
-                    type: "text",
-                    text: "① 點選下方複製帳號，完成 ATM 或網銀轉帳。",
-                    size: "xxs",
-                    color: "#475569"
-                  },
-                  {
-                    type: "text",
-                    text: "② 轉帳完成後，點擊下方【🏦 轉帳完成：回報末五碼】，或直接在下方 LINE 輸入框打上 5 位末五碼（如 88621）傳送即可！",
-                    size: "xxs",
-                    color: "#1E1B4B",
+                    text: "💡 轉帳完成後，點擊下方「轉帳完成：回報末五碼」",
+                    size: "xs",
+                    color: "#3730A3",
                     weight: "bold",
                     wrap: true
                   }
@@ -1590,7 +1578,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                 layout: "horizontal",
                 alignItems: "center",
                 contents: [
-                  { type: "text", text: "💵 管道 2：現金交付 (現場繳交)", size: "xs", color: "#065F46", weight: "bold" }
+                  { type: "text", text: "💵 管道 2：現金交付 (現場繳交)", size: "xs", color: "#065F46", weight: "bold", wrap: true }
                 ]
               },
               {
@@ -1698,6 +1686,210 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             label: "🏦 匯款帳號",
             text: "匯款帳號"
           }
+        }
+      ]
+    }
+  };
+}
+
+// 4-2. 填寫轉帳末五碼引導 Flex Message (排版全面優化，字體清晰絕不截斷)
+function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAmount?: string | number, fallbackBillId?: string) {
+  const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
+  const targetBillId = payment?.id || fallbackBillId || "";
+  const displayTitle = payment ? getPaymentTitle(payment) : (fallbackTitle || "待繳帳單");
+  const rawAmt = payment?.amount !== undefined ? payment.amount : (fallbackAmount || 0);
+  const amountStr = Number(rawAmt).toLocaleString();
+  const dueDateClean = payment?.due_date ? String(payment.due_date).split("T")[0] : "";
+
+  return {
+    type: "flex",
+    altText: `🏦 請在下方輸入【${displayTitle}】轉帳末五碼`,
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#312E81",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
+            contents: [
+              { type: "text", text: "智慧租屋 · 銀行轉帳回報", color: "#C7D2FE", size: "xs", weight: "bold", wrap: true },
+              {
+                type: "box",
+                layout: "horizontal",
+                backgroundColor: cat.bg,
+                borderColor: cat.border,
+                borderWidth: "1px",
+                cornerRadius: "6px",
+                paddingStart: "8px",
+                paddingEnd: "8px",
+                paddingTop: "2px",
+                paddingBottom: "2px",
+                contents: [
+                  { type: "text", text: `${cat.icon} ${cat.label}`, size: "xxs", color: cat.color, weight: "bold" }
+                ]
+              }
+            ]
+          },
+          { type: "text", text: "🏦 填寫轉帳末五碼", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs", wrap: true }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "md",
+        contents: [
+          // 1. 已鎖定項目與金額明細卡片
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "12px",
+            paddingAll: "14px",
+            borderColor: "#E2E8F0",
+            borderWidth: "1px",
+            contents: [
+              {
+                type: "text",
+                text: `📌 已鎖定項目：${displayTitle}`,
+                size: "sm",
+                color: "#1E293B",
+                weight: "bold",
+                wrap: true
+              },
+              {
+                type: "box",
+                layout: "baseline",
+                spacing: "xs",
+                margin: "sm",
+                contents: [
+                  { type: "text", text: "應繳金額", size: "xs", color: "#64748B", flex: 0 },
+                  { type: "text", text: "NT$", size: "sm", color: "#4F46E5", weight: "bold", flex: 0 },
+                  { type: "text", text: ` ${amountStr}`, size: "xxl", color: "#4F46E5", weight: "bold", flex: 1, wrap: true }
+                ]
+              },
+              ...(dueDateClean ? [
+                {
+                  type: "text",
+                  text: `📅 繳費期限：${dueDateClean}`,
+                  size: "xs",
+                  color: "#64748B",
+                  margin: "xs",
+                  wrap: true
+                }
+              ] : [])
+            ]
+          },
+          // 2. 輸入引導區塊 (字體清晰、指示明確、絕不擠壓截斷)
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#EEF2FF",
+            cornerRadius: "12px",
+            paddingAll: "14px",
+            borderColor: "#C7D2FE",
+            borderWidth: "1px",
+            spacing: "sm",
+            contents: [
+              {
+                type: "text",
+                text: "👇 請直接在「下方 LINE 訊息輸入框」輸入：",
+                size: "xs",
+                color: "#3730A3",
+                weight: "bold",
+                wrap: true
+              },
+              {
+                type: "box",
+                layout: "vertical",
+                backgroundColor: "#FFFFFF",
+                cornerRadius: "8px",
+                paddingAll: "10px",
+                borderColor: "#A5B4FC",
+                borderWidth: "1px",
+                contents: [
+                  {
+                    type: "text",
+                    text: "您的【轉帳末五碼】（5 位數字）",
+                    size: "xs",
+                    color: "#1E1B4B",
+                    weight: "bold",
+                    wrap: true
+                  },
+                  {
+                    type: "text",
+                    text: "例如直接輸入：88621",
+                    size: "sm",
+                    color: "#4F46E5",
+                    weight: "bold",
+                    margin: "xs",
+                    wrap: true
+                  }
+                ]
+              },
+              {
+                type: "text",
+                text: "💡 發送後系統將立即完成回報，並即時通知房東核帳開立電子收據！",
+                size: "xxs",
+                color: "#4338CA",
+                wrap: true,
+                margin: "xs"
+              }
+            ]
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#059669",
+            height: "sm",
+            action: {
+              type: "postback",
+              label: "💵 改用現場現金交付",
+              data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+              displayText: "💵 現金交付"
+            }
+          },
+          {
+            type: "button",
+            style: "link",
+            height: "sm",
+            action: {
+              type: "message",
+              label: "⏳ 返回待繳帳單",
+              text: "待繳帳單"
+            }
+          }
+        ]
+      }
+    },
+    quickReply: {
+      items: [
+        {
+          type: "action",
+          action: { type: "message", label: "💵 現金交付", text: "現金交付" }
+        },
+        {
+          type: "action",
+          action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" }
+        },
+        {
+          type: "action",
+          action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
         }
       ]
     }
@@ -4056,93 +4248,7 @@ serve(async (req: Request) => {
         const displayAmt = payment.amount !== undefined ? payment.amount : amount;
 
         await replyLineMessage(replyToken, [
-          {
-            type: "flex",
-            altText: `🏦 請在下方輸入【${displayTitle}】轉帳末五碼`,
-            contents: {
-              type: "bubble",
-              size: "mega",
-              header: {
-                type: "box",
-                layout: "vertical",
-                backgroundColor: "#312E81",
-                paddingAll: "16px",
-                contents: [
-                  { type: "text", text: "智慧租屋 · 銀行轉帳回報", color: "#C7D2FE", size: "xs", weight: "bold" },
-                  { type: "text", text: "🏦 填寫轉帳末五碼", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
-                ]
-              },
-              body: {
-                type: "box",
-                layout: "vertical",
-                paddingAll: "18px",
-                spacing: "md",
-                contents: [
-                  {
-                    type: "box",
-                    layout: "vertical",
-                    backgroundColor: "#F8FAFC",
-                    cornerRadius: "10px",
-                    paddingAll: "12px",
-                    borderColor: "#E2E8F0",
-                    borderWidth: "1px",
-                    contents: [
-                      { type: "text", text: `📌 已鎖定項目：${displayTitle}`, size: "xs", color: "#64748B", wrap: true },
-                      { type: "text", text: `應繳金額：NT$ ${Number(displayAmt || 0).toLocaleString()}`, size: "sm", color: "#1E293B", weight: "bold", margin: "xs" }
-                    ]
-                  },
-                  {
-                    type: "box",
-                    layout: "vertical",
-                    backgroundColor: "#EEF2FF",
-                    cornerRadius: "10px",
-                    paddingAll: "14px",
-                    spacing: "xs",
-                    contents: [
-                      { type: "text", text: "👇 請直接在「下方 LINE 訊息輸入框」輸入：", size: "xs", color: "#3730A3", weight: "bold" },
-                      { type: "text", text: "您的【轉帳末五碼】（5 位數字，例如直接輸入 88621）發送，系統將立即為您完成回報並通知房東開立收據！", size: "xs", color: "#4338CA", wrap: true }
-                    ]
-                  }
-                ]
-              },
-              footer: {
-                type: "box",
-                layout: "horizontal",
-                spacing: "sm",
-                paddingAll: "12px",
-                contents: [
-                  {
-                    type: "button",
-                    style: "secondary",
-                    height: "sm",
-                    action: {
-                      type: "postback",
-                      label: "💵 改用現金交付",
-                      data: `action=report_cash&id=${targetId}&title=${encodeURIComponent(displayTitle)}&amount=${displayAmt}`
-                    }
-                  },
-                  {
-                    type: "button",
-                    style: "secondary",
-                    height: "sm",
-                    action: { type: "message", label: "⏳ 返回待繳帳單", text: "待繳帳單" }
-                  }
-                ]
-              }
-            },
-            quickReply: {
-              items: [
-                {
-                  type: "action",
-                  action: { type: "message", label: "💵 現金交付", text: "現金交付" }
-                },
-                {
-                  type: "action",
-                  action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" }
-                }
-              ]
-            }
-          }
+          buildTransferGuideFlex(payment, displayTitle, displayAmt, targetId)
         ]);
         continue;
       }
@@ -4540,87 +4646,7 @@ serve(async (req: Request) => {
             const displayTitle = getPaymentTitle(targetPayment);
             const displayAmt = targetPayment.amount;
             await replyLineMessage(replyToken, [
-              {
-                type: "flex",
-                altText: `🏦 請在下方輸入【${displayTitle}】轉帳末五碼`,
-                contents: {
-                  type: "bubble",
-                  size: "mega",
-                  header: {
-                    type: "box",
-                    layout: "vertical",
-                    backgroundColor: "#312E81",
-                    paddingAll: "16px",
-                    contents: [
-                      { type: "text", text: "智慧租屋 · 銀行轉帳回報", color: "#C7D2FE", size: "xs", weight: "bold" },
-                      { type: "text", text: "🏦 填寫轉帳末五碼", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" }
-                    ]
-                  },
-                  body: {
-                    type: "box",
-                    layout: "vertical",
-                    paddingAll: "18px",
-                    spacing: "md",
-                    contents: [
-                      {
-                        type: "box",
-                        layout: "vertical",
-                        backgroundColor: "#F8FAFC",
-                        cornerRadius: "10px",
-                        paddingAll: "12px",
-                        borderColor: "#E2E8F0",
-                        borderWidth: "1px",
-                        contents: [
-                          { type: "text", text: `📌 已鎖定項目：${displayTitle}`, size: "xs", color: "#64748B", wrap: true },
-                          { type: "text", text: `應繳金額：NT$ ${Number(displayAmt || 0).toLocaleString()}`, size: "sm", color: "#1E293B", weight: "bold", margin: "xs" }
-                        ]
-                      },
-                      {
-                        type: "box",
-                        layout: "vertical",
-                        backgroundColor: "#EEF2FF",
-                        cornerRadius: "10px",
-                        paddingAll: "14px",
-                        spacing: "xs",
-                        contents: [
-                          { type: "text", text: "👇 請直接在「下方 LINE 訊息輸入框」輸入：", size: "xs", color: "#3730A3", weight: "bold" },
-                          { type: "text", text: "您的【轉帳末五碼】（5 位數字，例如直接輸入 88621）發送，系統將立即為您完成回報並通知房東開立收據！", size: "xs", color: "#4338CA", wrap: true }
-                        ]
-                      }
-                    ]
-                  },
-                  footer: {
-                    type: "box",
-                    layout: "horizontal",
-                    spacing: "sm",
-                    paddingAll: "12px",
-                    contents: [
-                      {
-                        type: "button",
-                        style: "secondary",
-                        height: "sm",
-                        action: {
-                          type: "postback",
-                          label: "💵 改用現金交付",
-                          data: `action=report_cash&id=${targetPayment.id}&title=${encodeURIComponent(displayTitle)}&amount=${displayAmt}`
-                        }
-                      },
-                      {
-                        type: "button",
-                        style: "secondary",
-                        height: "sm",
-                        action: { type: "message", label: "⏳ 返回待繳帳單", text: "待繳帳單" }
-                      }
-                    ]
-                  }
-                },
-                quickReply: {
-                  items: [
-                    { type: "action", action: { type: "message", label: "💵 現金交付", text: "現金交付" } },
-                    { type: "action", action: { type: "message", label: "⏳ 待繳帳單", text: "待繳帳單" } }
-                  ]
-                }
-              }
+              buildTransferGuideFlex(targetPayment, displayTitle, displayAmt, targetPayment.id)
             ]);
             continue;
           }
