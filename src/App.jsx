@@ -460,6 +460,7 @@ export default function App() {
 
   // --- 1. 獨立的資料抓取函式 (使用 useCallback 並在 SQL 層面以 .eq()/.in() 進行身分精確過濾) ---
   const fetchSupabaseDataRef = useRef(null);
+  const showToastRef = useRef(null);
 
   const fetchSupabaseData = useCallback(async (overrideRole, overrideLandlordId, overrideTenantPhone, overrideIsSuperadmin) => {
     if (!isSupabaseConfigured) return;
@@ -1457,26 +1458,139 @@ export default function App() {
     };
   }, []);
 
-  // --- 3. 穩定掛載 Realtime 頻道 (掛載一次，透過 Ref 呼叫最新 fetchSupabaseData，避免重複建立連線) ---
+  // --- 3. 全方位即時同步系統 (Realtime 專屬頻道 + 0.1秒極速更新 + 斷線自動重連 + 視窗聚焦喚醒 + 智慧輪詢兜底) ---
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
     let debounceTimer = null;
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          if (fetchSupabaseDataRef.current) {
-            fetchSupabaseDataRef.current();
-          }
-        }, 500);
-      })
-      .subscribe();
+    let reconnectTimer = null;
+    let channel = null;
+    let isSubscribed = false;
+
+    const triggerRefresh = (reason) => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (fetchSupabaseDataRef.current) {
+          fetchSupabaseDataRef.current();
+        }
+      }, 300);
+    };
+
+    const setupRealtimeChannel = () => {
+      try {
+        if (channel) {
+          supabase.removeChannel(channel);
+        }
+
+        channel = supabase.channel(`realtime-system-${Date.now()}`);
+
+        // A. 針對 payments 表專屬精準監聽（繳費回報、款項狀態變更即時捕捉）
+        channel
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
+            const newPayment = payload.new;
+            // 🎯 若收到租客回報 (tenant_submitted 或 pending_approval)，立即進行樂觀更新 (0.1秒極速反應)
+            if (newPayment && (newPayment.status === 'tenant_submitted' || newPayment.status === 'pending_approval')) {
+              setPayments(prev => {
+                const formattedNew = {
+                  id: newPayment.id,
+                  leaseId: newPayment.lease_id,
+                  tenantName: newPayment.tenant_name,
+                  propertyName: newPayment.property_name,
+                  amount: newPayment.amount,
+                  status: newPayment.status,
+                  billType: newPayment.bill_type || 'rent',
+                  title: formatFeeItemName(newPayment.title, newPayment.bill_type, newPayment.due_date || newPayment.paid_date),
+                  dueDate: newPayment.due_date,
+                  paidDate: newPayment.paid_date,
+                  paymentMethod: newPayment.payment_method,
+                  transferLast5: newPayment.transfer_last5,
+                  note: newPayment.note,
+                  createdAt: newPayment.created_at,
+                  updatedAt: newPayment.updated_at
+                };
+
+                const existingIdx = prev.findIndex(p => p.id === newPayment.id);
+                if (existingIdx >= 0) {
+                  const updated = [...prev];
+                  updated[existingIdx] = { ...updated[existingIdx], ...formattedNew };
+                  return updated;
+                } else {
+                  return [formattedNew, ...prev];
+                }
+              });
+
+              // 🔔 主動發出 Toast 提醒房東查核
+              const amtStr = Number(newPayment.amount || 0).toLocaleString();
+              const payerName = newPayment.tenant_name || '租客';
+              showToastRef.current?.(`🔔 收到「${payerName}」的繳費回報 (NT$ ${amtStr})！請查核入帳`, 'info');
+            }
+
+            // 同步觸發完整資料庫對帳重新獲取
+            triggerRefresh('payment-change');
+          })
+          // B. 針對 leases 合約表變更監聽
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'leases' }, () => {
+            triggerRefresh('lease-change');
+          })
+          // C. 針對 properties 房源表變更監聽
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'properties' }, () => {
+            triggerRefresh('property-change');
+          })
+          // D. 全局 schema 監聽（備援）
+          .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+            triggerRefresh('schema-change');
+          })
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              isSubscribed = true;
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              isSubscribed = false;
+              // 斷線時於 2 秒後自動嘗試重新建立頻道
+              if (reconnectTimer) clearTimeout(reconnectTimer);
+              reconnectTimer = setTimeout(() => {
+                setupRealtimeChannel();
+              }, 2000);
+            }
+          });
+      } catch (err) {
+        console.warn('Realtime channel setup error:', err);
+      }
+    };
+
+    setupRealtimeChannel();
+
+    // --- 第二重保護：當使用者切換分頁回網頁 (Tab Focus / Visible) 時立即自動同步 ---
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerRefresh('tab-visible');
+        if (!isSubscribed) {
+          setupRealtimeChannel();
+        }
+      }
+    };
+    const handleFocus = () => {
+      triggerRefresh('window-focus');
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    // --- 第三重保護：智慧定期輪詢 (每 10 秒輕量同步一次，作為防斷線兜底保護) ---
+    const pollingInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        triggerRefresh('periodic-polling');
+      }
+    }, 10000);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearInterval(pollingInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 
@@ -2818,6 +2932,7 @@ export default function App() {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
   };
+  showToastRef.current = showToast;
 
   const [lineLoginRole, setLineLoginRole] = useState('tenant');
   const [lineLoginInput, setLineLoginInput] = useState('');
