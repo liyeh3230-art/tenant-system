@@ -1075,7 +1075,7 @@ function buildPendingBillsFlex(payments: any[], profile: any = null) {
               }
             ]
           },
-          // 3. 到期日與備註列
+          // 3. 房源與到期日列
           {
             type: "box",
             layout: "horizontal",
@@ -1084,11 +1084,24 @@ function buildPendingBillsFlex(payments: any[], profile: any = null) {
             contents: [
               {
                 type: "text",
-                text: `📅 繳費期限：${dueDateClean || '依約定'}`,
+                text: p.property_name ? `🏠 房源：${p.property_name}` : `📅 繳費期限：${dueDateClean || '依約定'}`,
                 size: "xs",
-                color: isOverdue ? "#DC2626" : "#64748B",
-                weight: isOverdue ? "bold" : "regular"
-              }
+                color: "#64748B",
+                weight: "regular",
+                wrap: true,
+                flex: p.property_name && dueDateClean ? 6 : 1
+              },
+              ...(p.property_name && dueDateClean ? [
+                {
+                  type: "text",
+                  text: `📅 到期：${dueDateClean}`,
+                  size: "xs",
+                  color: isOverdue ? "#DC2626" : "#64748B",
+                  weight: isOverdue ? "bold" : "regular",
+                  align: "end",
+                  flex: 4
+                }
+              ] : [])
             ]
           },
           ...(p.note ? [

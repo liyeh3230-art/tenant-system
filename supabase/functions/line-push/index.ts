@@ -198,7 +198,7 @@ function buildNewBillFlex(params: {
   const amountStr = Number(payment.amount || 0).toLocaleString();
   const titleStr = formatFeeItemName(payment.title, payment.bill_type || payment.billType, payment.due_date || payment.dueDate);
   const dueDateStr = payment.due_date || payment.dueDate || "依約定繳款";
-  const propName = property?.name || lease?.property_name || "承租房源";
+  const propName = property?.name || lease?.property_name || lease?.propertyName || payment?.property_name || payment?.propertyName || "承租房源";
   const noteStr = payment.note ? String(payment.note).trim() : "";
 
   const headerBgColor = isDirectlyPaid ? "#059669" : "#D97706";
@@ -863,13 +863,20 @@ serve(async (req: Request) => {
 
     // 3. Locate Property & Landlord
     let targetProperty = property;
-    if (!targetProperty && targetLease?.property_id) {
+    const propIdToFind = targetProperty?.id || targetLease?.property_id || targetLease?.propertyId || payment?.property_id || payment?.propertyId;
+    if ((!targetProperty || !targetProperty.name) && propIdToFind) {
       const { data: pData } = await supabase
         .from("properties")
         .select("*")
-        .eq("id", targetLease.property_id)
+        .eq("id", propIdToFind)
         .maybeSingle();
-      targetProperty = pData;
+      if (pData) targetProperty = pData;
+    }
+
+    // 若依然沒有 targetProperty 物件但有傳遞名稱，組裝具有 name 的物件
+    const fallbackPropName = targetProperty?.name || property?.name || targetLease?.property_name || targetLease?.propertyName || payment?.property_name || payment?.propertyName;
+    if ((!targetProperty || !targetProperty.name) && fallbackPropName) {
+      targetProperty = { ...(targetProperty || {}), name: fallbackPropName };
     }
 
     let landlord: any = null;

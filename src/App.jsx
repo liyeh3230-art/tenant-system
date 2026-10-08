@@ -4704,22 +4704,41 @@ export default function App() {
                     payment: {
                       id: createdDepositPayment.id,
                       lease_id: newLease.id,
+                      leaseId: newLease.id,
                       amount: createdDepositPayment.amount,
                       bill_type: createdDepositPayment.billType,
+                      billType: createdDepositPayment.billType,
                       title: createdDepositPayment.title,
                       due_date: createdDepositPayment.dueDate,
+                      dueDate: createdDepositPayment.dueDate,
                       status: createdDepositPayment.status,
                       paid_date: createdDepositPayment.paidDate,
-                      note: createdDepositPayment.note
+                      note: createdDepositPayment.note,
+                      property_name: createdDepositPayment.propertyName,
+                      propertyName: createdDepositPayment.propertyName,
+                      property_id: leasePropId,
+                      propertyId: leasePropId
                     },
                     lease: {
                       id: newLease.id,
                       tenantName: newLease.tenantName,
                       phone: newLease.phone,
                       landlordId: currentLandlordId,
-                      propertyId: leasePropId
-                    }
+                      propertyId: leasePropId,
+                      property_id: leasePropId,
+                      propertyName: targetProp?.name || createdDepositPayment.propertyName,
+                      property_name: targetProp?.name || createdDepositPayment.propertyName
+                    },
+                    property: targetProp ? { id: targetProp.id, name: targetProp.name } : { name: createdDepositPayment.propertyName }
                   }
+                }).then(({ data: pushRes, error: pushErr }) => {
+                  if (pushErr) {
+                    console.warn('LINE push notification warning for deposit:', pushErr);
+                  } else if (pushRes?.pushed) {
+                    console.log(`📲 已自動發送 LINE 押金待繳帳單通知至「${newLease.tenantName}」的手機！`);
+                  }
+                }).catch(err => {
+                  console.warn('LINE push async call failed for deposit:', err);
                 });
               } catch (pushErr) {
                 console.error('Line push notification error for deposit:', pushErr);
