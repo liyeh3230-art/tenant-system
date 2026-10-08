@@ -223,6 +223,8 @@ function getCategoryMeta(billType: string | undefined | null) {
   switch (type) {
     case "rent":
       return { key: "rent", label: "房屋租金", icon: "🏠", color: "#4F46E5", bg: "#EEF2FF", border: "#C7D2FE" };
+    case "reservation":
+      return { key: "reservation", label: "訂金", icon: "📝", color: "#8B5CF6", bg: "#F5F3FF", border: "#DDD6FE" };
     case "deposit":
       return { key: "deposit", label: "押金保證金", icon: "🔒", color: "#0D9488", bg: "#F0FDFA", border: "#99F6E4" };
     case "management":
@@ -250,6 +252,7 @@ function getCategoryMeta(billType: string | undefined | null) {
 function formatFeeItemName(title?: string | null, billType?: string | null, dueDate?: string | null): string {
   const typeMap: Record<string, string> = {
     rent: '租金',
+    reservation: '訂金',
     deposit: '押金',
     electricity: '電費',
     power: '電費',
@@ -274,6 +277,7 @@ function formatFeeItemName(title?: string | null, billType?: string | null, dueD
     else if (raw.includes('瓦斯')) baseType = '瓦斯費';
     else if (raw.includes('管理')) baseType = '管理費';
     else if (raw.includes('租金')) baseType = '租金';
+    else if (raw.includes('訂金')) baseType = '訂金';
     else if (raw.includes('押金')) baseType = '押金';
     else if (raw.includes('車位')) baseType = '車位費';
     else if (raw.includes('修繕') || raw.includes('維修')) baseType = '修繕費';

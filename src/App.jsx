@@ -28,6 +28,7 @@ import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 export const categoryMap = {
   rent: { label: '租金', icon: '🏠', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  reservation: { label: '訂金', icon: '📝', color: 'bg-violet-50 text-violet-700 border-violet-200' },
   deposit: { label: '押金保證金', icon: '🔒', color: 'bg-purple-50 text-purple-700 border-purple-200' },
   utilities: { label: '水電費', icon: '⚡', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
   management: { label: '管理費', icon: '🏢', color: 'bg-teal-50 text-teal-700 border-teal-200' },
@@ -50,6 +51,7 @@ export const formatPaymentMethod = (method) => {
 export const formatFeeItemName = (title, billType, dueDate) => {
   const typeMap = {
     rent: '租金',
+    reservation: '訂金',
     deposit: '押金',
     electricity: '電費',
     power: '電費',
@@ -74,6 +76,7 @@ export const formatFeeItemName = (title, billType, dueDate) => {
     else if (raw.includes('瓦斯')) baseType = '瓦斯費';
     else if (raw.includes('管理')) baseType = '管理費';
     else if (raw.includes('租金')) baseType = '租金';
+    else if (raw.includes('訂金')) baseType = '訂金';
     else if (raw.includes('押金')) baseType = '押金';
     else if (raw.includes('車位')) baseType = '車位費';
     else if (raw.includes('修繕') || raw.includes('維修')) baseType = '修繕費';
@@ -382,6 +385,8 @@ export default function App() {
   const [leaseStartDate, setLeaseStartDate] = useState('');
   const [leaseEndDate, setLeaseEndDate] = useState('');
   const [leaseDeposit, setLeaseDeposit] = useState('');
+  const [leaseDepositStatus, setLeaseDepositStatus] = useState('paid'); // 'paid' | 'pending'
+  const [leaseDepositPaymentMethod, setLeaseDepositPaymentMethod] = useState('現金交付'); // '現金交付' | '銀行轉帳'
   const [leaseUnitRent, setLeaseUnitRent] = useState('');
   const [leasePeriodCount, setLeasePeriodCount] = useState('12');
   const [leaseUnitType, setLeaseUnitType] = useState('monthly'); // 'monthly' | 'yearly'
@@ -4404,6 +4409,8 @@ export default function App() {
     setLeaseStartDate(startStr);
     setLeaseEndDate(endStr);
     setLeaseDeposit(''); // 履約押金不預設金額
+    setLeaseDepositStatus('paid');
+    setLeaseDepositPaymentMethod('現金交付');
 
     // 3個計算欄位: (月/年)租金 * 合約期(月/年) = 合約總租金，依房源所設定之租金與週期同步預設
     const defaultUnitRent = vacantProp ? (vacantProp.rent || 15000) : 15000;
@@ -4637,8 +4644,100 @@ export default function App() {
         if (prev.some(l => l.id === newLease.id)) return prev;
         return [...prev, newLease];
       });
+
+      // 🎯 若填寫了履約押金金額 (> 0)，依選擇自動建立「已繳押金」或「待繳押金」款項紀錄
+      if (newLease.deposit > 0) {
+        const isDepPaid = leaseDepositStatus === 'paid';
+        const nowIso = new Date().toISOString();
+        const depPaymentId = `DEP${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        const targetProp = properties.find(p => p.id === leasePropId);
+        const depDueDate = leaseStartDate || nowIso.split('T')[0];
+
+        const createdDepositPayment = {
+          id: depPaymentId,
+          leaseId: newLease.id,
+          tenantName: newLease.tenantName,
+          propertyName: targetProp?.name || '租賃房源',
+          amount: newLease.deposit,
+          dueDate: depDueDate,
+          status: isDepPaid ? 'paid' : 'pending',
+          paidDate: isDepPaid ? depDueDate : null,
+          billType: 'deposit',
+          title: '合約履約押金',
+          paymentMethod: isDepPaid ? leaseDepositPaymentMethod : null,
+          creatorRole: 'landlord',
+          approvalStatus: 'approved',
+          note: isDepPaid ? `簽約時已繳清合約履約押金 (${leaseDepositPaymentMethod})` : '簽約時建立之待繳合約履約押金',
+          createdAt: nowIso,
+          updatedAt: nowIso
+        };
+
+        if (isSupabaseConfigured) {
+          try {
+            const { data: depRows, error: depErr } = await supabase.from('payments').insert({
+              id: createdDepositPayment.id,
+              lease_id: newLease.id,
+              tenant_name: createdDepositPayment.tenantName,
+              property_name: createdDepositPayment.propertyName,
+              amount: createdDepositPayment.amount,
+              due_date: createdDepositPayment.dueDate,
+              status: createdDepositPayment.status,
+              paid_date: createdDepositPayment.paidDate,
+              bill_type: createdDepositPayment.billType,
+              title: createdDepositPayment.title,
+              payment_method: createdDepositPayment.paymentMethod,
+              note: createdDepositPayment.note
+            }).select();
+
+            if (!depErr && depRows && depRows[0]) {
+              createdDepositPayment.id = depRows[0].id;
+              createdDepositPayment.createdAt = depRows[0].created_at || nowIso;
+              createdDepositPayment.updatedAt = depRows[0].updated_at || nowIso;
+            }
+
+            // 若為「待繳押金」，且租客有綁定 LINE，自動推播待繳帳單
+            if (!isDepPaid) {
+              try {
+                supabase.functions.invoke('line-push', {
+                  body: {
+                    action: 'push_bill',
+                    payment: {
+                      id: createdDepositPayment.id,
+                      lease_id: newLease.id,
+                      amount: createdDepositPayment.amount,
+                      bill_type: createdDepositPayment.billType,
+                      title: createdDepositPayment.title,
+                      due_date: createdDepositPayment.dueDate,
+                      status: createdDepositPayment.status,
+                      paid_date: createdDepositPayment.paidDate,
+                      note: createdDepositPayment.note
+                    },
+                    lease: {
+                      id: newLease.id,
+                      tenantName: newLease.tenantName,
+                      phone: newLease.phone,
+                      landlordId: currentLandlordId,
+                      propertyId: leasePropId
+                    }
+                  }
+                });
+              } catch (pushErr) {
+                console.error('Line push notification error for deposit:', pushErr);
+              }
+            }
+          } catch (depInsertErr) {
+            console.error('Failed to create deposit payment in Supabase:', depInsertErr);
+          }
+        }
+
+        setPayments(prev => [createdDepositPayment, ...prev]);
+      }
+
       setActiveModal(null);
-      showToast(`已成功建立「${leaseTenantName.trim()}」的租約紀錄！合約總租金：NT$ ${totalRent.toLocaleString()}`, 'success');
+      const depositMsg = newLease.deposit > 0
+        ? (leaseDepositStatus === 'paid' ? `，並已自動新增已繳押金 NT$ ${newLease.deposit.toLocaleString()}！` : `，並已自動建立待繳押金 NT$ ${newLease.deposit.toLocaleString()} 帳單！`)
+        : '！';
+      showToast(`已成功建立「${leaseTenantName.trim()}」的租約紀錄${depositMsg}`, 'success');
       fetchSupabaseData();
     } catch (err) {
       showToast(`建立租約失敗: ${err.message}`, 'error');
@@ -5036,6 +5135,7 @@ export default function App() {
 
     const typeLabels = {
       rent: '租金',
+      reservation: '訂金',
       deposit: '押金保證金',
       utilities: '水電費',
       management: '管理費',
@@ -5314,6 +5414,7 @@ export default function App() {
 
     const typeLabels = {
       rent: '租金',
+      reservation: '訂金',
       deposit: '押金保證金',
       utilities: '水電費',
       management: '管理費',
@@ -7241,6 +7342,7 @@ export default function App() {
 
               const categoryMap = {
                 rent: { label: '租金', icon: '🏠', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                reservation: { label: '訂金', icon: '📝', color: 'bg-violet-50 text-violet-700 border-violet-200' },
                 deposit: { label: '押金保證金', icon: '🔒', color: 'bg-purple-50 text-purple-700 border-purple-200' },
                 utilities: { label: '水電費', icon: '⚡', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
                 management: { label: '管理費', icon: '🏢', color: 'bg-teal-50 text-teal-700 border-teal-200' },
@@ -9058,6 +9160,7 @@ export default function App() {
 
                       const categoryMap = {
                         rent: { label: '租金', icon: '🏠', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                        reservation: { label: '訂金', icon: '📝', color: 'bg-violet-50 text-violet-700 border-violet-200' },
                         deposit: { label: '押金保證金', icon: '🔒', color: 'bg-purple-50 text-purple-700 border-purple-200' },
                         utilities: { label: '水電費', icon: '⚡', color: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
                         management: { label: '管理費', icon: '🏢', color: 'bg-teal-50 text-teal-700 border-teal-200' },
@@ -10927,16 +11030,80 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">履約押金金額 (NT$)</label>
-                    <input
-                      type="number"
-                      placeholder="請輸入押金金額"
-                      value={leaseDeposit}
-                      onChange={(e) => setLeaseDeposit(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                      required
-                    />
+                  <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                        <span>🔒 履約押金</span>
+                      </label>
+                      <div className="inline-flex items-center bg-slate-200/70 p-0.5 rounded-lg border border-slate-300/50">
+                        <button
+                          type="button"
+                          onClick={() => setLeaseDepositStatus('paid')}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${
+                            leaseDepositStatus === 'paid'
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span>✅</span>
+                          <span>已繳交</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLeaseDepositStatus('pending')}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${
+                            leaseDepositStatus === 'pending'
+                              ? 'bg-amber-500 text-white shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <span>⏳</span>
+                          <span>待繳交</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                      <div className={leaseDepositStatus === 'paid' ? 'sm:col-span-7' : 'sm:col-span-12'}>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">NT$</span>
+                          <input
+                            type="number"
+                            placeholder="請輸入押金金額"
+                            value={leaseDeposit}
+                            onChange={(e) => setLeaseDeposit(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold text-slate-800"
+                            required
+                          />
+                        </div>
+                      </div>
+                      {leaseDepositStatus === 'paid' && (
+                        <div className="sm:col-span-5">
+                          <select
+                            value={leaseDepositPaymentMethod}
+                            onChange={(e) => setLeaseDepositPaymentMethod(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold outline-none focus:border-indigo-500 text-slate-700"
+                          >
+                            <option value="現金交付">💵 現金交付</option>
+                            <option value="銀行轉帳">🏦 銀行轉帳</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] leading-relaxed">
+                      {leaseDepositStatus === 'paid' ? (
+                        <span className="text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium inline-flex items-center gap-1">
+                          <span>💡</span>
+                          <span>簽約完成時，系統將自動新增一筆已繳押金費用（{leaseDepositPaymentMethod}）。</span>
+                        </span>
+                      ) : (
+                        <span className="text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/80 font-medium inline-flex items-center gap-1">
+                          <span>💡</span>
+                          <span>簽約完成時，系統將自動新增一筆待繳押金費用，供租客後續繳費對帳。</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Three Calculation Fields: (月/年)租金 * 合約期(月/年) = 合約總租金 */}
@@ -11805,7 +11972,7 @@ export default function App() {
                         className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
                       >
                         <option value="rent">🏠 租金</option>
-                        <option value="deposit">🔒 押金保證金</option>
+                        <option value="reservation">📝 訂金</option>
                         <option value="utilities">⚡ 水電費</option>
                         <option value="management">🏢 管理費</option>
                         <option value="other">📦 其他</option>
@@ -12900,7 +13067,7 @@ export default function App() {
                             className="w-full border border-slate-200 bg-white rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:border-indigo-600"
                           >
                             <option value="rent">🏠 租金</option>
-                            <option value="deposit">🔒 押金保證金</option>
+                            <option value="reservation">📝 訂金</option>
                             <option value="utilities">⚡ 水電費</option>
                             <option value="management">🏢 管理費</option>
                             <option value="other">📦 其他</option>
