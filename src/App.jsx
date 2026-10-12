@@ -334,6 +334,7 @@ export default function App() {
   const [customBillAmount, setCustomBillAmount] = useState('');
   const [customBillDueDate, setCustomBillDueDate] = useState('');
   const [customBillNote, setCustomBillNote] = useState('');
+  const [customBillStep, setCustomBillStep] = useState(1); // 1: 選擇操作情境, 2: 填寫表單內容
   const [customBillPaymentType, setCustomBillPaymentType] = useState('paid'); // 'paid' (已收款直接入帳) | 'pending' (待繳帳單)
   const [customBillPaymentMethod, setCustomBillPaymentMethod] = useState('bank');
 
@@ -5246,10 +5247,23 @@ export default function App() {
     const dueDateStr = oneMonthLater.toISOString().split('T')[0];
     setCustomBillDueDate(dueDateStr);
 
-    setCustomBillPaymentType('paid'); // Default: record directly as paid
+    setCustomBillStep(1); // 預設進入第一步情境選擇
+    setCustomBillPaymentType('pending'); // 預設意向為待繳請款
     setCustomBillPaymentMethod('bank');
     setCustomBillNote('');
     setActiveModal('addCustomBill');
+  };
+
+  const handleSelectCustomBillMode = (mode) => {
+    setCustomBillPaymentType(mode);
+    if (mode === 'pending') {
+      const oneMonthLater = new Date();
+      oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+      setCustomBillDueDate(oneMonthLater.toISOString().split('T')[0]);
+    } else {
+      setCustomBillDueDate(new Date().toISOString().split('T')[0]);
+    }
+    setCustomBillStep(2);
   };
 
   const handleSaveCustomBill = async (e) => {
@@ -10560,7 +10574,13 @@ export default function App() {
                 {activeModal === 'viewLandlordProperties' && '旗下房源物件清單'}
                 {activeModal === 'recordPayment' && '確認帳單入帳與收款登記'}
                 {activeModal === 'viewReceipt' && '租金電子繳費證明收據'}
-                {activeModal === 'addCustomBill' && '新增帳單 / 記錄已收款項 (房東端)'}
+                {activeModal === 'addCustomBill' && (
+                  customBillStep === 1
+                    ? '➕ 新增費用與帳單 - 請先選擇操作情境'
+                    : customBillPaymentType === 'pending'
+                      ? '📝 開立待繳帳單 (向租客請款)'
+                      : '💵 登記已收款項 (直接入帳核銷)'
+                )}
                 {activeModal === 'tenantReportPayment' && '回報已繳費用'}
                 {activeModal === 'tenantPay' && '回報已繳費用'}
               </h3>
@@ -12016,186 +12036,356 @@ export default function App() {
                 );
               })()}
 
-              {/* Add Custom Bill / Direct Record Modal (Landlord) */}
+              {/* Add Custom Bill / Direct Record Modal (Landlord) - Two-Step Wizard */}
               {activeModal === 'addCustomBill' && (
-                <form onSubmit={handleSaveCustomBill} className="space-y-4">
-                  {/* Mode Selector */}
-                  <div className="bg-slate-100 p-1.5 rounded-xl flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setCustomBillPaymentType('paid')}
-                      className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${customBillPaymentType === 'paid'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                    >
-                      <CheckCircle size={14} />
-                      <span>直接登記為已收訖 (立即入帳)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCustomBillPaymentType('pending')}
-                      className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${customBillPaymentType === 'pending'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                    >
-                      <Clock size={14} />
-                      <span>開立待繳帳單 (未入帳)</span>
-                    </button>
-                  </div>
+                <>
+                  {/* STEP 1: 第一步確認業務情境大卡片 */}
+                  {customBillStep === 1 && (
+                    <div className="space-y-6 py-2">
+                      <div className="text-center space-y-1.5 border-b border-slate-100 pb-4">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold border border-indigo-200/80">
+                          <span>步驟 1 / 2</span>
+                          <span>•</span>
+                          <span>情境確認</span>
+                        </span>
+                        <h4 className="text-base sm:text-lg font-bold text-slate-800">
+                          請問您本次要執行的款項情境為何？
+                        </h4>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                          請先選擇以下作業情境。系統將依據您的選擇自動切換對應的表單欄位與 LINE 推播通知設定。
+                        </p>
+                      </div>
 
-                  <div className={`p-3 rounded-xl text-xs font-medium border ${customBillPaymentType === 'paid'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                    }`}>
-                    {customBillPaymentType === 'paid'
-                      ? '⚡ 房東直接記錄已收到的費用，系統將直接標記為「已繳清」並可隨時開立電子收據，不需房客審核。'
-                      : '📝 房東開立應繳帳單，房客端將收到即時提醒並計入「尚餘租金/待繳費用」。'}
-                  </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* 情境 A：開立待繳帳單 (向租客請款) */}
+                        <div
+                          onClick={() => handleSelectCustomBillMode('pending')}
+                          className="group relative text-left bg-gradient-to-b from-indigo-50/80 via-white to-white hover:from-indigo-100/80 hover:border-indigo-500 border-2 border-indigo-200/90 rounded-2xl p-5 sm:p-6 transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer flex flex-col justify-between"
+                        >
+                          <div className="space-y-3.5">
+                            <div className="flex items-center justify-between">
+                              <span className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+                                <Clock size={24} />
+                              </span>
+                              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100/90 px-2.5 py-1 rounded-full border border-indigo-200">
+                                ⏳ 待繳納 · 未入帳
+                              </span>
+                            </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">選擇承租合約與房客</label>
-                    <select
-                      value={customBillLeaseId}
-                      onChange={(e) => {
-                        setCustomBillLeaseId(e.target.value);
-                        const selLease = leases.find(l => l.id === e.target.value);
-                        if (selLease && customBillCategory === 'rent') setCustomBillAmount(getLeaseMonthlyRent(selLease).toString());
-                      }}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                      required
-                    >
-                      {leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active').map(l => {
-                        const p = properties.find(prop => prop.id === l.propertyId);
-                        return (
-                          <option key={l.id} value={l.id}>
-                            {l.tenantName} · {p ? p.name : '未知房源'} ({l.startDate} ~ {l.endDate})
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
+                            <div>
+                              <h5 className="font-bold text-slate-900 text-base sm:text-lg group-hover:text-indigo-600 transition-colors flex items-center gap-1.5">
+                                <span>開立待繳帳單</span>
+                                <span className="text-xs text-indigo-500 font-semibold">(向租客請款)</span>
+                              </h5>
+                              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                                開立租金、水電瓦斯、管理費等尚未收到之款項。系統將計入待收餘額，並自動發送 <strong>LINE 帳單卡片</strong> 提醒租客繳費。
+                              </p>
+                            </div>
 
-                  {/* LINE Bot 自動推播提示卡片 */}
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/90 text-xs">
-                    <div className="flex items-center space-x-2">
-                      <span className="flex h-2.5 w-2.5 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                      </span>
-                      <span className="font-bold text-emerald-900">📲 LINE 官方機器人推播</span>
-                    </div>
-                    <span className="text-emerald-700 text-xxs font-semibold">
-                      儲存後系統將自動將此帳單 Flex 票卡發送至租客 LINE
-                    </span>
-                  </div>
+                            <div className="bg-indigo-50/60 rounded-xl p-2.5 border border-indigo-100/80 text-[11px] text-indigo-900 space-y-1">
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span>📲</span>
+                                <span>租客 LINE 即時接收繳款通知</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span>📊</span>
+                                <span>自動列入待收總額與帳單管理名冊</span>
+                              </div>
+                            </div>
+                          </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">費用類別</label>
-                      <select
-                        value={customBillCategory}
-                        onChange={(e) => {
-                          setCustomBillCategory(e.target.value);
-                          if (e.target.value === 'rent') {
-                            const selLease = leases.find(l => l.id === customBillLeaseId);
-                            if (selLease) setCustomBillAmount(getLeaseMonthlyRent(selLease).toString());
-                          }
-                        }}
-                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                      >
-                        <option value="rent">🏠 租金</option>
-                        <option value="reservation">📝 訂金</option>
-                        <option value="utilities">⚡ 水電費</option>
-                        <option value="management">🏢 管理費</option>
-                        <option value="other">📦 其他</option>
-                      </select>
-                    </div>
+                          <div className="pt-4 mt-3 border-t border-indigo-100 flex items-center justify-between text-xs font-bold text-indigo-600 group-hover:translate-x-1 transition-transform duration-200">
+                            <span>選擇此情境，填寫帳單內容</span>
+                            <span className="text-base">→</span>
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">金額 (NT$)</label>
-                      <input
-                        type="number"
-                        placeholder="例如：3500"
-                        value={customBillAmount}
-                        onChange={(e) => setCustomBillAmount(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                        required
-                        min="1"
-                      />
-                    </div>
-                  </div>
+                        {/* 情境 B：登記已收款項 (直接入帳) */}
+                        <div
+                          onClick={() => handleSelectCustomBillMode('paid')}
+                          className="group relative text-left bg-gradient-to-b from-emerald-50/80 via-white to-white hover:from-emerald-100/80 hover:border-emerald-500 border-2 border-emerald-200/90 rounded-2xl p-5 sm:p-6 transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer flex flex-col justify-between"
+                        >
+                          <div className="space-y-3.5">
+                            <div className="flex items-center justify-between">
+                              <span className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+                                <CheckCircle size={24} />
+                              </span>
+                              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/90 px-2.5 py-1 rounded-full border border-emerald-200">
+                                ✅ 已收訖 · 立即入帳
+                              </span>
+                            </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">月份 / 其他項目</label>
-                      <input
-                        type="text"
-                        placeholder="例如：10月份 (未填則預設本月份)"
-                        value={customBillTitle}
-                        onChange={(e) => setCustomBillTitle(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500"
-                      />
-                    </div>
+                            <div>
+                              <h5 className="font-bold text-slate-900 text-base sm:text-lg group-hover:text-emerald-600 transition-colors flex items-center gap-1.5">
+                                <span>登記已收款項</span>
+                                <span className="text-xs text-emerald-600 font-semibold">(直接入帳核銷)</span>
+                              </h5>
+                              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                                租客已透過現金交付或銀行轉帳付訖。系統將直接標記為「已繳清」並核銷帳目，可立即產生並下載<strong>電子收據憑單</strong>。
+                              </p>
+                            </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-                        {customBillPaymentType === 'paid' ? '收款/入帳日期' : '應繳截止日期'}
-                      </label>
-                      <input
-                        type="date"
-                        value={customBillDueDate}
-                        onChange={(e) => setCustomBillDueDate(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                        required
-                      />
-                    </div>
-                  </div>
+                            <div className="bg-emerald-50/60 rounded-xl p-2.5 border border-emerald-100/80 text-[11px] text-emerald-900 space-y-1">
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span>🧾</span>
+                                <span>立即開立電子收據憑單</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 font-medium">
+                                <span>💰</span>
+                                <span>直接認列實收金額，扣減合約尚餘租金</span>
+                              </div>
+                            </div>
+                          </div>
 
-                  {customBillPaymentType === 'paid' && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-500 mb-1.5">收款管道方式</label>
-                      <select
-                        value={customBillPaymentMethod}
-                        onChange={(e) => setCustomBillPaymentMethod(e.target.value)}
-                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
-                      >
-                        <option value="bank">銀行轉帳</option>
-                        <option value="cash">現金交付</option>
-                      </select>
+                          <div className="pt-4 mt-3 border-t border-emerald-100 flex items-center justify-between text-xs font-bold text-emerald-600 group-hover:translate-x-1 transition-transform duration-200">
+                            <span>選擇此情境，記錄收訖內容</span>
+                            <span className="text-base">→</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal(null)}
+                          className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                        >
+                          取消關閉
+                        </button>
+                      </div>
                     </div>
                   )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">備註說明 (選填)</label>
-                    <textarea
-                      rows="2"
-                      placeholder="例如：電表度數 1240 -> 1450，共 210 度..."
-                      value={customBillNote}
-                      onChange={(e) => setCustomBillNote(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-indigo-500"
-                    />
-                  </div>
+                  {/* STEP 2: 第二步專屬表單內容填寫 */}
+                  {customBillStep === 2 && (
+                    <form onSubmit={handleSaveCustomBill} className="space-y-4">
+                      {/* 頂部導引列：返回上一步與當前模式標籤 */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCustomBillStep(1)}
+                          className="inline-flex items-center text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors group cursor-pointer w-fit"
+                        >
+                          <span className="mr-1 group-hover:-translate-x-1 transition-transform">←</span>
+                          <span>上一步：更換情境</span>
+                        </button>
 
-                  <div className="pt-3 flex justify-end space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => setActiveModal(null)}
-                      className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors focus:outline-none"
-                    >
-                      取消
-                    </button>
-                    <button
-                      type="submit"
-                      className={`px-5 py-2 text-sm font-semibold text-white rounded-xl transition-colors focus:outline-none shadow-xs flex items-center space-x-1.5 ${customBillPaymentType === 'paid' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
-                        }`}
-                    >
-                      <CheckCircle size={15} />
-                      <span>{customBillPaymentType === 'paid' ? '直接記錄已收款入帳' : '確認開立待繳帳單'}</span>
-                    </button>
-                  </div>
-                </form>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400">當前情境：</span>
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${
+                            customBillPaymentType === 'pending'
+                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          }`}>
+                            {customBillPaymentType === 'pending' ? (
+                              <>
+                                <Clock size={13} />
+                                <span>開立待繳帳單 (向租客請款)</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle size={13} />
+                                <span>登記已收款項 (直接入帳核銷)</span>
+                              </>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectCustomBillMode(customBillPaymentType === 'pending' ? 'paid' : 'pending')}
+                            className="text-xs text-slate-400 hover:text-slate-700 underline font-semibold ml-1 cursor-pointer"
+                          >
+                            快速切換
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 情境說明提示條 */}
+                      <div className={`p-3 rounded-xl text-xs font-medium border flex items-center gap-2.5 ${
+                        customBillPaymentType === 'paid'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                      }`}>
+                        <span className="text-base">{customBillPaymentType === 'paid' ? '🧾' : '📲'}</span>
+                        <div className="leading-relaxed">
+                          {customBillPaymentType === 'paid'
+                            ? '房東直接記錄已收到的費用，系統將直接標記為「已繳清」並可隨時開立電子收據，不需租客核對。'
+                            : '開立應繳帳單後，系統將主動發送 LINE 帳單通知提醒租客，並計入「尚餘租金/待繳費用」。'}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">選擇承租合約與房客</label>
+                        <select
+                          value={customBillLeaseId}
+                          onChange={(e) => {
+                            setCustomBillLeaseId(e.target.value);
+                            const selLease = leases.find(l => l.id === e.target.value);
+                            if (selLease && customBillCategory === 'rent') setCustomBillAmount(getLeaseMonthlyRent(selLease).toString());
+                          }}
+                          className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
+                          required
+                        >
+                          {leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active').map(l => {
+                            const p = properties.find(prop => prop.id === l.propertyId);
+                            return (
+                              <option key={l.id} value={l.id}>
+                                {l.tenantName} · {p ? p.name : '未知房源'} ({l.startDate} ~ {l.endDate})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* 情境專屬狀態提醒卡片 */}
+                      {customBillPaymentType === 'pending' ? (
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-indigo-50/80 border border-indigo-200/90 text-xs">
+                          <div className="flex items-center space-x-2">
+                            <span className="flex h-2.5 w-2.5 relative">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500"></span>
+                            </span>
+                            <span className="font-bold text-indigo-900">📲 LINE 官方機器人推播</span>
+                          </div>
+                          <span className="text-indigo-700 text-xxs font-semibold">
+                            開立後系統將自動將待繳帳單 Flex 票卡推播至租客 LINE
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/90 text-xs">
+                          <div className="flex items-center space-x-2">
+                            <span className="p-1 bg-emerald-500 text-white rounded-lg">
+                              <CheckCircle size={13} />
+                            </span>
+                            <span className="font-bold text-emerald-900">🧾 電子憑證立即入帳</span>
+                          </div>
+                          <span className="text-emerald-700 text-xxs font-semibold">
+                            登記入帳後直接認列實收，並可立即下載電子收據憑單
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1.5">費用類別</label>
+                          <select
+                            value={customBillCategory}
+                            onChange={(e) => {
+                              setCustomBillCategory(e.target.value);
+                              if (e.target.value === 'rent') {
+                                const selLease = leases.find(l => l.id === customBillLeaseId);
+                                if (selLease) setCustomBillAmount(getLeaseMonthlyRent(selLease).toString());
+                              }
+                            }}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
+                          >
+                            <option value="rent">🏠 租金</option>
+                            <option value="reservation">📝 訂金</option>
+                            <option value="utilities">⚡ 水電費</option>
+                            <option value="management">🏢 管理費</option>
+                            <option value="other">📦 其他</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1.5">金額 (NT$)</label>
+                          <input
+                            type="number"
+                            placeholder="例如：3500"
+                            value={customBillAmount}
+                            onChange={(e) => setCustomBillAmount(e.target.value)}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
+                            required
+                            min="1"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1.5">月份 / 其他項目說明</label>
+                          <input
+                            type="text"
+                            placeholder="例如：10月份 (未填則預設本月份)"
+                            value={customBillTitle}
+                            onChange={(e) => setCustomBillTitle(e.target.value)}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1.5">
+                            {customBillPaymentType === 'paid' ? '📅 實際收款 / 入帳日期' : '📅 應繳截止日期'}
+                          </label>
+                          <input
+                            type="date"
+                            value={customBillDueDate}
+                            onChange={(e) => setCustomBillDueDate(e.target.value)}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {customBillPaymentType === 'paid' && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 mb-1.5">收款管道方式</label>
+                          <select
+                            value={customBillPaymentMethod}
+                            onChange={(e) => setCustomBillPaymentMethod(e.target.value)}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold"
+                          >
+                            <option value="bank">🏦 銀行轉帳</option>
+                            <option value="cash">💵 現金交付</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5">備註說明 (選填)</label>
+                        <textarea
+                          rows="2"
+                          placeholder="例如：電表度數 1240 -> 1450，共 210 度..."
+                          value={customBillNote}
+                          onChange={(e) => setCustomBillNote(e.target.value)}
+                          className="w-full border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div className="pt-3 flex items-center justify-between border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setCustomBillStep(1)}
+                          className="px-3.5 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                        >
+                          ← 更換情境
+                        </button>
+
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setActiveModal(null)}
+                            className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 rounded-xl transition-colors cursor-pointer"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="submit"
+                            className={`px-5 py-2.5 text-xs sm:text-sm font-bold text-white rounded-xl transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer ${
+                              customBillPaymentType === 'paid'
+                                ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'
+                                : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100'
+                            }`}
+                          >
+                            {customBillPaymentType === 'paid' ? <CheckCircle size={15} /> : <Send size={15} />}
+                            <span>
+                              {customBillPaymentType === 'paid' ? '確認直接登記入帳 (已收款)' : '確認開立並發送待繳帳單'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
+                </>
               )}
 
               {/* Role Onboarding Modal: 我是房客 vs 我是房東 */}
