@@ -575,8 +575,8 @@ serve(async (req: Request) => {
         .update({ status: "active:landlord", updated_at: new Date().toISOString() })
         .eq("line_user_id", lineUserId);
 
-      // 4. 即時切換 LINE Rich Menu 為房東管理選單 (richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0)
-      const LANDLORD_RICH_MENU_ID = "richmenu-0cf19bf04cf49c2df9b24f69c2cfa5b0";
+      // 4. 即時切換 LINE Rich Menu 為房東管理選單 (richmenu-1f925c458c1ec02b69a389265ef6ed03)
+      const LANDLORD_RICH_MENU_ID = "richmenu-1f925c458c1ec02b69a389265ef6ed03";
       try {
         await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${LANDLORD_RICH_MENU_ID}`, {
           method: "POST",
