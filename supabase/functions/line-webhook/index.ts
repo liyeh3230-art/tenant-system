@@ -892,9 +892,381 @@ function buildPaidPaymentsFlex(payments: any[], profile: any) {
   };
 }
 
-// 3. 待繳帳單 Flex Message (針對行動裝置與 LINE 閱讀全面優化排版)
-function buildPendingBillsFlex(payments: any[], profile: any = null) {
+// 3. 待繳帳單 Flex Message (一個卡片只顯示一個待繳項目，全面優化排版)
+function buildSingleBillBubble(p: any, index: number, totalCount: number, profileOrCtx: any = null) {
+  const isSubmitted = (p.status === "tenant_submitted" || p.status === "pending_approval");
+  const dueDateClean = p.due_date ? String(p.due_date).substring(0, 10) : "";
+  const todayStr = new Date().toISOString().split("T")[0];
+  const isOverdue = !isSubmitted && dueDateClean && dueDateClean < todayStr;
+  const cat = getCategoryMeta(p.bill_type || p.billType);
+  const title = getPaymentTitle(p);
+  const amountStr = Number(p.amount || 0).toLocaleString();
+
+  // 房源名稱推導 (優先使用帳單房源名稱，次之使用租約/物業名稱)
+  const propDisplay = p.property_name || profileOrCtx?.property?.name || (profileOrCtx?.lease?.room_number ? `${profileOrCtx?.property?.name || ''} ${profileOrCtx.lease.room_number}室`.trim() : "");
+
+  // 計費週期推導 (若有)
+  let periodStr = "";
+  if (p.period_start && p.period_end) {
+    periodStr = `${String(p.period_start).substring(0, 10)} ~ ${String(p.period_end).substring(0, 10)}`;
+  } else if (p.billing_cycle) {
+    periodStr = p.billing_cycle;
+  }
+
+  // 視覺主題配色 (深綠翡翠色系呼應租客選單，逾期醒目暗紅，核帳沉穩深藍)
+  let headerBg = "#064E3B"; // 租客翡翠深綠
+  let headerSubColor = "#A7F3D0";
+  let heroBg = "#F0FDF4";
+  let heroBorder = "#BBF7D0";
+  let heroTextColor = "#065F46";
+  let statusBadgeBg = "#FEF3C7";
+  let statusTextColor = "#B45309";
+  let statusText = "⏳ 待繳納";
+  let btnColor = "#059669"; // 翡翠綠高質感按鈕
+
+  if (isSubmitted) {
+    headerBg = "#1E3A8A"; // 沉穩深藍
+    headerSubColor = "#BFDBFE";
+    heroBg = "#EFF6FF";
+    heroBorder = "#BFDBFE";
+    heroTextColor = "#1D4ED8";
+    statusBadgeBg = "#DBEAFE";
+    statusTextColor = "#1D4ED8";
+    statusText = "🔍 核帳中";
+    btnColor = "#2563EB";
+  } else if (isOverdue) {
+    headerBg = "#7F1D1D"; // 警示暗紅
+    headerSubColor = "#FECACA";
+    heroBg = "#FEF2F2";
+    heroBorder = "#FECACA";
+    heroTextColor = "#DC2626";
+    statusBadgeBg = "#FEE2E2";
+    statusTextColor = "#DC2626";
+    statusText = "⚠️ 已逾期";
+    btnColor = "#DC2626";
+  }
+
+  // Header 結構
+  const headerContents: any[] = [
+    // Top Row: 標籤 / 頁碼進度 + 狀態 Badge
+    {
+      type: "box",
+      layout: "horizontal",
+      justifyContent: "space-between",
+      alignItems: "center",
+      contents: [
+        {
+          type: "text",
+          text: totalCount > 1 ? `待繳項目 (${index + 1}/${totalCount})` : "智慧租屋 · 待繳帳單",
+          color: headerSubColor,
+          size: "xs",
+          weight: "bold"
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: statusBadgeBg,
+          cornerRadius: "6px",
+          paddingStart: "8px",
+          paddingEnd: "8px",
+          paddingTop: "2px",
+          paddingBottom: "2px",
+          contents: [
+            {
+              type: "text",
+              text: statusText,
+              size: "xxs",
+              color: statusTextColor,
+              weight: "bold"
+            }
+          ]
+        }
+      ]
+    },
+    // Middle Row: 帳單主標題 (大字醒目)
+    {
+      type: "text",
+      text: title,
+      color: "#FFFFFF",
+      size: "xl",
+      weight: "bold",
+      wrap: true,
+      margin: "sm"
+    }
+  ];
+
+  // 若有承租房源，在 header 顯示房源小字
+  if (propDisplay) {
+    headerContents.push({
+      type: "box",
+      layout: "horizontal",
+      margin: "xs",
+      contents: [
+        {
+          type: "text",
+          text: `🏠 ${propDisplay}`,
+          color: headerSubColor,
+          size: "xs",
+          wrap: true
+        }
+      ]
+    });
+  }
+
+  // Body 詳細清單
+  const detailRows: any[] = [
+    // 繳費期限
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "📅 繳費期限", size: "xs", color: "#64748B", flex: 3 },
+        {
+          type: "text",
+          text: isOverdue ? `${dueDateClean} (已逾期)` : (dueDateClean || "依約定"),
+          size: "xs",
+          color: isOverdue ? "#DC2626" : "#1E293B",
+          weight: "bold",
+          align: "end",
+          flex: 5
+        }
+      ]
+    },
+    // 費用類別
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "🏷️ 費用項目", size: "xs", color: "#64748B", flex: 3 },
+        {
+          type: "text",
+          text: `${cat.icon} ${cat.label}`,
+          size: "xs",
+          color: cat.color,
+          weight: "bold",
+          align: "end",
+          flex: 5
+        }
+      ]
+    }
+  ];
+
+  if (periodStr) {
+    detailRows.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "⏱️ 計費週期", size: "xs", color: "#64748B", flex: 3 },
+        { type: "text", text: periodStr, size: "xs", color: "#1E293B", align: "end", flex: 5, wrap: true }
+      ]
+    });
+  }
+
+  if (p.note) {
+    detailRows.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "📝 帳單備註", size: "xs", color: "#64748B", flex: 3 },
+        { type: "text", text: p.note, size: "xs", color: "#1E293B", align: "end", flex: 5, wrap: true }
+      ]
+    });
+  }
+
+  // Body 結構
+  const bodyContents: any[] = [
+    // 1. 應繳金額 HERO BLOCK (大額清晰聚焦)
+    {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: heroBg,
+      borderColor: heroBorder,
+      borderWidth: "1px",
+      cornerRadius: "12px",
+      paddingAll: "14px",
+      contents: [
+        {
+          type: "text",
+          text: "應繳金額",
+          size: "xs",
+          color: "#64748B",
+          weight: "bold"
+        },
+        {
+          type: "box",
+          layout: "baseline",
+          spacing: "xs",
+          margin: "xs",
+          contents: [
+            { type: "text", text: "NT$", size: "sm", color: heroTextColor, weight: "bold", flex: 0 },
+            {
+              type: "text",
+              text: ` ${amountStr}`,
+              size: "xxxl",
+              weight: "bold",
+              color: heroTextColor,
+              wrap: true,
+              flex: 1
+            }
+          ]
+        },
+        ...(isOverdue ? [
+          {
+            type: "text",
+            text: "⚠️ 此款項已超過約定繳款日，請儘速繳納並回報",
+            size: "xxs",
+            color: "#DC2626",
+            weight: "bold",
+            margin: "xs"
+          }
+        ] : [])
+      ]
+    },
+    // 2. 帳單詳細資訊 Grid
+    {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      margin: "md",
+      paddingStart: "4px",
+      paddingEnd: "4px",
+      contents: detailRows
+    },
+    // 3. 狀態提示 Banner
+    isSubmitted ? {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#EFF6FF",
+      borderColor: "#BFDBFE",
+      borderWidth: "1px",
+      cornerRadius: "8px",
+      paddingAll: "10px",
+      margin: "md",
+      contents: [
+        {
+          type: "text",
+          text: (p.payment_method === '現金交付' || String(p.payment_method || '').includes('現金'))
+            ? "🔍 已回報 [現金交付]，房東核對入帳中"
+            : (p.transfer_last5
+              ? `🔍 已回報末五碼 [${p.transfer_last5}]，房東核對入帳中`
+              : "🔍 已回報款項，房東核對入帳中"),
+          size: "xs",
+          color: "#1D4ED8",
+          weight: "bold",
+          wrap: true
+        },
+        {
+          type: "text",
+          text: "房東完成核帳後，將為您自動開立並推播電子收據",
+          size: "xxs",
+          color: "#64748B",
+          margin: "xs",
+          wrap: true
+        }
+      ]
+    } : {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#F8FAFC",
+      borderColor: "#E2E8F0",
+      borderWidth: "1px",
+      cornerRadius: "8px",
+      paddingAll: "8px",
+      margin: "md",
+      contents: [
+        {
+          type: "text",
+          text: "💡 轉帳或繳款完成後，請點選下方【回報此筆繳款】以鎖定帳單！",
+          size: "xxs",
+          color: "#64748B",
+          wrap: true
+        }
+      ]
+    }
+  ];
+
+  // Footer 按鈕群
+  const footerContents: any[] = [];
+
+  // 若尚未回報，顯示顯眼的回報按鈕
+  if (!isSubmitted) {
+    footerContents.push({
+      type: "button",
+      style: "primary",
+      color: btnColor,
+      height: "sm",
+      action: {
+        type: "postback",
+        label: "📝 回報此筆繳款",
+        data: `action=select_bill&id=${p.id}&title=${encodeURIComponent(title)}&amount=${p.amount}`,
+        displayText: `📝 回報繳款：${title}`
+      }
+    });
+  }
+
+  // 次要功能按鈕列 (匯款帳號 + 我的租約)
+  footerContents.push({
+    type: "box",
+    layout: "horizontal",
+    spacing: "sm",
+    margin: isSubmitted ? "none" : "sm",
+    contents: [
+      {
+        type: "button",
+        style: "secondary",
+        height: "sm",
+        action: { type: "message", label: "🏦 匯款帳號", text: "匯款帳號" }
+      },
+      {
+        type: "button",
+        style: "secondary",
+        height: "sm",
+        action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
+      }
+    ]
+  });
+
+  // 輪播翻頁提示 (僅在多筆時顯示)
+  if (totalCount > 1) {
+    footerContents.push({
+      type: "text",
+      text: `👉 左右滑動查看其餘帳單 (第 ${index + 1}/${totalCount} 筆)`,
+      size: "xxs",
+      color: "#94A3B8",
+      align: "center",
+      margin: "sm"
+    });
+  }
+
+  return {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: headerBg,
+      paddingAll: "16px",
+      contents: headerContents
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "16px",
+      contents: bodyContents
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "xs",
+      paddingAll: "14px",
+      contents: footerContents
+    }
+  };
+}
+
+function buildPendingBillsFlex(payments: any[], profileOrCtx: any = null) {
   if (!payments || payments.length === 0) {
+    const profile = profileOrCtx?.profile || profileOrCtx;
     return {
       type: "flex",
       altText: "🎉 太棒了！您目前沒有任何待繳帳單",
@@ -904,7 +1276,7 @@ function buildPendingBillsFlex(payments: any[], profile: any = null) {
         header: {
           type: "box",
           layout: "vertical",
-          backgroundColor: "#10B981",
+          backgroundColor: "#059669",
           paddingAll: "18px",
           contents: [
             { type: "text", text: "🎉 款項全數結清", color: "#FFFFFF", size: "lg", weight: "bold" }
@@ -938,7 +1310,6 @@ function buildPendingBillsFlex(payments: any[], profile: any = null) {
 
   // 1. 統計待繳總額並排序（依開立時間遞減排序，最後開立的排在最上面）
   const totalPending = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const todayStr = new Date().toISOString().split("T")[0];
 
   const getPendingSortTimestamp = (item: any) => {
     if (item.created_at) {
@@ -966,293 +1337,23 @@ function buildPendingBillsFlex(payments: any[], profile: any = null) {
     return String(b.id || "").localeCompare(String(a.id || ""));
   });
 
-  // 每頁 2 筆，卡片更寬敞大器，保證手機全螢幕瀏覽不被截斷
-  const ITEMS_PER_PAGE = 2;
-  const totalPages = Math.ceil(sortedPayments.length / ITEMS_PER_PAGE);
-
-  const buildPageBubble = (pageIndex: number) => {
-    const startIdx = pageIndex * ITEMS_PER_PAGE;
-    const pageItems = sortedPayments.slice(startIdx, startIdx + ITEMS_PER_PAGE);
-
-    const billBoxes: any[] = [];
-    pageItems.forEach((p, idx) => {
-      const isSubmitted = (p.status === "tenant_submitted" || p.status === "pending_approval");
-      const dueDateClean = p.due_date ? String(p.due_date).substring(0, 10) : "";
-      const isOverdue = !isSubmitted && dueDateClean && dueDateClean < todayStr;
-      const cat = getCategoryMeta(p.bill_type || p.billType);
-      const title = getPaymentTitle(p);
-      const amountStr = Number(p.amount || 0).toLocaleString();
-
-      // 狀態顏色設定
-      let cardBg = "#FFFBEB";
-      let cardBorder = "#FDE68A";
-      let statusBg = "#FEF3C7";
-      let statusTextColor = "#B45309";
-      let statusText = "⏳ 待繳納";
-      let amountColor = "#92400E";
-
-      if (isSubmitted) {
-        cardBg = "#F8FAFC";
-        cardBorder = "#CBD5E1";
-        statusBg = "#EFF6FF";
-        statusTextColor = "#2563EB";
-        statusText = "🔍 核帳中";
-        amountColor = "#475569";
-      } else if (isOverdue) {
-        cardBg = "#FEF2F2";
-        cardBorder = "#FECACA";
-        statusBg = "#FEE2E2";
-        statusTextColor = "#DC2626";
-        statusText = "⚠️ 已逾期";
-        amountColor = "#DC2626";
-      }
-
-      billBoxes.push({
-        type: "box",
-        layout: "vertical",
-        backgroundColor: cardBg,
-        borderColor: cardBorder,
-        borderWidth: "1px",
-        cornerRadius: "14px",
-        paddingAll: "14px",
-        margin: idx > 0 ? "md" : "none",
-        contents: [
-          // 1. 標題列：類別圖示 + 名稱 + 狀態標籤 (左右對齊)
-          {
-            type: "box",
-            layout: "horizontal",
-            justifyContent: "space-between",
-            alignItems: "center",
-            contents: [
-              {
-                type: "text",
-                text: `${cat.icon} ${title}`,
-                size: "sm",
-                weight: "bold",
-                color: "#1E293B",
-                wrap: true,
-                flex: 7
-              },
-              {
-                type: "box",
-                layout: "vertical",
-                backgroundColor: statusBg,
-                cornerRadius: "6px",
-                paddingStart: "8px",
-                paddingEnd: "8px",
-                paddingTop: "2px",
-                paddingBottom: "2px",
-                flex: 0,
-                contents: [
-                  {
-                    type: "text",
-                    text: statusText,
-                    size: "xxs",
-                    color: statusTextColor,
-                    weight: "bold"
-                  }
-                ]
-              }
-            ]
-          },
-          // 2. 應繳金額醒目區塊 (獨立基線列，金額與幣別全寬顯示永不截斷)
-          {
-            type: "box",
-            layout: "baseline",
-            spacing: "xs",
-            margin: "sm",
-            contents: [
-              { type: "text", text: "應繳金額", size: "xxs", color: "#64748B", flex: 0 },
-              { type: "text", text: "NT$", size: "xs", color: amountColor, weight: "bold", flex: 0 },
-              {
-                type: "text",
-                text: ` ${amountStr}`,
-                size: "xxl",
-                weight: "bold",
-                color: amountColor,
-                wrap: true,
-                flex: 1
-              }
-            ]
-          },
-          // 3. 房源與到期日列
-          {
-            type: "box",
-            layout: "horizontal",
-            justifyContent: "space-between",
-            margin: "xs",
-            contents: [
-              {
-                type: "text",
-                text: p.property_name ? `🏠 房源：${p.property_name}` : `📅 繳費期限：${dueDateClean || '依約定'}`,
-                size: "xs",
-                color: "#64748B",
-                weight: "regular",
-                wrap: true,
-                flex: p.property_name && dueDateClean ? 6 : 1
-              },
-              ...(p.property_name && dueDateClean ? [
-                {
-                  type: "text",
-                  text: `📅 到期：${dueDateClean}`,
-                  size: "xs",
-                  color: isOverdue ? "#DC2626" : "#64748B",
-                  weight: isOverdue ? "bold" : "regular",
-                  align: "end",
-                  flex: 4
-                }
-              ] : [])
-            ]
-          },
-          ...(p.note ? [
-            {
-              type: "text",
-              text: `📝 備註：${p.note}`,
-              size: "xxs",
-              color: "#64748B",
-              wrap: true,
-              margin: "xs"
-            }
-          ] : []),
-          // 4. 按鈕或狀態確認
-          !isSubmitted ? {
-            type: "button",
-            style: "primary",
-            color: isOverdue ? "#DC2626" : "#D97706",
-            height: "sm",
-            margin: "sm",
-            action: {
-              type: "postback",
-              label: "📝 回報此筆繳款",
-              data: `action=select_bill&id=${p.id}&title=${encodeURIComponent(title)}&amount=${p.amount}`
-            }
-          } : {
-            type: "box",
-            layout: "horizontal",
-            backgroundColor: "#EFF6FF",
-            cornerRadius: "8px",
-            paddingAll: "8px",
-            margin: "sm",
-            contents: [
-              {
-                type: "text",
-                text: (p.payment_method === '現金交付' || String(p.payment_method || '').includes('現金'))
-                  ? "🔍 已回報 [現金交付]，房東核對入帳中"
-                  : (p.transfer_last5
-                    ? `🔍 已回報末五碼 [${p.transfer_last5}]，房東核對入帳中`
-                    : "🔍 已回報，房東核對入帳中"),
-                size: "xxs",
-                color: "#2563EB",
-                weight: "bold",
-                wrap: true
-              }
-            ]
-          }
-        ]
-      });
-    });
-
-    return {
-      type: "bubble",
-      size: "mega",
-      header: {
-        type: "box",
-        layout: "vertical",
-        backgroundColor: "#B45309",
-        paddingAll: "16px",
-        contents: [
-          {
-            type: "box",
-            layout: "horizontal",
-            justifyContent: "space-between",
-            contents: [
-              { type: "text", text: "智慧租屋 · 待繳納帳單", color: "#FEF3C7", size: "xs", weight: "bold" },
-              { type: "text", text: `共 ${sortedPayments.length} 筆`, color: "#FDE68A", size: "xs", weight: "bold" }
-            ]
-          },
-          {
-            type: "text",
-            text: totalPages > 1 ? `待處理帳單 (${pageIndex + 1}/${totalPages})` : `待處理帳單 (共 ${sortedPayments.length} 筆)`,
-            color: "#FFFFFF",
-            size: "xl",
-            weight: "bold",
-            margin: "xs"
-          },
-          {
-            type: "box",
-            layout: "baseline",
-            spacing: "xs",
-            margin: "xs",
-            contents: [
-              { type: "text", text: "待繳總計", size: "xs", color: "#FEF3C7", flex: 0 },
-              { type: "text", text: "NT$", size: "xs", color: "#FFFFFF", weight: "bold", flex: 0 },
-              { type: "text", text: ` ${totalPending.toLocaleString()}`, size: "lg", color: "#FFFFFF", weight: "bold", wrap: true, flex: 1 }
-            ]
-          }
-        ]
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "16px",
-        contents: billBoxes
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        spacing: "sm",
-        paddingAll: "14px",
-        contents: [
-          {
-            type: "box",
-            layout: "horizontal",
-            spacing: "sm",
-            contents: [
-              {
-                type: "button",
-                style: "secondary",
-                height: "sm",
-                action: { type: "message", label: "🏦 房東帳號", text: "匯款帳號" }
-              },
-              {
-                type: "button",
-                style: "primary",
-                color: "#4F46E5",
-                height: "sm",
-                action: { type: "message", label: "📋 我的租約", text: "租約狀況" }
-              }
-            ]
-          },
-          ...(totalPages > 1 ? [
-            {
-              type: "text",
-              text: `👉 左右滑動查看其餘帳單 (第 ${pageIndex + 1}/${totalPages} 頁)`,
-              size: "xxs",
-              color: "#94A3B8",
-              align: "center",
-              margin: "xs"
-            }
-          ] : [])
-        ]
-      }
-    };
-  };
-
-  // 若只有 1 頁，直接回傳單一 Bubble 卡片
-  if (totalPages <= 1) {
+  // 一個卡片只顯示一個待繳項目 (單筆直接顯示獨立 Bubble，多筆以橫向 Carousel 輪播)
+  if (sortedPayments.length === 1) {
+    const single = sortedPayments[0];
+    const singleTitle = getPaymentTitle(single);
+    const singleAmt = Number(single.amount || 0).toLocaleString();
     return {
       type: "flex",
-      altText: `📋 待處理帳單：共 ${sortedPayments.length} 筆，待繳總計 NT$ ${totalPending.toLocaleString()}`,
-      contents: buildPageBubble(0)
+      altText: `📋 待處理帳單：【${singleTitle}】NT$ ${singleAmt}`,
+      contents: buildSingleBillBubble(single, 0, 1, profileOrCtx)
     };
   }
 
-  // 多於 1 頁時，產生左右滑動之 Carousel 輪播卷軸（最多 10 頁）
-  const carouselBubbles = [];
-  const maxPages = Math.min(totalPages, 10);
-  for (let i = 0; i < maxPages; i++) {
-    carouselBubbles.push(buildPageBubble(i));
-  }
+  // 多於 1 筆時，產生左右滑動之 Carousel 輪播卷軸（上限 10 筆，符合 LINE 限制）
+  const displayItems = sortedPayments.slice(0, 10);
+  const carouselBubbles = displayItems.map((p, idx) =>
+    buildSingleBillBubble(p, idx, displayItems.length, profileOrCtx)
+  );
 
   return {
     type: "flex",
@@ -4245,7 +4346,7 @@ serve(async (req: Request) => {
                 text: "⚠️【尚未指定欲回報之帳單】\n\n您名下有多筆待繳帳單，請先在欲繳納的帳單卡片中點選【📝 回報此筆繳款】以鎖定項目！",
                 quickReply: buildSmartQuickReply(userCtx?.currentRole || "tenant", userCtx?.isLandlord)
               },
-              buildPendingBillsFlex(pendingPayments, userCtx?.profile)
+              buildPendingBillsFlex(pendingPayments, userCtx)
             ]);
             continue;
           } else {
@@ -4706,7 +4807,7 @@ serve(async (req: Request) => {
                 text: "⚠️【請先鎖定欲回報之帳單】\n\n您名下有多筆待繳帳單，請在下方卡片中點選欲繳納帳單上的【📝 回報此筆繳款】，系統鎖定後再回傳轉帳末五碼喔！",
                 quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
               },
-              buildPendingBillsFlex(pendingPayments, userCtx?.profile)
+              buildPendingBillsFlex(pendingPayments, userCtx)
             ]);
             continue;
           }
@@ -4787,7 +4888,7 @@ serve(async (req: Request) => {
                   text: `⚠️【尚未鎖定欲回報之帳單】\n\n系統已收到您輸入的 ${inputDesc}，但您尚未指定要回報哪一筆帳單！\n\n👇 請在下方待繳帳單卡片中，先點選【📝 回報此筆繳款】以鎖定欲繳納的項目，再送出回報喔！`,
                   quickReply: buildSmartQuickReply(userCtx.currentRole, userCtx.isLandlord)
                 },
-                buildPendingBillsFlex(pendingPayments, userCtx?.profile)
+                buildPendingBillsFlex(pendingPayments, userCtx)
               ]);
               continue;
             }
@@ -4935,7 +5036,7 @@ serve(async (req: Request) => {
           }
 
           await replyLineMessage(replyToken, [
-            buildPendingBillsFlex(pendingPayments, userCtx.profile)
+            buildPendingBillsFlex(pendingPayments, userCtx)
           ]);
           continue;
         }
