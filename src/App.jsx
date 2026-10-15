@@ -227,12 +227,29 @@ export default function App() {
   }, [role]);
 
   const pendingOpenCustomBillRef = useRef(false);
+  const [openCustomBillTrigger, setOpenCustomBillTrigger] = useState(0);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);
-    const action = searchParams.get('action') || searchParams.get('mode') || searchParams.get('open');
-    if (action === 'addCustomBill' || action === 'add_bill' || action === 'create_bill' || action === 'new_bill') {
+    let action = searchParams.get('action') || searchParams.get('mode') || searchParams.get('open') || '';
+    const liffState = searchParams.get('liff.state');
+    if (liffState) {
+      try {
+        const raw = decodeURIComponent(liffState);
+        const sp = new URLSearchParams(raw.startsWith('?') ? raw.slice(1) : raw);
+        if (sp.get('action')) action = sp.get('action');
+        else if (sp.get('mode') && sp.get('mode') !== 'apply_landlord') action = sp.get('mode');
+      } catch (e) {}
+    }
+    const isAddBill =
+      action === 'addCustomBill' ||
+      action === 'add_bill' ||
+      action === 'create_bill' ||
+      action === 'new_bill' ||
+      (typeof window !== 'undefined' && (window.location.href.includes('addCustomBill') || window.location.href.includes('action=add_bill')));
+    if (isAddBill) {
       pendingOpenCustomBillRef.current = true;
+      setOpenCustomBillTrigger(c => c + 1);
       setRole(prev => (prev === 'superadmin' ? 'superadmin' : 'admin'));
       setActiveTab('dashboard');
     }
@@ -421,6 +438,7 @@ export default function App() {
   const [superadminCategory, setSuperadminCategory] = useState('landlord'); // 'landlord' | 'tenant'
   const [landlordAddresses, setLandlordAddresses] = useState([]);
   const [newAddressText, setNewAddressText] = useState('');
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   // Tenant Self-Registration & Password-based Login States
   const [registeredTenants, setRegisteredTenants] = useState([]);
@@ -1241,6 +1259,8 @@ export default function App() {
 
     } catch (err) {
       console.error('Supabase 資料載入失敗:', err);
+    } finally {
+      setIsDataLoaded(true);
     }
   }, [currentLandlordId, currentLandlordPhone, currentTenantPhone, currentUser?.phone, role, isSuperadminAuthenticated]);
 
@@ -1671,7 +1691,216 @@ export default function App() {
         let provider = 'line';
 
         const searchParams = new URLSearchParams(window.location.search);
-        const mode = searchParams.get('mode') || searchParams.get('action');
+        let actionParam = searchParams.get('action') || '';
+        let modeParam = searchParams.get('mode') || '';
+
+        // 若帶有 LIFF 狀態參數，解析內部包含之真實 action 與參數
+        const liffState = searchParams.get('liff.state');
+        if (liffState) {
+          try {
+            const rawState = decodeURIComponent(liffState);
+            const stateParams = new URLSearchParams(rawState.startsWith('?') ? rawState.slice(1) : rawState);
+            if (!actionParam && stateParams.get('action')) actionParam = stateParams.get('action');
+            if (stateParams.get('mode') && stateParams.get('mode') !== 'apply_landlord') {
+              modeParam = stateParams.get('mode');
+            }
+            if (!searchParams.get('phone') && stateParams.get('phone')) {
+              searchParams.set('phone', stateParams.get('phone'));
+            }
+            if (!searchParams.get('uid') && (stateParams.get('uid') || stateParams.get('line_uid'))) {
+              searchParams.set('uid', stateParams.get('uid') || stateParams.get('line_uid'));
+            }
+          } catch (e) {
+            console.warn('Parse liff.state notice:', e);
+          }
+        }
+
+        const isAddBill =
+          actionParam === 'addCustomBill' ||
+          actionParam === 'add_bill' ||
+          actionParam === 'create_bill' ||
+          actionParam === 'new_bill' ||
+          modeParam === 'addCustomBill' ||
+          modeParam === 'add_bill' ||
+          modeParam === 'create_bill' ||
+          modeParam === 'new_bill';
+
+        // 🌟 優先分支：直接開啟「新增費用與帳單」視窗 (避免被 apply_landlord 攔截並關閉視窗)
+        if (isAddBill) {
+          let phoneParam = searchParams.get('phone') || '';
+          let nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
+          let lineUidParam = searchParams.get('line_uid') || searchParams.get('uid') || '';
+
+          // 1. 若在 LIFF 環境中，確保 LIFF 初始化完成並讀取使用者 Profile
+          if (typeof window !== 'undefined' && window.liff) {
+            try {
+              await initLiffSDK();
+              if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
+                const liffProfile = await window.liff.getProfile();
+                if (liffProfile) {
+                  if (!nameParam && liffProfile.displayName) nameParam = liffProfile.displayName;
+                  if (!lineUidParam && liffProfile.userId) lineUidParam = liffProfile.userId;
+                }
+              }
+            } catch (liffErr) {
+              console.warn('LIFF addCustomBill profile notice:', liffErr);
+            }
+          }
+
+          // 2. 嘗試從 localStorage 中的 app_auth_session 補齊電話與姓名
+          if (!phoneParam) {
+            try {
+              const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed?.phone) phoneParam = parsed.phone;
+                if (!nameParam && parsed?.name) nameParam = parsed.name;
+              }
+            } catch (e) {}
+          }
+
+          // 3. 若電話未指定但有 LINE UID，嘗試由 line_bindings 關聯 profiles 或 landlords 反查電話與姓名
+          if (!phoneParam && lineUidParam) {
+            try {
+              const { data: bndList } = await supabase
+                .from('line_bindings')
+                .select('tenant_id, line_display_name')
+                .eq('line_user_id', lineUidParam)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+              const binding = bndList?.[0];
+              if (binding?.tenant_id) {
+                const { data: lndById } = await supabase
+                  .from('landlords')
+                  .select('*')
+                  .eq('id', binding.tenant_id)
+                  .is('deleted_at', null)
+                  .maybeSingle();
+                if (lndById?.phone) {
+                  phoneParam = lndById.phone;
+                  if (!nameParam && lndById.name) nameParam = lndById.name;
+                } else {
+                  const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('phone, name')
+                    .eq('id', binding.tenant_id)
+                    .maybeSingle();
+                  if (profile?.phone) {
+                    phoneParam = profile.phone;
+                    if (!nameParam && profile.name) nameParam = profile.name;
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Failed to query binding by lineUid for addCustomBill:', e);
+            }
+          }
+
+          const targetPhone = phoneParam || currentLandlordPhone || activeUserPhone || '';
+          const cleanP = String(targetPhone).replace(/[^0-9]/g, '');
+
+          let landlordRec = null;
+          if (cleanP) {
+            const { data: lnd } = await supabase
+              .from('landlords')
+              .select('*')
+              .eq('phone', cleanP)
+              .is('deleted_at', null)
+              .maybeSingle();
+            if (lnd && lnd.status === 'approved') {
+              landlordRec = lnd;
+            }
+          }
+
+          if (!landlordRec && lineUidParam) {
+            try {
+              const { data: bndList } = await supabase
+                .from('line_bindings')
+                .select('tenant_id')
+                .eq('line_user_id', lineUidParam)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+              const bnd = bndList?.[0];
+              if (bnd?.tenant_id) {
+                const { data: lndById } = await supabase
+                  .from('landlords')
+                  .select('*')
+                  .eq('id', bnd.tenant_id)
+                  .is('deleted_at', null)
+                  .maybeSingle();
+                if (lndById && lndById.status === 'approved') {
+                  landlordRec = lndById;
+                } else {
+                  const { data: prof } = await supabase
+                    .from('profiles')
+                    .select('phone, name')
+                    .eq('id', bnd.tenant_id)
+                    .maybeSingle();
+                  if (prof?.phone) {
+                    const cleanProfP = String(prof.phone).replace(/[^0-9]/g, '');
+                    const { data: lndByProfPhone } = await supabase
+                      .from('landlords')
+                      .select('*')
+                      .eq('phone', cleanProfP)
+                      .is('deleted_at', null)
+                      .maybeSingle();
+                    if (lndByProfPhone && lndByProfPhone.status === 'approved') landlordRec = lndByProfPhone;
+                  }
+                }
+              }
+            } catch (e) {}
+          }
+
+          if (!landlordRec) {
+            try {
+              const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed?.id) {
+                  const { data: lndById } = await supabase
+                    .from('landlords')
+                    .select('*')
+                    .eq('id', parsed.id)
+                    .is('deleted_at', null)
+                    .maybeSingle();
+                  if (lndById && lndById.status === 'approved') landlordRec = lndById;
+                }
+              }
+            } catch (e) {}
+          }
+
+          setRole('admin');
+          setActiveTab('dashboard');
+
+          if (landlordRec) {
+            setCurrentLandlordId(landlordRec.id);
+            setCurrentLandlordPhone(landlordRec.phone);
+            setCurrentUser({
+              id: landlordRec.id,
+              phone: landlordRec.phone,
+              user_metadata: { role: 'landlord', name: landlordRec.name || nameParam }
+            });
+
+            try {
+              localStorage.setItem('app_auth_session', JSON.stringify({
+                id: landlordRec.id,
+                phone: landlordRec.phone,
+                name: landlordRec.name || nameParam,
+                role: 'landlord'
+              }));
+            } catch (e) {}
+
+            await fetchSupabaseData('admin', landlordRec.id, landlordRec.phone);
+          } else {
+            await fetchSupabaseData('admin');
+          }
+
+          pendingOpenCustomBillRef.current = true;
+          setOpenCustomBillTrigger(c => c + 1);
+          return;
+        }
+
+        const mode = modeParam || actionParam;
         const lineUidParam = searchParams.get('line_uid') || searchParams.get('uid');
         const displayNameParam = searchParams.get('displayName') || searchParams.get('name') || '';
 
@@ -1859,17 +2088,12 @@ export default function App() {
               return;
             }
 
-            // 狀態 3：已核准 (Approved) -> 直接進入房東後台
+            // 狀態 3：已核准 (Approved) -> 直接進入房東後台 (不關閉視窗)
             if (existingLandlord.status === 'approved') {
               setPendingLandlordNotice({ open: false, data: null });
               setRole('admin');
               setActiveTab('overview');
               showToast('🎉 您的房東身分已核准開通！已為您切換至房東經營後台。', 'success');
-              if (typeof window !== 'undefined' && window.liff && typeof window.liff.isInClient === 'function' && window.liff.isInClient()) {
-                setTimeout(() => {
-                  try { window.liff.closeWindow(); } catch (e) {}
-                }, 2000);
-              }
               return;
             }
           }
@@ -1879,127 +2103,6 @@ export default function App() {
           setPendingLandlordNotice({ open: false, data: null });
           setActiveModal('landlordApplication');
           showToast('👋 歡迎申請開通房東權限！請填寫以下查核資料並送出審核。', 'info');
-          return;
-        }
-
-        // 支援直接透過 LINE BOT / LIFF / 外部連結開啟「新增費用與帳單」視窗
-        if (mode === 'addCustomBill' || mode === 'add_bill' || mode === 'create_bill' || mode === 'new_bill') {
-          let phoneParam = searchParams.get('phone') || '';
-          let nameParam = searchParams.get('name') || searchParams.get('displayName') || '';
-          let lineUidParam = searchParams.get('line_uid') || searchParams.get('uid') || '';
-
-          // 1. 若在 LIFF 環境中，確保 LIFF 初始化完成並讀取使用者 Profile
-          if (typeof window !== 'undefined' && window.liff) {
-            try {
-              await initLiffSDK();
-              if (typeof window.liff.isLoggedIn === 'function' && window.liff.isLoggedIn()) {
-                const liffProfile = await window.liff.getProfile();
-                if (liffProfile) {
-                  if (!nameParam && liffProfile.displayName) nameParam = liffProfile.displayName;
-                  if (!lineUidParam && liffProfile.userId) lineUidParam = liffProfile.userId;
-                }
-              }
-            } catch (liffErr) {
-              console.warn('LIFF addCustomBill profile notice:', liffErr);
-            }
-          }
-
-          // 2. 嘗試從 localStorage 中的 app_auth_session 補齊電話與姓名
-          if (!phoneParam) {
-            try {
-              const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
-              if (saved) {
-                const parsed = JSON.parse(saved);
-                if (parsed?.phone) phoneParam = parsed.phone;
-                if (!nameParam && parsed?.name) nameParam = parsed.name;
-              }
-            } catch (e) {}
-          }
-
-          // 3. 若電話未指定但有 LINE UID，嘗試由 line_bindings 關聯 profiles 反查電話與姓名
-          if (!phoneParam && lineUidParam) {
-            try {
-              const { data: binding } = await supabase
-                .from('line_bindings')
-                .select('tenant_id, line_display_name')
-                .eq('line_user_id', lineUidParam)
-                .maybeSingle();
-              if (binding?.tenant_id) {
-                const { data: profile } = await supabase
-                  .from('profiles')
-                  .select('phone, name')
-                  .eq('id', binding.tenant_id)
-                  .maybeSingle();
-                if (profile?.phone) {
-                  phoneParam = profile.phone;
-                  if (!nameParam && profile.name) nameParam = profile.name;
-                }
-              }
-            } catch (e) {
-              console.warn('Failed to query binding by lineUid for addCustomBill:', e);
-            }
-          }
-
-          const targetPhone = phoneParam || currentLandlordPhone || activeUserPhone || '';
-          const cleanP = String(targetPhone).replace(/[^0-9]/g, '');
-
-          let landlordRec = null;
-          if (cleanP) {
-            const { data: lnd } = await supabase
-              .from('landlords')
-              .select('*')
-              .eq('phone', cleanP)
-              .is('deleted_at', null)
-              .maybeSingle();
-            if (lnd && lnd.status === 'approved') {
-              landlordRec = lnd;
-            }
-          }
-
-          if (!landlordRec && lineUidParam) {
-            const { data: bnd } = await supabase
-              .from('line_bindings')
-              .select('tenant_id')
-              .eq('line_user_id', lineUidParam)
-              .maybeSingle();
-            if (bnd?.tenant_id) {
-              const { data: lndById } = await supabase
-                .from('landlords')
-                .select('*')
-                .eq('id', bnd.tenant_id)
-                .is('deleted_at', null)
-                .maybeSingle();
-              if (lndById && lndById.status === 'approved') landlordRec = lndById;
-            }
-          }
-
-          if (landlordRec) {
-            setCurrentLandlordId(landlordRec.id);
-            setCurrentLandlordPhone(landlordRec.phone);
-            setCurrentUser({
-              id: landlordRec.id,
-              phone: landlordRec.phone,
-              user_metadata: { role: 'landlord', name: landlordRec.name || nameParam }
-            });
-            setRole('admin');
-            setActiveTab('dashboard');
-
-            try {
-              localStorage.setItem('app_auth_session', JSON.stringify({
-                id: landlordRec.id,
-                phone: landlordRec.phone,
-                name: landlordRec.name || nameParam,
-                role: 'landlord'
-              }));
-            } catch (e) {}
-
-            await fetchSupabaseData('admin', landlordRec.id, landlordRec.phone);
-            pendingOpenCustomBillRef.current = true;
-          } else {
-            setRole(prev => (prev === 'superadmin' ? 'superadmin' : 'admin'));
-            setActiveTab('dashboard');
-            pendingOpenCustomBillRef.current = true;
-          }
           return;
         }
 
@@ -5369,6 +5472,18 @@ export default function App() {
 
     if (activeLeases.length === 0) {
       showToast('目前名下尚無在約中的租約紀錄！請先在「租約管理」登錄合約。', 'warning');
+      setCustomBillLeaseId('');
+      setCustomBillCategory('rent');
+      setCustomBillTitle('');
+      setCustomBillAmount('');
+      const oneMonthLater = new Date();
+      oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+      setCustomBillDueDate(oneMonthLater.toISOString().split('T')[0]);
+      setCustomBillStep(1);
+      setCustomBillPaymentType('pending');
+      setCustomBillPaymentMethod('bank');
+      setCustomBillNote('');
+      setActiveModal('addCustomBill');
       return;
     }
     const candidateLeases = activeLeases.length > 0 ? activeLeases : leases.filter(l => l.status === 'active');
@@ -5393,15 +5508,12 @@ export default function App() {
 
   // 監聽是否有待開啟之新增帳單彈窗 (來自 LINE 富選單或外部 URL deep link)
   useEffect(() => {
-    if (pendingOpenCustomBillRef.current && leases && leases.length > 0) {
-      const filteredLeases = leases.filter(l => l.status === 'active' && (landlordPropertyIds.length === 0 || landlordPropertyIds.includes(l.propertyId) || (currentLandlordId && l.landlordId === currentLandlordId)));
-      const activeLeases = filteredLeases.length > 0 ? filteredLeases : leases.filter(l => l.status === 'active');
-      if (activeLeases.length > 0) {
-        pendingOpenCustomBillRef.current = false;
-        handleOpenAddCustomBill();
-      }
+    if ((pendingOpenCustomBillRef.current || openCustomBillTrigger > 0) && isDataLoaded) {
+      pendingOpenCustomBillRef.current = false;
+      setOpenCustomBillTrigger(0);
+      handleOpenAddCustomBill();
     }
-  }, [leases, landlordPropertyIds, currentLandlordId]);
+  }, [leases, landlordPropertyIds, currentLandlordId, openCustomBillTrigger, isDataLoaded]);
 
   const handleSelectCustomBillMode = (mode) => {
     setCustomBillPaymentType(mode);
