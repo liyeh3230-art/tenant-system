@@ -226,6 +226,18 @@ export default function App() {
     roleRef.current = role;
   }, [role]);
 
+  const pendingOpenCustomBillRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const action = searchParams.get('action') || searchParams.get('mode') || searchParams.get('open');
+    if (action === 'addCustomBill' || action === 'add_bill' || action === 'create_bill' || action === 'new_bill') {
+      pendingOpenCustomBillRef.current = true;
+      setRole(prev => (prev === 'superadmin' ? 'superadmin' : 'admin'));
+      setActiveTab('dashboard');
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('app_auth_session') : null;
@@ -5229,13 +5241,13 @@ export default function App() {
     setActiveModal('viewReceipt');
   };
 
-  const handleOpenAddCustomBill = () => {
-    const activeLeases = leases.filter(l => landlordPropertyIds.includes(l.propertyId) && l.status === 'active');
+  const handleOpenAddCustomBill = (targetLeaseId = null) => {
+    const activeLeases = leases.filter(l => (landlordPropertyIds.length === 0 || landlordPropertyIds.includes(l.propertyId)) && l.status === 'active');
     if (activeLeases.length === 0) {
-      showToast('目前尚無有效租約可開立帳單！', 'warning');
+      showToast('目前尚無有效租約可開立帳單！請先在「租約管理」登錄合約。', 'warning');
       return;
     }
-    const firstLease = activeLeases[0];
+    const firstLease = (targetLeaseId && activeLeases.find(l => l.id === targetLeaseId)) || activeLeases[0];
     setCustomBillLeaseId(firstLease.id);
     setCustomBillCategory('rent');
     setCustomBillTitle('');
@@ -5253,6 +5265,17 @@ export default function App() {
     setCustomBillNote('');
     setActiveModal('addCustomBill');
   };
+
+  // 監聽是否有待開啟之新增帳單彈窗 (來自 LINE 富選單或外部 URL deep link)
+  useEffect(() => {
+    if (pendingOpenCustomBillRef.current && leases && leases.length > 0) {
+      const activeLeases = leases.filter(l => (landlordPropertyIds.length === 0 || landlordPropertyIds.includes(l.propertyId)) && l.status === 'active');
+      if (activeLeases.length > 0) {
+        pendingOpenCustomBillRef.current = false;
+        handleOpenAddCustomBill();
+      }
+    }
+  }, [leases, landlordPropertyIds]);
 
   const handleSelectCustomBillMode = (mode) => {
     setCustomBillPaymentType(mode);
@@ -7536,8 +7559,8 @@ export default function App() {
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center shadow-xs whitespace-nowrap"
                       >
                         <Plus size={15} className="mr-1 sm:mr-1.5 flex-shrink-0" />
-                        <span className="hidden sm:inline">登記帳單/已繳紀錄</span>
-                        <span className="sm:hidden">登記新帳單</span>
+                        <span className="hidden sm:inline">新增帳單 / 繳費紀錄</span>
+                        <span className="sm:hidden">新增帳單</span>
                       </button>
                     </div>
                   </div>

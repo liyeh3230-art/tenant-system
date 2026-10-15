@@ -55,7 +55,7 @@ const landlordMenuDef = {
     { bounds: bounds[0], action: { type: "message", text: "經營概況" } },
     { bounds: bounds[1], action: { type: "message", text: "待核帳單" } },
     { bounds: bounds[2], action: { type: "message", text: "當前租約" } },
-    { bounds: bounds[3], action: { type: "message", text: "房源現況" } },
+    { bounds: bounds[3], action: { type: "message", text: "新增帳單" } },
     { bounds: bounds[4], action: { type: "uri", uri: "https://liyeh3230-art.github.io/tenant-system/" } },
     { bounds: bounds[5], action: { type: "postback", data: "action=switch_role&target=tenant", displayText: "🔄 切換為租客模式" } }
   ]
@@ -107,6 +107,21 @@ async function setDefaultRichMenu(richMenuId) {
   }
 }
 
+async function linkUserRichMenu(userId, richMenuId) {
+  const res = await fetch(`https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
+    }
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn(`Failed to link rich menu to user ${userId}:`, text);
+  } else {
+    console.log(`   Linked rich menu ${richMenuId} to user ${userId} successfully!`);
+  }
+}
+
 async function main() {
   console.log("=== Registering 3-Tier Dynamic LINE Rich Menus ===");
   
@@ -153,6 +168,24 @@ async function main() {
   const configPath = "supabase/functions/line-webhook/rich_menu_ids.json";
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
   console.log(`Config written to ${configPath}:`, config);
+
+  // 6. Update line-webhook/index.ts constants
+  const webhookIndexPath = "supabase/functions/line-webhook/index.ts";
+  if (fs.existsSync(webhookIndexPath)) {
+    let content = fs.readFileSync(webhookIndexPath, "utf8");
+    content = content.replace(/const TENANT_STANDARD_RICH_MENU_ID = "[^"]+";/, `const TENANT_STANDARD_RICH_MENU_ID = "${tenantStandardMenuId}";`);
+    content = content.replace(/const TENANT_DUAL_RICH_MENU_ID = "[^"]+";/, `const TENANT_DUAL_RICH_MENU_ID = "${tenantDualMenuId}";`);
+    content = content.replace(/const LANDLORD_RICH_MENU_ID = "[^"]+";/, `const LANDLORD_RICH_MENU_ID = "${landlordMenuId}";`);
+    fs.writeFileSync(webhookIndexPath, content, "utf8");
+    console.log(`Updated constants in ${webhookIndexPath}`);
+  }
+
+  // 7. Update known landlord user(s) to the new landlord rich menu immediately
+  const knownLandlords = ["U604565299ab45b4cb7bcb2e1f2472358"];
+  for (const uid of knownLandlords) {
+    console.log(`Linking new Landlord Menu to ${uid}...`);
+    await linkUserRichMenu(uid, landlordMenuId);
+  }
 
   console.log("=== ALL 3 RICH MENUS SUCCESSFULLY REGISTERED & CONFIGURED! ===");
 }

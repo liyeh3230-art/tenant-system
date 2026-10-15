@@ -2326,9 +2326,9 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 // -----------------------------------------------------------------------------
 // DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS (3-TIER ARCHITECTURE)
 // -----------------------------------------------------------------------------
-const TENANT_STANDARD_RICH_MENU_ID = "richmenu-ba8a1c28671652a5e3cfffe0e91de3ff"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
-const TENANT_DUAL_RICH_MENU_ID = "richmenu-1bac1fa53e9ac912b0530cda795e7bf2";     // 雙身分租客選單（第 6 格：切換為房東）
-const LANDLORD_RICH_MENU_ID = "richmenu-1f925c458c1ec02b69a389265ef6ed03";        // 房東經營選單（第 6 格：切換為租客）
+const TENANT_STANDARD_RICH_MENU_ID = "richmenu-832ce5dea034fa8a80b4528e203967af"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
+const TENANT_DUAL_RICH_MENU_ID = "richmenu-c6cbfc55f4cb3dfcbbc1dcae94df2a1d";     // 雙身分租客選單（第 6 格：切換為房東）
+const LANDLORD_RICH_MENU_ID = "richmenu-9f99f953a3d5c9a576e4bf1d2724a51c";        // 房東經營選單（第 6 格：切換為租客）
 const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 
 // Helper to push message to a specific LINE User ID
@@ -2363,6 +2363,10 @@ function buildSmartQuickReply(role: string = "tenant", isLandlord: boolean = fal
   if (role === "landlord") {
     return {
       items: [
+        {
+          type: "action",
+          action: { type: "message", label: "➕ 新增帳單", text: "新增帳單" }
+        },
         {
           type: "action",
           action: { type: "message", label: "📊 經營概況", text: "經營概況" }
@@ -3495,6 +3499,193 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
   return buildLandlordCurrentLeasesFlex(leases, properties);
 }
 
+// 5. 房東新增費用與帳單引導卡片 (支援直達網站兩步驟開立待繳 / 登記已繳彈窗)
+function buildLandlordAddBillFlex(leases: any[] = [], properties: any[] = [], userCtx: any = null) {
+  const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\/$/, "");
+  const addBillUrl = `${cleanBase}/?action=addCustomBill&_t=${Date.now()}`;
+
+  const activeLeases = (leases || []).filter((l: any) => l.status === "active");
+
+  const leaseItems = activeLeases.slice(0, 4).map((lease: any) => {
+    const prop = (properties || []).find((p: any) => p.id === lease.property_id);
+    const propName = prop?.name || "租賃房源";
+    const tenantName = lease.tenant_name || "房客";
+    const monthlyRent = Number(lease.monthly_rent || 0).toLocaleString();
+
+    return {
+      type: "box",
+      layout: "horizontal",
+      alignItems: "center",
+      contents: [
+        {
+          type: "text",
+          text: `🏠 ${propName}`,
+          size: "xs",
+          color: "#0F172A",
+          weight: "bold",
+          flex: 5,
+          wrap: true
+        },
+        {
+          type: "text",
+          text: `${tenantName} (NT$ ${monthlyRent})`,
+          size: "xxs",
+          color: "#64748B",
+          align: "end",
+          flex: 4
+        }
+      ]
+    };
+  });
+
+  return {
+    type: "flex",
+    altText: "➕ 房東新增費用與帳單 · 快速開立待繳或登記入帳",
+    contents: {
+      type: "bubble",
+      size: "mega",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#064E3B",
+        paddingAll: "18px",
+        contents: [
+          { type: "text", text: "智慧物業 · 帳單與收據作業", color: "#6EE7B7", size: "xs", weight: "bold" },
+          { type: "text", text: "➕ 新增費用與帳單", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs" },
+          { type: "text", text: "開立待繳帳單向租客請款，或直接登記已收款項", color: "#A7F3D0", size: "xs", margin: "xs" }
+        ]
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        spacing: "md",
+        contents: [
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#F8FAFC",
+            cornerRadius: "12px",
+            borderColor: "#E2E8F0",
+            borderWidth: "1px",
+            paddingAll: "12px",
+            spacing: "sm",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                spacing: "sm",
+                contents: [
+                  { type: "text", text: "⏳", size: "sm", flex: 0 },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    flex: 1,
+                    contents: [
+                      { type: "text", text: "開立待繳帳單 (向租客請款)", size: "xs", weight: "bold", color: "#1E293B" },
+                      { type: "text", text: "新增應繳租金/水電/押金，系統自動發送 LINE 帳單通知提醒租客", size: "xxs", color: "#64748B", wrap: true }
+                    ]
+                  }
+                ]
+              },
+              { type: "separator", color: "#E2E8F0" },
+              {
+                type: "box",
+                layout: "horizontal",
+                spacing: "sm",
+                contents: [
+                  { type: "text", text: "💵", size: "sm", flex: 0 },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    flex: 1,
+                    contents: [
+                      { type: "text", text: "登記已收款項 (直接入帳開立收據)", size: "xs", weight: "bold", color: "#065F46" },
+                      { type: "text", text: "已收現金交付或轉帳款項，即時建立已繳紀錄、計入財務營收並推播收據", size: "xxs", color: "#64748B", wrap: true }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          activeLeases.length > 0 ? {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#F0FDF4",
+            cornerRadius: "10px",
+            borderColor: "#BBF7D0",
+            borderWidth: "1px",
+            paddingAll: "10px",
+            spacing: "xs",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                contents: [
+                  { type: "text", text: "可開立房源與租客", size: "xxs", weight: "bold", color: "#166534" },
+                  { type: "text", text: `共 ${activeLeases.length} 間在約中`, size: "xxs", color: "#15803D", align: "end" }
+                ]
+              },
+              { type: "separator", color: "#DCFCE7", margin: "xs" },
+              ...leaseItems
+            ]
+          } : {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#FFFBEB",
+            cornerRadius: "10px",
+            borderColor: "#FDE68A",
+            borderWidth: "1px",
+            paddingAll: "10px",
+            contents: [
+              { type: "text", text: "⚠️ 目前尚無在約中的租約紀錄，請先至租約管理登錄合約！", size: "xs", color: "#B45309", wrap: true }
+            ]
+          }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        spacing: "sm",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#059669",
+            height: "md",
+            action: {
+              type: "uri",
+              label: "➕ 前往網頁開立帳單",
+              uri: addBillUrl
+            }
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            spacing: "sm",
+            contents: [
+              {
+                type: "button",
+                style: "secondary",
+                height: "sm",
+                action: { type: "message", label: "⏳ 待核帳單", text: "待核帳單" }
+              },
+              {
+                type: "button",
+                style: "secondary",
+                height: "sm",
+                action: { type: "message", label: "📊 經營概況", text: "經營概況" }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    quickReply: buildSmartQuickReply("landlord", true)
+  };
+}
+
 // -----------------------------------------------------------------------------
 // DUAL-ROLE STRICT USER CONTEXT FETCHER (ZERO LEAKAGE / STRICT AUTH)
 // -----------------------------------------------------------------------------
@@ -4483,8 +4674,8 @@ serve(async (req: Request) => {
         }
 
         // 3. 房東功能分支 (嚴格限房東身分，非房東直接拒絕)
-        const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|當前租約|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單)$/.test(text) ||
-          text.includes("經營") || text.includes("待核") || text.includes("當前租約") || text.includes("名冊");
+        const isLandlordCommand = /^(經營概況|概況|統計|儀表板|待核帳單|待核|審核|核帳|當前租約|房源現況|房源|房間|物業|租客名冊|名冊|房客|名單|新增帳單|開立帳單|新增費用|開立待繳|登記已繳|開帳單|請款)$/.test(text) ||
+          text.includes("經營") || text.includes("待核") || text.includes("當前租約") || text.includes("名冊") || text.includes("新增帳單") || text.includes("開立帳單") || text.includes("新增費用") || text.includes("開立待繳") || text.includes("登記已繳");
 
         if (isLandlordCommand && !userCtx.isLandlord) {
           await replyLineMessage(replyToken, [
@@ -4565,7 +4756,7 @@ serve(async (req: Request) => {
             text.includes("房源") || text.includes("房間") || text.includes("物業") ||
             text.includes("名冊") || text.includes("房客") || text.includes("名單") ||
             text.includes("已繳") || text.includes("收據") ||
-            text === "3" || text === "4"
+            text === "3"
           ) {
             const leases = userCtx.landlordManagedLeases;
             if ((text.includes("已繳") || text.includes("收據")) && leases.length === 1) {
@@ -4602,6 +4793,20 @@ serve(async (req: Request) => {
                 userCtx.landlordProperties,
                 paidRentPayments
               )
+            ]);
+            continue;
+          }
+
+          // 3.4 新增帳單 (開立待繳請款 / 登記已收費用，直達網站與雲端資料庫)
+          if (
+            text.includes("新增帳單") || text.includes("開立帳單") || text.includes("新增費用") ||
+            text.includes("開立待繳") || text.includes("登記已繳") || text.includes("開帳單") ||
+            text.includes("請款") || text === "4"
+          ) {
+            const leases = userCtx.landlordManagedLeases || [];
+            const properties = userCtx.landlordProperties || [];
+            await replyLineMessage(replyToken, [
+              buildLandlordAddBillFlex(leases, properties, userCtx)
             ]);
             continue;
           }

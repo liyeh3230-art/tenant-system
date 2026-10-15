@@ -235,12 +235,12 @@ $landlordItems = @(
         IconBgTop = "#311C54"; IconBgBot = "#432873"; BtnBgTop = "#2E1B4E"; BtnBgBot = "#170C29"; BtnTextColor = "#C4B5FD"
     },
     @{
-        Icon = "🏠"; Title = "房源現況"; Tag = "資產空間"
-        Desc1 = "空置招租與已出租"; Desc2 = "各房號配置與租金"
-        BtnText = "檢視房源 ➔"
-        CardBgTop = "#1E293B"; CardBgBot = "#111827"; BorderColor = "#1D4238"; AccentColor = "#2DD4BF"
-        DescColor = "#94A3B8"; TagBg = "#06332B"
-        IconBgTop = "#083B32"; IconBgBot = "#0E4D41"; BtnBgTop = "#0A3D34"; BtnBgBot = "#041F1A"; BtnTextColor = "#5EEAD4"
+        Icon = "➕"; Title = "新增帳單"; Tag = "快速開立"
+        Desc1 = "開立待繳或登記入帳"; Desc2 = "即時同步網站與資料庫"
+        BtnText = "新增帳單 ➔"
+        CardBgTop = "#1E293B"; CardBgBot = "#111827"; BorderColor = "#10B981"; AccentColor = "#34D399"
+        DescColor = "#94A3B8"; TagBg = "#064E3B"
+        IconBgTop = "#065F46"; IconBgBot = "#047857"; BtnBgTop = "#065F46"; BtnBgBot = "#022C22"; BtnTextColor = "#6EE7B7"
     },
     @{
         Icon = "🌐"; Title = "管理後台"; Tag = "完整系統"
