@@ -439,6 +439,7 @@ export default function App() {
   const [landlordAddresses, setLandlordAddresses] = useState([]);
   const [newAddressText, setNewAddressText] = useState('');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isCustomBillLeaseDropdownOpen, setIsCustomBillLeaseDropdownOpen] = useState(false);
 
   // Tenant Self-Registration & Password-based Login States
   const [registeredTenants, setRegisteredTenants] = useState([]);
@@ -5503,6 +5504,7 @@ export default function App() {
     setCustomBillPaymentType('pending'); // 預設意向為待繳請款
     setCustomBillPaymentMethod('bank');
     setCustomBillNote('');
+    setIsCustomBillLeaseDropdownOpen(false);
     setActiveModal('addCustomBill');
   };
 
@@ -12466,32 +12468,128 @@ export default function App() {
 
                       <div>
                         <label className="block text-xs font-semibold text-slate-500 mb-1.5">承租合約 / 房客</label>
-                        <select
-                          value={customBillLeaseId}
-                          onChange={(e) => {
-                            setCustomBillLeaseId(e.target.value);
-                            const selLease = leases.find(l => l.id === e.target.value);
-                            if (selLease && customBillCategory === 'rent') setCustomBillAmount(getLeaseMonthlyRent(selLease).toString());
-                          }}
-                          className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 font-semibold bg-white"
-                          required
-                        >
-                          {(() => {
-                            const filtered = leases.filter(l => l.status === 'active' && (landlordPropertyIds.length === 0 || landlordPropertyIds.includes(l.propertyId) || (currentLandlordId && l.landlordId === currentLandlordId)));
-                            const activeList = filtered.length > 0 ? filtered : leases.filter(l => l.status === 'active');
-                            if (activeList.length === 0) {
-                              return <option value="">⚠️ 目前尚無在約中的租約紀錄（請先登錄合約）</option>;
-                            }
-                            return activeList.map(l => {
-                              const p = properties.find(prop => prop.id === l.propertyId);
-                              return (
-                                <option key={l.id} value={l.id}>
-                                  {l.tenantName} · {p ? p.name : '租賃房源'} ({l.startDate} ~ {l.endDate})
-                                </option>
-                              );
-                            });
-                          })()}
-                        </select>
+                        {(() => {
+                          const filtered = leases.filter(l => l.status === 'active' && (landlordPropertyIds.length === 0 || landlordPropertyIds.includes(l.propertyId) || (currentLandlordId && l.landlordId === currentLandlordId)));
+                          const activeList = filtered.length > 0 ? filtered : leases.filter(l => l.status === 'active');
+                          const selectedLease = activeList.find(l => l.id === customBillLeaseId) || (activeList.length > 0 ? activeList[0] : null);
+                          const selectedProp = selectedLease ? properties.find(prop => prop.id === selectedLease.propertyId) : null;
+                          const selectedPropName = selectedProp ? selectedProp.name : '租賃房源';
+
+                          if (activeList.length === 0) {
+                            return (
+                              <div className="w-full border border-amber-200 bg-amber-50 rounded-xl px-4 py-3 text-xs text-amber-700 font-semibold flex items-center gap-2">
+                                <AlertCircle size={15} className="shrink-0 text-amber-600" />
+                                <span>⚠️ 目前名下尚無在約中的租約紀錄（請先至租約管理登錄合約）</span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="relative">
+                              {/* 點選外部關閉選單 */}
+                              {isCustomBillLeaseDropdownOpen && (
+                                <div
+                                  className="fixed inset-0 z-20"
+                                  onClick={() => setIsCustomBillLeaseDropdownOpen(false)}
+                                />
+                              )}
+
+                              {/* 自訂下拉選單 Trigger 按鈕：合約日期放在房客房號下方 */}
+                              <button
+                                type="button"
+                                onClick={() => setIsCustomBillLeaseDropdownOpen(prev => !prev)}
+                                className={`w-full border rounded-xl px-4 py-2.5 bg-white text-left transition-all flex items-center justify-between shadow-2xs cursor-pointer relative z-20 ${
+                                  isCustomBillLeaseDropdownOpen
+                                    ? 'border-indigo-500 ring-2 ring-indigo-100 shadow-sm'
+                                    : 'border-slate-200 hover:border-slate-300'
+                                }`}
+                              >
+                                <div className="flex-1 min-w-0 pr-2">
+                                  {/* 上方：房客姓名與房號/房源 */}
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-800 text-sm truncate">
+                                      {selectedLease ? `${selectedLease.tenantName} · ${selectedPropName}` : '請選擇承租合約'}
+                                    </span>
+                                    {selectedLease && (
+                                      <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.2 rounded shrink-0">
+                                        在約中
+                                      </span>
+                                    )}
+                                  </div>
+                                  {/* 下方：合約起訖日期 */}
+                                  {selectedLease && (
+                                    <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                                      <Calendar size={13} className="text-slate-400 shrink-0" />
+                                      <span>合約期間：{selectedLease.startDate} ~ {selectedLease.endDate}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <ChevronDown
+                                  size={18}
+                                  className={`text-slate-400 transition-transform duration-200 shrink-0 ${
+                                    isCustomBillLeaseDropdownOpen ? 'rotate-180 text-indigo-600' : ''
+                                  }`}
+                                />
+                              </button>
+
+                              {/* 浮動下拉選單清單 */}
+                              {isCustomBillLeaseDropdownOpen && (
+                                <div className="absolute z-30 left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                                  <div className="px-3.5 py-2 border-b border-slate-100 bg-slate-50/80 text-[11px] font-bold text-slate-500 flex justify-between items-center">
+                                    <span>選擇承租合約 / 房客</span>
+                                    <span className="text-slate-400">共 {activeList.length} 筆在約</span>
+                                  </div>
+                                  <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 p-1">
+                                    {activeList.map(l => {
+                                      const p = properties.find(prop => prop.id === l.propertyId);
+                                      const propName = p ? p.name : '租賃房源';
+                                      const isSelected = l.id === (customBillLeaseId || selectedLease?.id);
+                                      return (
+                                        <div
+                                          key={l.id}
+                                          onClick={() => {
+                                            setCustomBillLeaseId(l.id);
+                                            if (customBillCategory === 'rent') {
+                                              setCustomBillAmount(getLeaseMonthlyRent(l).toString());
+                                            }
+                                            setIsCustomBillLeaseDropdownOpen(false);
+                                          }}
+                                          className={`p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between ${
+                                            isSelected
+                                              ? 'bg-indigo-50/90 text-indigo-900 border border-indigo-200/80'
+                                              : 'hover:bg-slate-50 text-slate-700'
+                                          }`}
+                                        >
+                                          <div className="min-w-0 flex-1 pr-2">
+                                            {/* 上方：房客 · 房源名稱 */}
+                                            <div className="flex items-center gap-2">
+                                              <span className={`text-sm font-bold truncate ${isSelected ? 'text-indigo-950' : 'text-slate-800'}`}>
+                                                {l.tenantName} · {propName}
+                                              </span>
+                                              {isSelected && (
+                                                <span className="text-[10px] font-bold bg-indigo-600 text-white px-1.5 py-0.2 rounded shrink-0">
+                                                  目前選擇
+                                                </span>
+                                              )}
+                                            </div>
+                                            {/* 下方：合約日期（放在房客房號下方） */}
+                                            <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                                              <Calendar size={12} className={isSelected ? 'text-indigo-500' : 'text-slate-400'} />
+                                              <span>合約期間：{l.startDate} ~ {l.endDate}</span>
+                                            </div>
+                                          </div>
+                                          {isSelected && (
+                                            <Check size={16} className="text-indigo-600 shrink-0 ml-2" />
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
