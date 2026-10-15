@@ -108,7 +108,7 @@ async function verifyLineSignature(body: string, signature: string | null, secre
 
 // Reply message to LINE user
 async function replyLineMessage(replyToken: string, messages: any[]): Promise<Response> {
-  return await fetch("https://api.line.me/v2/bot/message/reply", {
+  const res = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -119,6 +119,11 @@ async function replyLineMessage(replyToken: string, messages: any[]): Promise<Re
       messages,
     }),
   });
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("LINE replyLineMessage error:", res.status, errText);
+  }
+  return res;
 }
 
 // Helper to fetch user profile from LINE API
@@ -1102,7 +1107,7 @@ function buildSingleBillBubble(p: any, index: number, totalCount: number, profil
             {
               type: "text",
               text: ` ${amountStr}`,
-              size: "xxxl",
+              size: "3xl",
               weight: "bold",
               color: heroTextColor,
               wrap: true,
