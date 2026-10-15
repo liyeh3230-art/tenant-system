@@ -1492,7 +1492,7 @@ function buildReportSuccessFlex(payment: any, last5: string | null, isCash: bool
   };
 }
 
-// 4-1. 鎖定待繳帳單 Flex Message (全面優化排版與精簡資訊呈現)
+// 4-1. 鎖定待繳帳單 Flex Message (全面優化排版與精簡資訊呈現，按鈕全寬絕不截斷)
 function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string, fallbackAmount?: string | number, fallbackBillId?: string) {
   const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
   const targetBillId = payment?.id || fallbackBillId || "";
@@ -1544,9 +1544,84 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
     }
   }
 
+  const footerContents: any[] = [
+    // 主要動作：全寬按鈕，文字完整絕不被擠壓截斷為「回報末五...」
+    {
+      type: "button",
+      style: "primary",
+      color: "#059669",
+      height: "sm",
+      action: {
+        type: "postback",
+        label: "🏦 轉帳完成：回報末五碼",
+        data: `action=guide_transfer_report&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+        displayText: "🏦 我已完成轉帳，回報末五碼"
+      }
+    },
+    // 次要動作：現金交付與複製帳號
+    {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#0284C7",
+          height: "sm",
+          flex: 1,
+          action: {
+            type: "postback",
+            label: "💵 現金交付",
+            data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+            displayText: "💵 現金交付"
+          }
+        },
+        ...(cleanAccount ? [
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            flex: 1,
+            action: {
+              type: "clipboard",
+              label: "📋 複製帳號",
+              clipboardText: cleanAccount
+            }
+          }
+        ] : [
+          {
+            type: "button",
+            style: "secondary",
+            height: "sm",
+            flex: 1,
+            action: {
+              type: "message",
+              label: "⏳ 返回待繳",
+              text: "待繳帳單"
+            }
+          }
+        ])
+      ]
+    }
+  ];
+
+  if (cleanAccount) {
+    footerContents.push({
+      type: "button",
+      style: "secondary",
+      height: "sm",
+      action: {
+        type: "message",
+        label: "⏳ 返回待繳帳單",
+        text: "待繳帳單"
+      }
+    });
+  }
+
   return {
     type: "flex",
-    altText: `📌 已為您鎖定帳單：【${displayTitle}】NT$ ${amountStr}`,
+    altText: `📌 已鎖定帳單：【${displayTitle}】NT$ ${amountStr}`,
     contents: {
       type: "bubble",
       size: "mega",
@@ -1562,7 +1637,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             justifyContent: "space-between",
             alignItems: "center",
             contents: [
-              { type: "text", text: "📌 繳費回報 · 鎖定帳單", color: "#A7F3D0", size: "xs", weight: "bold" },
+              { type: "text", text: "📌 已鎖定繳款帳單", color: "#A7F3D0", size: "xs", weight: "bold", wrap: true },
               {
                 type: "box",
                 layout: "horizontal",
@@ -1584,7 +1659,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             type: "text",
             text: displayTitle,
             color: "#FFFFFF",
-            size: "xl",
+            size: "lg",
             weight: "bold",
             margin: "sm",
             wrap: true
@@ -1630,7 +1705,8 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
                   text: `📅 繳費期限：${dueDateClean}`,
                   size: "xs",
                   color: "#64748B",
-                  margin: "xs"
+                  margin: "xs",
+                  wrap: true
                 }
               ] : [])
             ]
@@ -1673,7 +1749,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             contents: [
               {
                 type: "text",
-                text: "房東尚未設定銀行帳號，若已線下取得帳號轉帳，請點選下方回報末五碼供對帳。",
+                text: "房東尚未設定銀行帳號，若已透過其他管道轉帳，請點選下方回報末五碼。",
                 size: "xs",
                 color: "#64748B",
                 wrap: true
@@ -1681,13 +1757,14 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
             ]
           },
 
-          // 3. 一行精簡指引
+          // 3. 一行精簡引導 (啟用 wrap: true 絕不截斷)
           {
             type: "text",
-            text: "💡 轉帳完成後回報末五碼；現場繳交請點選現金交付。",
+            text: "💡 轉帳請點選回報末五碼；現場繳交請選現金交付",
             size: "xxs",
             color: "#94A3B8",
-            align: "center"
+            align: "center",
+            wrap: true
           }
         ]
       },
@@ -1696,74 +1773,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
         layout: "vertical",
         spacing: "sm",
         paddingAll: "14px",
-        contents: [
-          // 主要動作：回報末五碼 / 現金交付 (並排 2 顆主按鈕)
-          {
-            type: "box",
-            layout: "horizontal",
-            spacing: "sm",
-            contents: [
-              {
-                type: "button",
-                style: "primary",
-                color: "#059669",
-                height: "sm",
-                flex: 1,
-                action: {
-                  type: "postback",
-                  label: "🏦 回報末五碼",
-                  data: `action=guide_transfer_report&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
-                  displayText: "🏦 我已完成轉帳，回報末五碼"
-                }
-              },
-              {
-                type: "button",
-                style: "primary",
-                color: "#0284C7",
-                height: "sm",
-                flex: 1,
-                action: {
-                  type: "postback",
-                  label: "💵 現金交付",
-                  data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
-                  displayText: "💵 現金交付"
-                }
-              }
-            ]
-          },
-          // 次要動作：複製帳號 / 返回待繳 (並排 2 顆次按鈕)
-          {
-            type: "box",
-            layout: "horizontal",
-            spacing: "sm",
-            contents: [
-              ...(cleanAccount ? [
-                {
-                  type: "button",
-                  style: "secondary",
-                  height: "sm",
-                  flex: 1,
-                  action: {
-                    type: "clipboard",
-                    label: "📋 複製帳號",
-                    clipboardText: cleanAccount
-                  }
-                }
-              ] : []),
-              {
-                type: "button",
-                style: "secondary",
-                height: "sm",
-                flex: 1,
-                action: {
-                  type: "message",
-                  label: "⏳ 返回待繳",
-                  text: "待繳帳單"
-                }
-              }
-            ]
-          }
-        ]
+        contents: footerContents
       }
     },
     quickReply: {
@@ -1809,7 +1819,7 @@ function buildLockedBillFlex(payment: any, landlord: any, fallbackTitle?: string
   };
 }
 
-// 4-2. 填寫轉帳末五碼引導 Flex Message (排版全面優化，字體清晰絕不截斷)
+// 4-2. 填寫轉帳末五碼引導 Flex Message (全面精簡優化排版，字體清晰絕不截斷)
 function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAmount?: string | number, fallbackBillId?: string) {
   const cat = getCategoryMeta(payment?.bill_type || payment?.billType);
   const targetBillId = payment?.id || fallbackBillId || "";
@@ -1836,7 +1846,7 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
             justifyContent: "space-between",
             alignItems: "center",
             contents: [
-              { type: "text", text: "智慧租屋 · 銀行轉帳回報", color: "#A7F3D0", size: "xs", weight: "bold", wrap: true },
+              { type: "text", text: "🏦 轉帳回報 · 末五碼", color: "#A7F3D0", size: "xs", weight: "bold", wrap: true },
               {
                 type: "box",
                 layout: "horizontal",
@@ -1854,7 +1864,15 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
               }
             ]
           },
-          { type: "text", text: "🏦 填寫轉帳末五碼", color: "#FFFFFF", size: "xl", weight: "bold", margin: "xs", wrap: true }
+          {
+            type: "text",
+            text: displayTitle,
+            color: "#FFFFFF",
+            size: "lg",
+            weight: "bold",
+            margin: "sm",
+            wrap: true
+          }
         ]
       },
       body: {
@@ -1863,48 +1881,53 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
         paddingAll: "16px",
         spacing: "md",
         contents: [
-          // 1. 已鎖定項目與金額明細卡片
+          // 1. 金額焦點與期限
           {
             type: "box",
-            layout: "vertical",
+            layout: "horizontal",
+            justifyContent: "space-between",
+            alignItems: "center",
             backgroundColor: "#F0FDF4",
-            cornerRadius: "12px",
-            paddingAll: "14px",
             borderColor: "#BBF7D0",
             borderWidth: "1px",
+            cornerRadius: "12px",
+            paddingAll: "14px",
             contents: [
               {
-                type: "text",
-                text: `📌 已鎖定項目：${displayTitle}`,
-                size: "sm",
-                color: "#1E293B",
-                weight: "bold",
-                wrap: true
+                type: "box",
+                layout: "vertical",
+                contents: [
+                  {
+                    type: "text",
+                    text: "應繳金額",
+                    size: "xs",
+                    color: "#64748B",
+                    weight: "bold"
+                  },
+                  ...(dueDateClean ? [
+                    {
+                      type: "text",
+                      text: `期限：${dueDateClean}`,
+                      size: "xxs",
+                      color: "#94A3B8",
+                      margin: "xs"
+                    }
+                  ] : [])
+                ]
               },
               {
                 type: "box",
                 layout: "baseline",
                 spacing: "xs",
-                margin: "sm",
                 contents: [
-                  { type: "text", text: "應繳金額", size: "xs", color: "#64748B", flex: 0 },
                   { type: "text", text: "NT$", size: "sm", color: "#065F46", weight: "bold", flex: 0 },
-                  { type: "text", text: ` ${amountStr}`, size: "3xl", color: "#065F46", weight: "bold", flex: 1, wrap: true }
+                  { type: "text", text: ` ${amountStr}`, size: "xxl", color: "#065F46", weight: "bold", flex: 0 }
                 ]
-              },
-              ...(dueDateClean ? [
-                {
-                  type: "text",
-                  text: `📅 繳費期限：${dueDateClean}`,
-                  size: "xs",
-                  color: "#64748B",
-                  margin: "xs",
-                  wrap: true
-                }
-              ] : [])
+              }
             ]
           },
-          // 2. 輸入引導區塊 (字體清晰、指示明確、絕不擠壓截斷)
+
+          // 2. 輸入末五碼指引區塊 (極簡大字、指示直覺)
           {
             type: "box",
             layout: "vertical",
@@ -1913,49 +1936,31 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
             paddingAll: "14px",
             borderColor: "#E2E8F0",
             borderWidth: "1px",
-            spacing: "sm",
+            spacing: "xs",
             contents: [
               {
                 type: "text",
-                text: "👇 請直接在「下方 LINE 訊息輸入框」輸入：",
-                size: "xs",
+                text: "💬 請直接在下方輸入「轉帳末五碼」",
+                size: "sm",
                 color: "#1E293B",
                 weight: "bold",
                 wrap: true
               },
               {
                 type: "box",
-                layout: "vertical",
-                backgroundColor: "#FFFFFF",
-                cornerRadius: "8px",
-                paddingAll: "10px",
-                borderColor: "#CBD5E1",
-                borderWidth: "1px",
+                layout: "horizontal",
+                alignItems: "center",
+                margin: "xs",
                 contents: [
-                  {
-                    type: "text",
-                    text: "您的【轉帳末五碼】（5 位數字）",
-                    size: "xs",
-                    color: "#1E293B",
-                    weight: "bold",
-                    wrap: true
-                  },
-                  {
-                    type: "text",
-                    text: "例如直接輸入：88621",
-                    size: "sm",
-                    color: "#059669",
-                    weight: "bold",
-                    margin: "xs",
-                    wrap: true
-                  }
+                  { type: "text", text: "例如直接回覆：", size: "xs", color: "#64748B", flex: 0 },
+                  { type: "text", text: "88621", size: "lg", color: "#059669", weight: "bold", flex: 0 }
                 ]
               },
               {
                 type: "text",
-                text: "💡 發送後系統將立即完成回報，並即時通知房東核帳開立電子收據！",
+                text: "💡 送出後系統將立即為您送交房東核帳並開立收據",
                 size: "xxs",
-                color: "#64748B",
+                color: "#94A3B8",
                 wrap: true,
                 margin: "xs"
               }
@@ -1965,29 +1970,30 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
       },
       footer: {
         type: "box",
-        layout: "vertical",
+        layout: "horizontal",
         spacing: "sm",
-        paddingAll: "12px",
+        paddingAll: "14px",
         contents: [
           {
             type: "button",
-            style: "primary",
-            color: "#059669",
+            style: "secondary",
             height: "sm",
+            flex: 1,
             action: {
               type: "postback",
-              label: "💵 改用現場現金交付",
+              label: "💵 改付現金",
               data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
               displayText: "💵 現金交付"
             }
           },
           {
             type: "button",
-            style: "link",
+            style: "secondary",
             height: "sm",
+            flex: 1,
             action: {
               type: "message",
-              label: "⏳ 返回待繳帳單",
+              label: "⏳ 返回待繳",
               text: "待繳帳單"
             }
           }
@@ -1998,7 +2004,12 @@ function buildTransferGuideFlex(payment: any, fallbackTitle?: string, fallbackAm
       items: [
         {
           type: "action",
-          action: { type: "message", label: "💵 現金交付", text: "現金交付" }
+          action: {
+            type: "postback",
+            label: "💵 改付現金",
+            data: `action=report_cash&id=${targetBillId}&title=${encodeURIComponent(displayTitle)}&amount=${rawAmt}`,
+            displayText: "💵 現金交付"
+          }
         },
         {
           type: "action",
