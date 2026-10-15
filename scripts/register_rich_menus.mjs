@@ -55,7 +55,7 @@ const landlordMenuDef = {
     { bounds: bounds[0], action: { type: "message", text: "經營概況" } },
     { bounds: bounds[1], action: { type: "message", text: "待核帳單" } },
     { bounds: bounds[2], action: { type: "message", text: "當前租約" } },
-    { bounds: bounds[3], action: { type: "message", text: "新增帳單" } },
+    { bounds: bounds[3], action: { type: "uri", uri: "https://liff.line.me/2011231660-Jgip7AQv?action=addCustomBill" } },
     { bounds: bounds[4], action: { type: "uri", uri: "https://liyeh3230-art.github.io/tenant-system/" } },
     { bounds: bounds[5], action: { type: "postback", data: "action=switch_role&target=tenant", displayText: "🔄 切換為租客模式" } }
   ]

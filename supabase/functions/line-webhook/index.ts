@@ -2326,9 +2326,9 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 // -----------------------------------------------------------------------------
 // DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS (3-TIER ARCHITECTURE)
 // -----------------------------------------------------------------------------
-const TENANT_STANDARD_RICH_MENU_ID = "richmenu-832ce5dea034fa8a80b4528e203967af"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
-const TENANT_DUAL_RICH_MENU_ID = "richmenu-c6cbfc55f4cb3dfcbbc1dcae94df2a1d";     // 雙身分租客選單（第 6 格：切換為房東）
-const LANDLORD_RICH_MENU_ID = "richmenu-9f99f953a3d5c9a576e4bf1d2724a51c";        // 房東經營選單（第 6 格：切換為租客）
+const TENANT_STANDARD_RICH_MENU_ID = "richmenu-4150a2c1cf5f455c823d24d6a54979d7"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
+const TENANT_DUAL_RICH_MENU_ID = "richmenu-13a199ce2859fc012b23d8063d299303";     // 雙身分租客選單（第 6 格：切換為房東）
+const LANDLORD_RICH_MENU_ID = "richmenu-0ef0c25a4b8ead415fb2e0b1f61f8bd1";        // 房東經營選單（第 6 格：切換為租客）
 const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 
 // Helper to push message to a specific LINE User ID
@@ -3500,9 +3500,19 @@ function buildLandlordTenantsFlex(leases: any[], properties: any[]) {
 }
 
 // 5. 房東新增費用與帳單引導卡片 (支援直達網站兩步驟開立待繳 / 登記已繳彈窗)
-function buildLandlordAddBillFlex(leases: any[] = [], properties: any[] = [], userCtx: any = null) {
+function buildLandlordAddBillFlex(leases: any[] = [], properties: any[] = [], userCtx: any = null, lineUserId: string = "") {
   const cleanBase = (SITE_URL || "https://liyeh3230-art.github.io/tenant-system").replace(/\/$/, "");
-  const addBillUrl = `${cleanBase}/?action=addCustomBill&_t=${Date.now()}`;
+  const phone = userCtx?.cleanPhone || userCtx?.landlordRecord?.phone || "";
+  const name = userCtx?.userName || userCtx?.landlordRecord?.name || "";
+  const lineUid = userCtx?.lineUserId || lineUserId || "";
+  const queryParams = `action=addCustomBill&phone=${encodeURIComponent(phone)}&name=${encodeURIComponent(name)}&uid=${encodeURIComponent(lineUid)}&_t=${Date.now()}`;
+
+  let addBillUrl = `${cleanBase}/?${queryParams}`;
+  if (LIFF_LANDLORD_APPLICATION_URL) {
+    addBillUrl = LIFF_LANDLORD_APPLICATION_URL.includes("?")
+      ? `${LIFF_LANDLORD_APPLICATION_URL}&${queryParams}`
+      : `${LIFF_LANDLORD_APPLICATION_URL}?${queryParams}`;
+  }
 
   const activeLeases = (leases || []).filter((l: any) => l.status === "active");
 
@@ -4806,7 +4816,7 @@ serve(async (req: Request) => {
             const leases = userCtx.landlordManagedLeases || [];
             const properties = userCtx.landlordProperties || [];
             await replyLineMessage(replyToken, [
-              buildLandlordAddBillFlex(leases, properties, userCtx)
+              buildLandlordAddBillFlex(leases, properties, userCtx, lineUserId)
             ]);
             continue;
           }
