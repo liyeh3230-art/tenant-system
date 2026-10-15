@@ -2326,9 +2326,9 @@ function buildUnboundGuideFlex(lineUserId = "", displayName = "") {
 // -----------------------------------------------------------------------------
 // DUAL-ROLE RICH MENU & LINE MESSAGING API CONSTANTS (3-TIER ARCHITECTURE)
 // -----------------------------------------------------------------------------
-const TENANT_STANDARD_RICH_MENU_ID = "richmenu-4150a2c1cf5f455c823d24d6a54979d7"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
-const TENANT_DUAL_RICH_MENU_ID = "richmenu-13a199ce2859fc012b23d8063d299303";     // 雙身分租客選單（第 6 格：切換為房東）
-const LANDLORD_RICH_MENU_ID = "richmenu-0ef0c25a4b8ead415fb2e0b1f61f8bd1";        // 房東經營選單（第 6 格：切換為租客）
+const TENANT_STANDARD_RICH_MENU_ID = "richmenu-2e8884d28f37c541cbdf0e3dbbad10a6"; // 純租客專屬選單（第 6 格：點選發送 postback「申請成為房東」，跳出 LINE 申請導引卡片）
+const TENANT_DUAL_RICH_MENU_ID = "richmenu-1033bd28bdf3f95d3d9ff382bef582fa";     // 雙身分租客選單（第 6 格：切換為房東）
+const LANDLORD_RICH_MENU_ID = "richmenu-855d3b6f377fdb4f31bff3e72a9fe824";        // 房東經營選單（第 6 格：切換為租客）
 const LIFF_LANDLORD_APPLICATION_URL = Deno.env.get("LIFF_LANDLORD_APPLICATION_URL") || Deno.env.get("LIFF_APPLY_LANDLORD_URL") || "https://liff.line.me/2011231660-Jgip7AQv";
 
 // Helper to push message to a specific LINE User ID

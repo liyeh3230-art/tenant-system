@@ -79,11 +79,13 @@ async function createRichMenu(menuDef) {
 
 async function uploadRichMenuImage(richMenuId, imagePath) {
   const imageBuffer = fs.readFileSync(imagePath);
+  const ext = path.extname(imagePath).toLowerCase();
+  const contentType = (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/png';
   const res = await fetch(`https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
-      "Content-Type": "image/png"
+      "Content-Type": contentType
     },
     body: imageBuffer
   });
@@ -125,22 +127,36 @@ async function linkUserRichMenu(userId, richMenuId) {
 async function main() {
   console.log("=== Registering 3-Tier Dynamic LINE Rich Menus ===");
   
-  // 1. Create Standard Tenant Rich Menu (For pure tenants: Grid 5 is 申請成為房東)
+  // Choose between jpg and png based on existence and size
+  const getImageFile = (baseName) => {
+    const jpg = `public/${baseName}.jpg`;
+    const png = `public/${baseName}.png`;
+    if (fs.existsSync(jpg) && fs.statSync(jpg).size < 1048576) return jpg;
+    if (fs.existsSync(png) && fs.statSync(png).size < 1048576) return png;
+    if (fs.existsSync(jpg)) return jpg;
+    return png;
+  };
+
+  const tenantStandardImg = getImageFile("richmenu_tenant_standard");
+  const tenantDualImg = getImageFile("richmenu_tenant");
+  const landlordImg = getImageFile("richmenu_landlord");
+
+  // 1. Create Standard Tenant Rich Menu (For pure tenants: Grid 6 is 申請成為房東)
   console.log("1. Creating Standard Tenant Rich Menu (申請成為房東)...");
   const tenantStandardMenuId = await createRichMenu(tenantStandardMenuDef);
   console.log(`   Tenant Standard Menu ID: ${tenantStandardMenuId}`);
   
-  console.log("2. Uploading Standard Tenant Image...");
-  await uploadRichMenuImage(tenantStandardMenuId, "public/richmenu_tenant_standard.png");
+  console.log(`2. Uploading Standard Tenant Image (${tenantStandardImg})...`);
+  await uploadRichMenuImage(tenantStandardMenuId, tenantStandardImg);
   console.log("   Standard Tenant Image uploaded successfully!");
 
-  // 2. Create Dual Tenant Rich Menu (For landlords in tenant mode: Grid 5 is 切換為房東)
+  // 2. Create Dual Tenant Rich Menu (For landlords in tenant mode: Grid 6 is 切換為房東)
   console.log("3. Creating Dual Tenant Rich Menu (切換為房東)...");
   const tenantDualMenuId = await createRichMenu(tenantDualMenuDef);
   console.log(`   Tenant Dual Menu ID: ${tenantDualMenuId}`);
   
-  console.log("4. Uploading Dual Tenant Image...");
-  await uploadRichMenuImage(tenantDualMenuId, "public/richmenu_tenant.png");
+  console.log(`4. Uploading Dual Tenant Image (${tenantDualImg})...`);
+  await uploadRichMenuImage(tenantDualMenuId, tenantDualImg);
   console.log("   Dual Tenant Image uploaded successfully!");
 
   // 3. Create Landlord Rich Menu
@@ -148,8 +164,8 @@ async function main() {
   const landlordMenuId = await createRichMenu(landlordMenuDef);
   console.log(`   Landlord Menu ID: ${landlordMenuId}`);
   
-  console.log("6. Uploading Landlord Image...");
-  await uploadRichMenuImage(landlordMenuId, "public/richmenu_landlord.png");
+  console.log(`6. Uploading Landlord Image (${landlordImg})...`);
+  await uploadRichMenuImage(landlordMenuId, landlordImg);
   console.log("   Landlord Image uploaded successfully!");
 
   // 4. Set Standard Tenant Rich Menu as default for all general users
@@ -178,6 +194,16 @@ async function main() {
     content = content.replace(/const LANDLORD_RICH_MENU_ID = "[^"]+";/, `const LANDLORD_RICH_MENU_ID = "${landlordMenuId}";`);
     fs.writeFileSync(webhookIndexPath, content, "utf8");
     console.log(`Updated constants in ${webhookIndexPath}`);
+  }
+
+  // 7. Update line-push/index.ts constants
+  const pushIndexPath = "supabase/functions/line-push/index.ts";
+  if (fs.existsSync(pushIndexPath)) {
+    let content = fs.readFileSync(pushIndexPath, "utf8");
+    content = content.replace(/const LANDLORD_RICH_MENU_ID = "[^"]+";/, `const LANDLORD_RICH_MENU_ID = "${landlordMenuId}";`);
+    content = content.replace(/const TENANT_STANDARD_RICH_MENU_ID = "[^"]+";/, `const TENANT_STANDARD_RICH_MENU_ID = "${tenantStandardMenuId}";`);
+    fs.writeFileSync(pushIndexPath, content, "utf8");
+    console.log(`Updated constants in ${pushIndexPath}`);
   }
 
   // 7. Update known landlord user(s) to the new landlord rich menu immediately

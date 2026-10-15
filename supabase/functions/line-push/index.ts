@@ -576,7 +576,7 @@ serve(async (req: Request) => {
         .eq("line_user_id", lineUserId);
 
       // 4. 即時切換 LINE Rich Menu 為房東管理選單 (richmenu-1f925c458c1ec02b69a389265ef6ed03)
-      const LANDLORD_RICH_MENU_ID = "richmenu-1f925c458c1ec02b69a389265ef6ed03";
+      const LANDLORD_RICH_MENU_ID = "richmenu-855d3b6f377fdb4f31bff3e72a9fe824";
       try {
         await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${LANDLORD_RICH_MENU_ID}`, {
           method: "POST",
@@ -745,7 +745,7 @@ serve(async (req: Request) => {
 
       if (activeBinding) {
         const lineUserId = activeBinding.line_user_id;
-        const TENANT_STANDARD_RICH_MENU_ID = "richmenu-cfddd338cb4c727d0ac9c86274615a2a";
+        const TENANT_STANDARD_RICH_MENU_ID = "richmenu-2e8884d28f37c541cbdf0e3dbbad10a6";
         try {
           await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${TENANT_STANDARD_RICH_MENU_ID}`, {
             method: "POST",
